@@ -1,0 +1,160 @@
+// Copyright 2025 Velda Inc
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+
+package velda.config;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "velda.io/velda/pkg/proto/config";
+
+message Server {
+  // Local address for the server to listen on.
+  string grpc_address = 1;
+  string http_address = 2;
+
+  reserved 3, 4, 5;
+}
+
+message Storage {
+  message Zfs {
+    string pool = 1;
+  }
+  oneof storage {
+    Zfs zfs = 1;
+  }
+  reserved 2, 3;
+}
+
+message AgentPool {
+  string name = 1;
+	
+  message AutoScaler {
+    AutoscalerBackend backend = 1;
+    int32 max_agents = 2;
+    int32 min_idle_agents = 3;
+    int32 max_idle_agents = 4;
+
+    // How long to wait before removing idle agents.
+    // Default will be 0 seconds: it will immediately remove idle agents
+    // until min_idle_agents is reached.
+    google.protobuf.Duration idle_decay = 5;
+
+    // How long to wait before starting the size-maintenance loop.
+    // It will always start after all workers are connected.
+    // Default to infinite: will always wait for all workers to connect.
+    google.protobuf.Duration initial_delay = 6;
+
+    // How often to scan the backend to check
+    // for consistency of the agent connected VS the auto-scaler backend.
+    // Default to 60 seconds.
+    google.protobuf.Duration sync_loop_interval = 7;
+
+    // If set, any worker that has not been connected to the agent
+    // for this duration will be killed.
+    // Only checked at every sync_loop_interval.
+    google.protobuf.Duration kill_unknown_after = 8;
+
+    // Number of sessions per agent
+    // Default to 1
+    // This is only used for auto-scaling purpose.
+    // An agent may run less sessions than this.
+    int32 default_slots_per_agent = 9;
+  }
+  AutoScaler auto_scaler = 2;
+}
+
+message AutoscalerBackendGCEInstanceGroup {
+  string project = 1;
+  string zone = 2;
+  string instance_group = 3;
+  // The prefix of the instance name.
+  // If not set, will use instance_group as the prefix.
+  string instance_name_prefix = 4;
+}
+
+message AutoscalerBackendAWSLaunchTemplate {
+  string region = 1;
+  string launch_template_name = 2;
+  // The prefix of the instance name.
+  // If not set, will use launch_template_name as the prefix.
+  string instance_name_prefix = 3;
+}
+
+message AutoscalerBackendKubernetes {
+  string kubeconfig = 1;
+  string context = 2;
+  string pod_template_path = 3;
+  string pod_selector = 4;
+}
+
+message AutoscalerBackendCommand {
+  string start = 1;
+  string stop = 2;
+  string list = 3;
+}
+
+message Provisioner {
+  oneof provisioner {
+    //GCEProvisioner gce = 1;
+    AWSProvisioner aws = 2;
+    KubernetesProvisioner kubernetes = 3;
+    GCSProvisioner gcs = 4;
+  }
+}
+
+message KubernetesProvisioner {
+  // Use in-cluster AgentPool custom resource definition or default cluster.
+  // TODO: Should always use the namespace that apiserver runs.
+  string namespace = 1;
+}
+
+// Use AWS SSM parameter to provision agent pools.
+message AWSProvisioner {
+  string region = 1;
+  string config_prefix = 2;
+  google.protobuf.Duration update_interval = 3;
+}
+
+message GCSProvisioner {
+  string bucket = 1;
+  string config_prefix = 2;
+  google.protobuf.Duration update_interval = 3;
+}
+
+message AutoscalerBackend {
+  oneof backend {
+    AutoscalerBackendGCEInstanceGroup gce_instance_group = 1;
+    AutoscalerBackendAWSLaunchTemplate aws_launch_template = 4;
+    AutoscalerBackendKubernetes kubernetes = 2;
+    AutoscalerBackendCommand command = 3;
+  }
+}
+
+message Config {
+  Server server = 1;
+
+  Storage storage = 4;
+
+  repeated AgentPool agent_pools = 5;
+
+  // Dyanmic create agent pools from external configs.
+  repeated Provisioner provisioners = 9;
+
+  // Whether to allow pools to be dynamically created(e.g. through
+  // custom method to create an agent).
+  bool allow_new_pool = 6;
+
+  reserved 2, 3, 7, 8, 10;
+}

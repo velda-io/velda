@@ -1,0 +1,95 @@
+// Copyright 2025 Velda Inc
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+
+package velda;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+import "execution.proto";
+
+option go_package = "velda.io/velda/pkg/proto";
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_QUEUEING = 2;
+  TASK_STATUS_RUNNING = 3;
+  TASK_STATUS_RUNNING_SUBTASKS = 4;
+  TASK_STATUS_SUCCESS = 5;
+  TASK_STATUS_FAILURE = 6;
+  TASK_STATUS_FAILED_UPSTREAM = 7;
+}
+
+message Task {
+  string id = 1;
+  TaskStatus status = 12;
+  int64 instance_id = 2;
+  Workload workload = 3;
+  string pool = 4;
+  int64 priority = 5;
+  repeated string labels = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp finished_at = 9;
+  // For task with sub-tasks, when all the sub-tasks are completed.
+  google.protobuf.Timestamp resolved_at = 11;
+
+  BatchTaskResult batch_task_result = 10;
+
+  int32 children_count = 13;
+  int32 completed_children_count = 14;
+}
+
+// Returns all sub-tasks sorted by default ordering.
+message ListTasksRequest {
+  string parent_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message SearchTasksRequest {
+  repeated string label_filters = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message GetTaskRequest {
+  string task_id = 1;
+}
+
+message TaskPageResult {
+  repeated Task tasks = 1;
+  string next_page_token = 2;
+}
+
+service TaskService {
+  rpc GetTask(GetTaskRequest) returns (Task) {
+    option (google.api.http) = {
+            get: "/github.com/velda-io/velda/task/info/{task_id=**}"
+        };
+  };
+  rpc ListTasks(ListTasksRequest) returns (TaskPageResult) {
+    option (google.api.http) = {
+            get: "/github.com/velda-io/velda/task/tasks/{parent_id=**}"
+        };
+  };
+
+  rpc SearchTasks(SearchTasksRequest) returns (TaskPageResult) {
+    option (google.api.http) = {
+            get: "/github.com/velda-io/velda/tasks/search"
+        };
+  };
+}

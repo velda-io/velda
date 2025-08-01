@@ -1,0 +1,108 @@
+// Copyright 2025 Velda Inc
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+package apiserver
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	_ "net/http/pprof"
+	"reflect"
+
+	_ "github.com/jackc/pgx/v4/stdlib"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	_ "velda.io/velda/pkg/broker/backends/aws"
+	_ "velda.io/velda/pkg/broker/backends/cmd"
+	_ "velda.io/velda/pkg/broker/backends/gce"
+	_ "velda.io/velda/pkg/broker/backends/k8s"
+)
+
+var (
+	configPath = flag.String("config", "config.yaml", "Configuration file")
+	// If set to false, the service will exit on configuration change
+	// This will allow the service to be restarted by a systemd service or other process manager
+	restartOnConfigChange = flag.Bool("restart-on-config-change", false, "Restart service on configuration change")
+	allMetrics            = prometheus.NewRegistry()
+)
+
+type Service interface {
+	InitConfig(configPath string) error
+	InitDatabase() error
+	InitServices() error
+	InitGrpcServer() error
+	RegisterServices() error
+
+	Run() error
+	ExportedMetrics() *prometheus.Registry
+}
+
+func initService(s Service, configPath string) error {
+	if err := s.InitConfig(configPath); err != nil {
+		return fmt.Errorf("Failed to Initialize service configuration: %v", err)
+	}
+
+	if err := s.InitDatabase(); err != nil {
+		return fmt.Errorf("Failed to Initialize database: %v", err)
+	}
+
+	if err := s.InitServices(); err != nil {
+		return fmt.Errorf("Failed to Initialize services: %v", err)
+	}
+
+	if err := s.InitGrpcServer(); err != nil {
+		return fmt.Errorf("Failed to Initialize gRPC server: %v", err)
+	}
+
+	if err := s.RegisterServices(); err != nil {
+		return fmt.Errorf("Failed to register services: %v", err)
+	}
+
+	return nil
+}
+
+func Main(s Service) {
+	flag.Parse()
+	go func() {
+		http.Handle("/metrics", promhttp.HandlerFor(allMetrics, promhttp.HandlerOpts{}))
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+	for {
+		err := runService(s)
+		if errors.Is(err, ConfigChanged) && *restartOnConfigChange {
+			log.Println("Configuration changed, restarting service")
+			continue
+		}
+		if err != nil {
+			log.Fatalf("Service exited with error: %v", err)
+		}
+		break
+	}
+}
+
+func runService(svc Service) error {
+	t := reflect.TypeOf(svc).Elem()
+	svc = reflect.New(t).Interface().(Service)
+
+	if err := initService(svc, *configPath); err != nil {
+		return fmt.Errorf("Failed to initialize service: %v", err)
+	}
+	metrics := svc.ExportedMetrics()
+	allMetrics.MustRegister(metrics)
+	defer allMetrics.Unregister(metrics)
+	return svc.Run()
+}

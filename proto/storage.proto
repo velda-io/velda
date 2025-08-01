@@ -1,0 +1,77 @@
+// Copyright 2025 Velda Inc
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+
+package velda.storage;
+
+import "google/protobuf/empty.proto";
+option go_package = "velda.io/velda/pkg/proto/storage";
+
+service StorageService {
+  rpc CreateInstance(CreateInstanceRequest) returns (google.protobuf.Empty);
+  rpc CreateInstanceFromSnapshot(CreateInstanceFromSnapshotRequest)
+  returns (google.protobuf.Empty);
+  rpc CreateInstanceFromImage(CreateInstanceFromImageRequest)
+  returns (google.protobuf.Empty);
+  rpc CreateSnapshot(CreateSnapshotRequest) returns (google.protobuf.Empty);
+  rpc DeleteSnapshot(DeleteSnapshotRequest) returns (google.protobuf.Empty);
+  rpc DeleteInstance(DeleteInstanceRequest) returns (google.protobuf.Empty);
+  rpc CreateImageFromSnapshot(CreateImageFromSnapshotRequest)
+  returns (google.protobuf.Empty);
+  rpc ListImages(google.protobuf.Empty) returns (ListImagesResponse);
+  rpc DeleteImage(DeleteImageRequest) returns (google.protobuf.Empty);
+}
+
+message CreateInstanceRequest {
+  int64 instance_id = 1;
+}
+
+message CreateInstanceFromSnapshotRequest {
+  int64 instance_id = 1;
+  int64 snapshot_instance_id = 2;
+  string snapshot_name = 3;
+}
+
+message CreateInstanceFromImageRequest {
+  int64 instance_id = 1;
+  string image_name = 2;
+}
+
+message CreateSnapshotRequest {
+  int64 instance_id = 1;
+  string snapshot_name = 2;
+}
+
+message DeleteSnapshotRequest {
+  int64 instance_id = 1;
+  string snapshot_name = 2;
+}
+
+message DeleteInstanceRequest {
+  int64 instance_id = 1;
+}
+
+message CreateImageFromSnapshotRequest {
+  string image_name = 1;
+  int64 snapshot_instance_id = 2;
+  string snapshot_name = 3;
+}
+
+message ListImagesResponse {
+  repeated string images = 1;
+}
+
+message DeleteImageRequest {
+  string image_name = 1;
+}

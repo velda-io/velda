@@ -1,0 +1,589 @@
+// Copyright 2025 Velda Inc
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+package broker
+
+import (
+	"context"
+	"errors"
+	"log"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+var ErrPoolMaxSizeReached = errors.New("pool is full")
+
+type WorkerStatusCode int
+
+const (
+	// This is not used.
+	WorkerStatusNone WorkerStatusCode = iota
+	// Worker that is requested but not connected to the server.
+	WorkerStatusPending
+	// Running at least one session.
+	WorkerStatusRunning
+	// Not running any session.
+	WorkerStatusIdle
+	// Worker was connected but lose connection, and the deletion is not requested by the scheduler.
+	WorkerStatusLost
+	// Worker has been requested to delete by the scheduler, but the connection is still alive.
+	WorkerStatusDeleting
+	// Worker in the backend list, but was not requested by the scheduler. It may reconnect later.
+	WorkerStatusUnknown
+	// Worker has been requested to delete by the scheduler, and connection is terminated.
+	// Waiting to confirm that backend has marked it deleted.
+	WorkerStatusDisconnected
+	// Worker has been requested to delete by the scheduler, and waiting for the worker to confirm deletion.
+	WorkerStatusNotifyDeleting
+	// This is not used.
+	WorkerStatusMax
+	// Workers being deleted do not have a record in AutoScalePool.
+)
+
+func (s WorkerStatusCode) String() string {
+	switch s {
+	case WorkerStatusNone:
+		return "None"
+	case WorkerStatusPending:
+		return "Pending"
+	case WorkerStatusRunning:
+		return "Running"
+	case WorkerStatusIdle:
+		return "Idle"
+	case WorkerStatusLost:
+		return "Lost"
+	case WorkerStatusNotifyDeleting:
+		return "NotifyDeleting"
+	case WorkerStatusDeleting:
+		return "Deleting"
+	case WorkerStatusUnknown:
+		return "Unknown"
+	case WorkerStatusDisconnected:
+		return "Disconnected"
+	default:
+		return "Invalid"
+	}
+}
+
+var nonActiveStatus = []WorkerStatusCode{
+	WorkerStatusPending,
+	WorkerStatusUnknown,
+	WorkerStatusLost,
+	WorkerStatusDisconnected}
+
+type WorkerStatus struct {
+	Name      string
+	CreatedAt time.Time
+	Status    WorkerStatusCode
+}
+
+type ResourcePoolBackend interface {
+	RequestScaleUp(ctx context.Context) (string, error)
+	RequestDelete(ctx context.Context, workerName string) error
+
+	// used for checking inconsistency and identify zombie workers
+	ListWorkers(ctx context.Context) ([]WorkerStatus, error)
+}
+
+/*
+Handler that manages the lifecycle of workers in a pool.
+
+State machine of worker:
+
+	None -> Unknown: Reconnect without agent update request
+	None -> Pending: RequestScaleUp(By autoscaler)
+	Pending -> Idle: NotifyAgentAvailable
+	Running -> Idle: MarkIdle
+	Idle -> Running: MarkBusy
+	Idle -> Deleting: MarkDeleting(Agent requests deletion)
+	Deleting -> DisConnected: MarkLost
+	Running/Idle -> Lost: MarkLost
+	DisConnected -> None: Removed during scanning
+	Lost -> None: Removed during scanning
+*/
+
+const defaultSyncInterval = 1 * time.Minute
+
+type workerDetail struct {
+	statusChan    chan AgentStatusRequest
+	availableSlot int
+}
+
+type AutoScaledPool struct {
+	name                 string
+	ctx                  context.Context
+	backend              ResourcePoolBackend
+	minIdle              int
+	maxIdle              int
+	idleDecay            time.Duration
+	syncLoopInterval     time.Duration
+	killUnknownAfter     time.Duration
+	maxSize              int
+	defaultSlotsPerAgent int
+	syncLoopTimer        *time.Ticker
+	syncNow              chan struct{}
+
+	currentSyncVersion atomic.Int32
+
+	mu              sync.Mutex
+	pendingSessions int
+	idleSlots       int
+	// Workers that are not in the backend list.
+	// Value is the creation time.
+	workersByStatus map[WorkerStatusCode]map[string]int32
+	runningWorkers  map[string]int32
+	idleWorkers     map[string]int32
+	pendingWorkers  map[string]int32
+	deletingWorkers map[string]int32
+	// Includes all unknown, pending and lost workers (or workers without heartbeat with the server)
+	// Value is the last seen time.
+	// If the worker is not seen after killUnknownAfter, it will be deleted.
+	lastKnownTime map[string]time.Time
+
+	workerStatus map[string]WorkerStatusCode
+	workerDetail map[string]*workerDetail
+
+	killIdleTimer           *time.Timer
+	killingIdle             bool
+	readyForIdleMaintenance bool
+}
+
+type AutoScaledPoolConfig struct {
+	Context              context.Context
+	Backend              ResourcePoolBackend
+	MinIdle              int
+	MaxIdle              int
+	IdleDecay            time.Duration
+	MaxSize              int
+	SyncLoopInterval     time.Duration
+	KillUnknownAfter     time.Duration
+	DefaultSlotsPerAgent int
+}
+
+func NewAutoScaledPool(name string, config AutoScaledPoolConfig) *AutoScaledPool {
+	pool := &AutoScaledPool{
+		name:            name,
+		ctx:             config.Context,
+		workersByStatus: make(map[WorkerStatusCode]map[string]int32),
+		workerStatus:    make(map[string]WorkerStatusCode),
+		workerDetail:    make(map[string]*workerDetail),
+		syncNow:         make(chan struct{}, 1),
+	}
+	for i := 0; i < int(WorkerStatusMax); i++ {
+		pool.workersByStatus[WorkerStatusCode(i)] = make(map[string]int32)
+	}
+	// Aliases
+	pool.runningWorkers = pool.workersByStatus[WorkerStatusRunning]
+	pool.idleWorkers = pool.workersByStatus[WorkerStatusIdle]
+	pool.pendingWorkers = pool.workersByStatus[WorkerStatusPending]
+	pool.deletingWorkers = pool.workersByStatus[WorkerStatusDeleting]
+
+	pool.lastKnownTime = make(map[string]time.Time)
+	pool.killIdleTimer = time.AfterFunc(1000*time.Hour, pool.deleteOneIdleWorker)
+	pool.killIdleTimer.Stop()
+	pool.syncLoopInterval = config.SyncLoopInterval
+
+	pool.syncLoopTimer = time.NewTicker(1000 * time.Hour)
+	pool.syncLoopTimer.Stop()
+	go pool.syncLoop(config.Context)
+	context.AfterFunc(config.Context, pool.shutdown)
+
+	pool.UpdateConfig(&config)
+	return pool
+}
+
+func (p *AutoScaledPool) syncLoop(ctx context.Context) {
+	defer p.syncLoopTimer.Stop()
+	sync := func() {
+		for {
+			err := p.Reconnect(ctx)
+			if err == backendChagnedError {
+				// Retry with new backend immediately.
+				continue
+			}
+			if err != nil {
+				p.logPrintf("Failed to reconnect: %v", err)
+			}
+			break
+		}
+	}
+	sync()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.syncLoopTimer.C:
+			sync()
+		case <-p.syncNow:
+			p.syncLoopTimer.Reset(p.syncLoopInterval)
+			sync()
+		}
+	}
+}
+
+var backendChagnedError = errors.New("backend changed")
+
+func (p *AutoScaledPool) Reconnect(ctx context.Context) error {
+	p.mu.Lock()
+	backend := p.backend
+	p.mu.Unlock()
+	if backend == nil {
+		return nil
+	}
+	// Don't hold the lock while listing workers.
+	curVersion := p.currentSyncVersion.Add(1)
+	workerStatuses, err := backend.ListWorkers(ctx)
+	if err != nil {
+		return err
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.backend != backend {
+		return backendChagnedError
+	}
+	for _, status := range workerStatuses {
+		name := status.Name
+		currentStatus, ok := p.workerStatus[name]
+		if !ok {
+			p.setWorkerStatusLocked(name, WorkerStatusUnknown, 0)
+			p.lastKnownTime[name] = time.Now()
+			p.logPrintf("Found unknown worker %s", name)
+		} else {
+			p.workersByStatus[currentStatus][name] = curVersion
+		}
+	}
+	for _, status := range nonActiveStatus {
+		workers := p.workersByStatus[status]
+		for name, value := range workers {
+			if value != curVersion {
+				p.logPrintf("Worker %s is removed from backend. Was %v", name, status)
+				p.removeWorkerLocked(name)
+			}
+		}
+	}
+	// Check for unknown workers, if expired, request deletion.
+	if p.killUnknownAfter > 0 {
+		for name, lastConnect := range p.lastKnownTime {
+			if time.Since(lastConnect) > p.killUnknownAfter {
+				err := p.backend.RequestDelete(ctx, name)
+				if err != nil {
+					p.logPrintf("Failed to request deletion for unknown worker %s: %v", name, err)
+				} else {
+					p.removeWorkerLocked(name)
+					p.logPrintf("Unknown worker %s is deleted. Last active: %v", name, lastConnect)
+				}
+			}
+		}
+	}
+	p.maintainIdleWorkers()
+	return nil
+}
+
+// RequestWorker requests a worker from the pool.
+// It should always be called when a new session is createdd,
+// and followed by RequestCancelled, MarkBusy, or NotifyAgentAvailable
+// with assignedWork=true.
+func (p *AutoScaledPool) RequestWorker() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.pendingSessions++
+	p.maintainIdleWorkers()
+	return nil
+}
+
+// Cancel one of the previous scale up action.
+// To be invoked when:
+// - One pending session is cancelled
+func (p *AutoScaledPool) RequestCancelled() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pendingSessions--
+	p.maintainIdleWorkers()
+	return nil
+}
+
+// MarkBusy marks a worker from idle to busy.
+func (p *AutoScaledPool) MarkBusy(workerName string, remainingSlot int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pendingSessions--
+	p.setWorkerStatusLocked(workerName, WorkerStatusRunning, remainingSlot)
+	p.maintainIdleWorkers()
+	return nil
+}
+
+func (p *AutoScaledPool) MarkIdle(workerName string, remainingSlot int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	oldStatus := p.setWorkerStatusLocked(workerName, WorkerStatusIdle, remainingSlot)
+	log.Printf("Worker %s marked idle, was %v", workerName, oldStatus)
+	if oldStatus == WorkerStatusRunning {
+		p.maintainIdleWorkers()
+	}
+	return nil
+}
+
+func (p *AutoScaledPool) MarkLost(workerName string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.lastKnownTime[workerName] = time.Now()
+	oldStatus := p.workerStatus[workerName]
+	if oldStatus == WorkerStatusNone {
+		p.logPrintf("Worker %s lost, was not in pool", workerName)
+	} else if oldStatus == WorkerStatusDeleting {
+		p.setWorkerStatusLocked(workerName, WorkerStatusDisconnected, 0)
+	} else {
+		p.setWorkerStatusLocked(workerName, WorkerStatusLost, 0)
+		p.logPrintf("Worker %s lost, was %v", workerName, oldStatus)
+	}
+
+	p.maintainIdleWorkers()
+	return nil
+}
+
+func (p *AutoScaledPool) MarkDeleting(workerName string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	oldStatus := p.workerStatus[workerName]
+	p.logPrintf("Worker %s deleting, was %v", workerName, oldStatus)
+	p.setWorkerStatusLocked(workerName, WorkerStatusDeleting, 0)
+	p.backend.RequestDelete(p.ctx, workerName)
+	p.maintainIdleWorkers()
+	return nil
+}
+
+func (p *AutoScaledPool) NotifyAgentAvailable(name string, busy bool, statusChannel chan AgentStatusRequest, availableSlot int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var oldStatus WorkerStatusCode
+	if busy {
+		oldStatus = p.setWorkerStatusLocked(name, WorkerStatusRunning, availableSlot)
+	} else {
+		oldStatus = p.setWorkerStatusLocked(name, WorkerStatusIdle, availableSlot)
+	}
+	if oldStatus == WorkerStatusNone {
+		p.logPrintf("Worker %s starting while not in pool", name)
+	} else if oldStatus == WorkerStatusUnknown {
+		p.logPrintf("Unknown worker %s reconnected. Busy: %t", name, busy)
+	}
+	p.workerDetail[name].statusChan = statusChannel
+	p.workerDetail[name].availableSlot = availableSlot
+
+	p.maintainIdleWorkers()
+
+	return nil
+}
+
+func (p *AutoScaledPool) UpdateConfig(config *AutoScaledPoolConfig) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	oldBackend := p.backend
+	p.backend = config.Backend
+	p.minIdle = config.MinIdle
+	p.maxIdle = config.MaxIdle
+	p.idleDecay = config.IdleDecay
+	p.maxSize = config.MaxSize
+	p.killUnknownAfter = config.KillUnknownAfter
+	if p.killingIdle {
+		p.killIdleTimer.Stop()
+		p.killingIdle = false
+	}
+	oldInterval := p.syncLoopInterval
+	p.syncLoopInterval = config.SyncLoopInterval
+	if p.syncLoopInterval <= 0 {
+		p.syncLoopInterval = defaultSyncInterval
+	}
+	p.defaultSlotsPerAgent = config.DefaultSlotsPerAgent
+	if p.defaultSlotsPerAgent <= 0 {
+		p.defaultSlotsPerAgent = 1
+	}
+	if p.maxIdle < p.minIdle+p.defaultSlotsPerAgent-1 {
+		log.Printf("Pool %s: maxIdle (%d) is less than minIdle (%d) + defaultSlotsPerAgent (%d) - 1. Adjusting maxIdle to %d.",
+			p.name, p.maxIdle, p.minIdle, p.defaultSlotsPerAgent, p.minIdle+p.defaultSlotsPerAgent-1)
+		p.maxIdle = p.minIdle + p.defaultSlotsPerAgent - 1
+	}
+	if oldInterval != p.syncLoopInterval {
+		p.syncLoopTimer.Reset(p.syncLoopInterval)
+	}
+	if oldBackend != p.backend {
+		p.syncNow <- struct{}{}
+	} else {
+		p.maintainIdleWorkers()
+	}
+}
+
+func (p *AutoScaledPool) ReadyForIdleMaintenance() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.readyForIdleMaintenance {
+		p.logPrintf("Ready for idle maintenance per request by initialDelay. Current unknown workers: %d", len(p.workersByStatus[WorkerStatusUnknown]))
+		p.readyForIdleMaintenance = true
+		p.maintainIdleWorkers()
+	}
+}
+
+func (p *AutoScaledPool) maintainIdleWorkers() {
+	// We will start worker management once we have all the information about each worker.
+	if p.backend != nil && len(p.workersByStatus[WorkerStatusUnknown]) == 0 && !p.readyForIdleMaintenance {
+		p.readyForIdleMaintenance = true
+		p.logPrintf("No more unknown workers, start size maintenance")
+	}
+	if !p.readyForIdleMaintenance || p.backend == nil {
+		return
+	}
+	if p.ctx.Err() != nil {
+		return
+	}
+	for p.idleSizeLocked() < p.minIdle && p.sizeLocked() < p.maxSize {
+		name, err := p.backend.RequestScaleUp(p.ctx)
+		p.logPrintf("Creating worker %s, before idle size: %d", name, p.idleSizeLocked())
+		if err != nil {
+			// TODO: Needs add backoff
+			p.logPrintf("Failed to scale up: %v", err)
+			break
+		} else {
+			p.lastKnownTime[name] = time.Now()
+			p.setWorkerStatusLocked(name, WorkerStatusPending, p.defaultSlotsPerAgent)
+		}
+	}
+
+	// Delete idle workers if there are too many.
+	for p.idleSizeLocked() > p.maxIdle {
+		if !p.deleteOneWorkerLocked() {
+			break
+		}
+		p.killingIdle = false
+		p.killIdleTimer.Stop()
+	}
+	if p.idleSizeLocked()-p.defaultSlotsPerAgent >= p.minIdle && len(p.idleWorkers) > 0 {
+		if !p.killingIdle {
+			p.logPrintf("Started idle decay timer")
+			p.killIdleTimer.Reset(p.idleDecay)
+			p.killingIdle = true
+		}
+	} else if p.killingIdle {
+		p.killIdleTimer.Stop()
+		p.killingIdle = false
+	}
+}
+
+func (p *AutoScaledPool) deleteOneIdleWorker() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.killingIdle = false
+	if p.idleSizeLocked()-p.defaultSlotsPerAgent < p.minIdle || len(p.idleWorkers) <= p.minIdle {
+		p.logPrintf("No idle workers to delete, stopping idle decay timer")
+		return
+	}
+	if p.deleteOneWorkerLocked() {
+		p.maintainIdleWorkers()
+	}
+}
+
+func (p *AutoScaledPool) deleteOneWorkerLocked() bool {
+	if len(p.idleWorkers) == 0 {
+		p.logPrintf("No idle workers to delete")
+		return false
+	}
+	var name string
+	for k := range p.idleWorkers {
+		name = k
+		break
+	}
+	if p.idleSizeLocked()-p.workerDetail[name].availableSlot < p.minIdle {
+		p.logPrintf("Not enough idle slots to delete worker %s, current idle size: %d", name, p.idleSizeLocked())
+		return false
+	}
+	statusChan := p.workerDetail[name].statusChan
+	statusChan <- AgentStatusRequest{
+		shutdown: true,
+		target:   name,
+	}
+	p.setWorkerStatusLocked(name, WorkerStatusNotifyDeleting, -1)
+	p.logPrintf("Deleting idle worker %s, current idle size: %d", name, p.idleSizeLocked())
+	return true
+}
+
+func (p *AutoScaledPool) InspectWorkers(f func(name string, status WorkerStatusCode, statusChan chan AgentStatusRequest) bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for status, workers := range p.workersByStatus {
+		for name := range workers {
+			statusChan := p.workerDetail[name].statusChan
+			if !f(name, status, statusChan) {
+				return
+			}
+		}
+	}
+}
+
+func (p *AutoScaledPool) sizeLocked() int {
+	return len(p.idleWorkers) + len(p.runningWorkers) + len(p.pendingWorkers) + len(p.workersByStatus[WorkerStatusUnknown])
+}
+
+func (p *AutoScaledPool) idleSizeLocked() int {
+	return p.idleSlots - p.pendingSessions
+}
+
+func (p *AutoScaledPool) shutdown() {
+	p.killIdleTimer.Stop()
+}
+
+func (p *AutoScaledPool) setWorkerStatusLocked(name string, status WorkerStatusCode, newIdleSlots int) WorkerStatusCode {
+	currentStatus, ok := p.workerStatus[name]
+	if ok && currentStatus != status {
+		delete(p.workersByStatus[currentStatus], name)
+		if currentStatus == WorkerStatusUnknown || currentStatus == WorkerStatusPending || currentStatus == WorkerStatusLost {
+			delete(p.lastKnownTime, name)
+		}
+	} else if !ok {
+		p.workerDetail[name] = &workerDetail{}
+	}
+	old := p.workerDetail[name].availableSlot
+	if newIdleSlots < 0 {
+		newIdleSlots = old
+	}
+	p.workerDetail[name].availableSlot = newIdleSlots
+	if currentStatus == WorkerStatusNotifyDeleting {
+		old = 0
+	}
+	if status == WorkerStatusNotifyDeleting {
+		newIdleSlots = 0
+	}
+	p.idleSlots += newIdleSlots - old
+
+	p.workersByStatus[status][name] = p.currentSyncVersion.Load()
+	p.workerStatus[name] = status
+	return currentStatus
+}
+
+func (p *AutoScaledPool) removeWorkerLocked(name string) WorkerStatusCode {
+	currentStatus, ok := p.workerStatus[name]
+	if ok {
+		delete(p.workersByStatus[currentStatus], name)
+		p.idleSlots -= p.workerDetail[name].availableSlot
+	}
+	delete(p.workerStatus, name)
+	delete(p.workerDetail, name)
+	return currentStatus
+}
+
+func (p *AutoScaledPool) logPrintf(format string, args ...interface{}) {
+	log.Printf("Pool %s:\t"+format, append([]interface{}{p.name}, args...)...)
+}

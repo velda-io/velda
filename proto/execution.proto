@@ -1,0 +1,48 @@
+// Copyright 2025 Velda Inc
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+
+package velda;
+
+option go_package = "velda.io/velda/pkg/proto";
+
+message Workload {
+  // The binary path to execute.
+  string command = 1;
+  // If provided, the absolute path to the binary.
+  string command_path = 9;
+  // The arguments to pass to the binary.
+  repeated string args = 2;
+  // The working directory to execute the command in.
+  // If empty, home directory will be used.
+  string working_dir = 3;
+  // The environment variables to set for the command.
+  // Environment variables are passed in the form of key=value.
+  repeated string environs = 4;
+
+  // Whether to execute the command in a shell.
+  // If true, command will be the shell script and args are ignored.
+  // If command is empty, it will start the default shell at current directory.
+  bool shell = 5;
+
+  // The system user credentials to execute the command.
+  uint32 uid = 6;
+  uint32 gid = 7;
+  repeated uint32 groups = 8;
+}
+
+message BatchTaskResult {
+  optional int32 exit_code = 1;
+  int32 terminated_signal = 2;
+}

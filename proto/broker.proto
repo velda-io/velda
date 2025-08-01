@@ -1,0 +1,250 @@
+// Copyright 2025 Velda Inc
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+
+package velda;
+
+import "execution.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "velda.io/velda/pkg/proto";
+
+message AgentIdentity {
+  string agent_id = 1;
+  string hostname = 2;
+  string pool = 3;
+}
+
+message AgentUpdateRequest {
+  AgentIdentity agent_identity = 1;
+ 
+  SessionInitResponse session_init_response = 2;
+  SessionCompletion session_completion = 3;
+
+  // Only sent in the first message.
+  repeated CurrentExecution current_executions = 4;
+
+  // The number of slots available for new & current sessions.
+  // Default to 1.
+  int32 slots = 5;
+}
+
+// Session execution record and final state enum for accounting
+message SessionExecutionRecord {
+  int64 instance_id = 1;
+  string pool = 2;
+  string session_id = 3;
+  string agent_id = 4;
+  google.protobuf.Timestamp create_time = 5;
+  google.protobuf.Timestamp start_time = 6;
+  google.protobuf.Timestamp end_time = 7;
+  string service_name = 8;
+  string batch_task_id = 9;
+  string description = 10;
+  SessionExecutionFinalState final_state = 11;
+}
+
+enum SessionExecutionFinalState {
+  SESSION_EXECUTION_FINAL_STATE_UNSPECIFIED = 0;
+  SESSION_EXECUTION_FINAL_STATE_COMPLETE = 1;
+  SESSION_EXECUTION_FINAL_STATE_FAILURE = 2;
+  SESSION_EXECUTION_FINAL_STATE_CHECKPOINTED = 3;
+  SESSION_EXECUTION_FINAL_STATE_RESOURCE_EXHAUSTED = 4;
+  SESSION_EXECUTION_FINAL_STATE_CANCELLED = 5;
+  SESSION_EXECUTION_FINAL_STATE_CANCELLED_BY_AGENT = 6;
+  SESSION_EXECUTION_FINAL_STATE_WORKER_LOST = 7;
+  SESSION_EXECUTION_FINAL_STATE_STARTUP_FAILURE = 8;
+}
+
+message CurrentExecution {
+  SessionRequest request = 1;
+  SessionInitResponse response = 2;
+}
+
+message Dependency {
+  string upstream_task_id = 1;
+  enum DependencyType {
+    DEPENDENCY_TYPE_UNSPECIFIED = 0;
+    DEPENDENCY_TYPE_SUCCESS = 1;
+    DEPENDENCY_TYPE_FAILURE = 2;
+  }
+  DependencyType type = 2;
+}
+
+message SessionRequest {
+  // Only set by the server.
+  string session_id = 1;
+  // For batch task only: Task ID to identify the task, can be later used to
+  // query status.
+  string task_id = 11;
+  // For online task: Service name to identify the session. Can be used to
+  // connect.
+  string service_name = 12;
+  // usre@instance_id
+  int64 instance_id = 2;
+  string user = 3;
+  string pool = 4;
+
+  // Time to wait before the first connection. Default to 60 seconds.
+  google.protobuf.Duration init_timeout = 5;
+
+  // The idle timeout for the session. The session will be terminated if
+  // there is no activity for the duration.
+  // Default to 0.
+  google.protobuf.Duration idle_timeout = 6;
+
+  // The priority of the task.
+  int64 priority = 8;
+
+  // The workload to execute. If not set, it will be an interactive session
+  // and needs to be connected explicitly by the client.
+  Workload workload = 9;
+
+  // Additional metadata for searching the task.
+  repeated string labels = 10;
+
+  // When requesting with a service name only, a new session will always be
+  // created.
+  // 
+  // Used to create multiple sessions for the same service name.
+  // If not set, it will reuse the existing session if available.
+  // Note: This API may change, we may use dedicated manifest to configure
+  // complicated services.
+  bool force_new_session = 13;
+
+  // For batch workload: The dependencies of the task.
+  repeated Dependency dependencies = 14;
+
+  enum ConnectionFinishAction {
+    CONNECTION_FINISH_ACTION_UNSPECIFIED = 0;
+    // The session will be terminated when the last connection is closed.
+    CONNECTION_FINISH_ACTION_TERMINATE = 1;
+    // The session will be kept alive when the last connection is closed.
+    CONNECTION_FINISH_ACTION_KEEP_ALIVE = 2;
+    // The session will be checkpointed when the last connection is closed.
+    CONNECTION_FINISH_ACTION_CHECKPOINT = 3;
+  }
+  ConnectionFinishAction connection_finish_action = 15;
+
+  // If true, the session will be restoring from the last checkpoint.
+  // This should not be set by the client.
+  bool checkpointed = 16;
+
+  reserved 7;
+}
+
+message SessionInitResponse {
+  int64 instance_id = 1;
+  string session_id = 2;
+  bool success = 3;
+  int32 port = 4;
+
+  bytes host_key = 5;
+}
+
+message SessionCompletion {
+  int64 instance_id = 1;
+  string session_id = 2;
+
+  BatchTaskResult batch_task_result = 3;
+
+  bool checkpointed = 4;
+}
+
+message AgentUpdateResponse {
+  SessionRequest session_request = 1;
+}
+
+message ExecutionStatus {
+  string session_id = 1;
+  string execution_id = 2;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    // Waiting to be assigned to an agent.
+    STATUS_QUEUEING = 1;
+    // Has assigned to an agent, but not started yet.
+    STATUS_PENDING = 2;
+    STATUS_RUNNING = 3;
+    STATUS_TERMINATED = 4;
+    // Lost heartbeat from the agent, but the agent may be still running.
+    STATUS_STALE = 5;
+    STATUS_CHECKPOINTED = 6;
+  }
+
+  Status status = 3;
+
+  string task_id = 4;
+
+  message SshConnection {
+    // Host name or IP address for the client to connect.
+    string host = 1;
+    // Default to 22 if not set.
+    int32 port = 2;
+    // The host key of the agent. The client should verify the host key
+    // before connecting to the agent.
+    bytes host_key = 3;
+
+    reserved 4,5;
+  }
+  SshConnection ssh_connection = 5;
+}
+
+message ListSessionsRequest {
+  int64 instance_id = 1;
+  string service_name = 2;
+}
+
+message Session {
+  string session_id = 1;
+  string user = 2;
+  string pool = 3;
+  int64 instance_id = 4;
+  ExecutionStatus.Status status = 5;
+  string service_name = 6;
+  repeated string labels = 7;
+
+  string internal_ip_address = 8;
+}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
+}
+
+message AttachSessionRequest {
+  int64 instance_id = 1;
+  string session_id = 2;
+}
+
+// The broker service.
+service BrokerService {
+  rpc AgentUpdate(stream AgentUpdateRequest)
+     returns (stream AgentUpdateResponse);
+
+  rpc RequestSession(SessionRequest) returns (ExecutionStatus) {
+    option (google.api.http) = {
+      post: "/broker/v1/session"
+      body: "*"
+    };
+  }
+
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse) {
+    option (google.api.http) = {
+			get: "/broker/v1/sessions"
+		};
+  }
+}
+
