@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,14 +24,15 @@ import (
 	"github.com/spf13/cobra"
 	_ "modernc.org/sqlite"
 
-	"velda.io/velda/pkg/utils"
 	agentpb "velda.io/velda/pkg/proto/agent"
+	"velda.io/velda/pkg/utils"
 )
 
 var (
-	configDir    string
-	profile      string
-	profileInput string
+	configDir        string
+	profile          string
+	profileInput     string
+	systemConfigPath string
 	// Only generated if the agent is running in a sandbox context.
 	agentConfig *agentpb.AgentConfig
 
@@ -39,7 +40,7 @@ var (
 )
 
 func InitConfigFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringVar(&configDir, "config_dir", "", "config directory. Defaults to ~/.config/velda")
+	cmd.PersistentFlags().StringVar(&configDir, "config_dir", "", "config directory. Defaults to env VELDA_CONFIG_DIR or ~/.config/velda")
 	cmd.PersistentFlags().StringVar(&profileInput, "profile", "", "The user profile to use.")
 
 	// Legacy flags.
@@ -48,17 +49,27 @@ func InitConfigFlags(cmd *cobra.Command) {
 }
 
 func InitConfig() {
-	_, err := os.Stat("/run/velda/velda.yaml")
+	systemConfigPath = os.Getenv("VELDA_SYSTEM_CONFIG")
+	if systemConfigPath == "" {
+		systemConfigPath = "/run/velda/velda.yaml"
+	}
+	_, err := os.Stat(systemConfigPath)
 	if err != nil {
 		// User login.
+		if configDir == "" {
+			configDir = os.Getenv("VELDA_CONFIG_DIR")
+		}
 		if configDir == "" {
 			// Try to use the user's home directory
 			homedir, err := os.UserHomeDir()
 			if err == nil {
 				configDir = homedir + "/.config/velda"
-				os.MkdirAll(configDir, 0755)
 			}
 		}
+		if configDir == "" {
+			log.Fatalf("Unable to determine the config directory. Please set --config_dir or $VELDA_CONFIG_DIR environment variable.")
+		}
+		os.MkdirAll(configDir, 0755)
 		profile = profileInput
 		if profile == "" {
 			profile, err = GlobalConfig().GetConfig("profile")
@@ -69,7 +80,7 @@ func InitConfig() {
 	} else {
 		// Agent daemon.
 		agentConfig = &agentpb.AgentConfig{}
-		if err := utils.LoadProto("/run/velda/velda.yaml", agentConfig); err != nil {
+		if err := utils.LoadProto(systemConfigPath, agentConfig); err != nil {
 			log.Printf("Failed to load agent config: %v", err)
 		}
 		brokerAddrFlag = agentConfig.Broker.Address
@@ -122,7 +133,7 @@ func LoadConfigs(profile string) (*Configs, error) {
 	if err != nil {
 		return nil, err
 	}
-	if e, _ := cfg.GetConfig("email"); e == "" {
+	if e, _ := cfg.GetConfig("broker"); e == "" {
 		return cfg, fmt.Errorf("%w: %v", profileNotFoundError, profile)
 	}
 	return cfg, nil
@@ -276,7 +287,7 @@ func (cfg *Configs) MakeCurrent() error {
 }
 
 func ListProfiles() ([]string, error) {
-	rows, err := GlobalConfig().db.Query("SELECT profile FROM config WHERE key='email'")
+	rows, err := GlobalConfig().db.Query("SELECT profile FROM config WHERE key='broker'")
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +324,7 @@ func DeleteCurrentProfile() error {
 }
 
 func GetAgentSandboxConfig() *agentpb.SandboxConfig {
-	if agentConfig == nil {
+	if agentConfig.GetSandboxConfig() == nil {
 		return &agentpb.SandboxConfig{}
 	}
 	return agentConfig.SandboxConfig
