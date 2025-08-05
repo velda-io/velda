@@ -40,10 +40,8 @@ var (
 )
 
 func InitConfigFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringVar(&configDir, "config_dir", "", "config directory. Defaults to ~/.config/velda")
+	cmd.PersistentFlags().StringVar(&configDir, "config_dir", "", "config directory. Defaults to env VELDA_CONFIG_DIR or ~/.config/velda")
 	cmd.PersistentFlags().StringVar(&profileInput, "profile", "", "The user profile to use.")
-	cmd.PersistentFlags().StringVar(&systemConfigPath, "system_config", "/run/velda/velda.yaml", "Path to the system configuration file. Defaults to /run/velda/velda.yaml")
-	cmd.PersistentFlags().MarkHidden("system_config")
 
 	// Legacy flags.
 	cmd.PersistentFlags().StringVar(&brokerAddrFlag, "broker", "novahub.dev:50051", "broker address")
@@ -51,17 +49,27 @@ func InitConfigFlags(cmd *cobra.Command) {
 }
 
 func InitConfig() {
+	systemConfigPath = os.Getenv("VELDA_SYSTEM_CONFIG")
+	if systemConfigPath == "" {
+		systemConfigPath = "/run/velda/velda.yaml"
+	}
 	_, err := os.Stat(systemConfigPath)
 	if err != nil {
 		// User login.
+		if configDir == "" {
+			configDir = os.Getenv("VELDA_CONFIG_DIR")
+		}
 		if configDir == "" {
 			// Try to use the user's home directory
 			homedir, err := os.UserHomeDir()
 			if err == nil {
 				configDir = homedir + "/.config/velda"
-				os.MkdirAll(configDir, 0755)
 			}
 		}
+		if configDir == "" {
+			log.Fatalf("Unable to determine the config directory. Please set --config_dir or $VELDA_CONFIG_DIR environment variable.")
+		}
+		os.MkdirAll(configDir, 0755)
 		profile = profileInput
 		if profile == "" {
 			profile, err = GlobalConfig().GetConfig("profile")
@@ -125,7 +133,7 @@ func LoadConfigs(profile string) (*Configs, error) {
 	if err != nil {
 		return nil, err
 	}
-	if e, _ := cfg.GetConfig("email"); e == "" {
+	if e, _ := cfg.GetConfig("broker"); e == "" {
 		return cfg, fmt.Errorf("%w: %v", profileNotFoundError, profile)
 	}
 	return cfg, nil
@@ -279,7 +287,7 @@ func (cfg *Configs) MakeCurrent() error {
 }
 
 func ListProfiles() ([]string, error) {
-	rows, err := GlobalConfig().db.Query("SELECT profile FROM config WHERE key='email'")
+	rows, err := GlobalConfig().db.Query("SELECT profile FROM config WHERE key='broker'")
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +324,7 @@ func DeleteCurrentProfile() error {
 }
 
 func GetAgentSandboxConfig() *agentpb.SandboxConfig {
-	if agentConfig == nil {
+	if agentConfig.GetSandboxConfig() == nil {
 		return &agentpb.SandboxConfig{}
 	}
 	return agentConfig.SandboxConfig

@@ -47,6 +47,14 @@ agent_pools:
 
 ### Start a runner
 Runner is the node that runs the workload.
+System requirement:
+* Linux AMD64 or ARM64
+* Direct IP access to the APIServer
+* Directly reachable from the clients through IP(i.e. not behind the firewall)
+* Must have CGroup v2 enabled, and cgroup v1 disabled.
+* Recommended at least 1 vCPUs & 4 GB memory
+
+#### Install the runner
 1. Locate the address of apiserver
 ```bash
 export APISERVER=127.0.0.1 # Replace with IP of the apiserver.
@@ -57,14 +65,16 @@ export APISERVER=127.0.0.1 # Replace with IP of the apiserver.
 sudo mkdir -p /tmp/agentdisk/0
 sudo mount -t nfs ${APISERVER}:/zpool /tmp/agentdisk/0
 ```
-4. Setup the agent config file, and store it to `/run/velda/velda.yaml` (Or use `--system_config` in step 5 to override it)
+4. Setup the agent config file, and store it to `agent_config.yaml` or the system wide default `/run/velda/velda.yaml`
 ```yaml
 broker:
   address: "${APISERVER}:50051"
 ```
-5. Start the daemon, which will run your sandbox when requested
+5. Start the daemon. You must allocate a dedicated CGroup.
 ```bash
-./velda agent daemon --pool shell
+sudo systemd-run --unit=velda-agent -E VELDA_SYSTEM_CONFIG=$PWD/agent_config.yaml velda agent daemon --pool shell
+# Stream logs
+sudo journalctl -fu velda-agent.service
 ```
 
 ### <a name="connect"></a>Create and initialize your first instance
@@ -80,7 +90,7 @@ export APISERVER=127.0.0.1 # Replace with IP of the apiserver.
 2. Install the client commandline tool (CLI)
 3. Set the apiserver address.
 ```bash
-velda config set --broker_url=${APISERVER}:50051
+velda init --broker=${APISERVER}:50051
 ```
 4. Create your instance
 ```bash
