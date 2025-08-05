@@ -35,7 +35,7 @@ On the other hand, all sessions created by `vrun` will share the exact same envi
 
 ## Getting started
 * [Setup a new cluster](docs/cluster_setup.md)
-* [Connect to a cluster](docs/connect.md)
+* [Connect to a cluster](docs/cluster_setup.md#connect)
 
 ## 🤝 Contributing
 We love contributions from our community ❤️. Pull requests are welcome!

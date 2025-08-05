@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,14 +24,15 @@ import (
 	"github.com/spf13/cobra"
 	_ "modernc.org/sqlite"
 
-	"velda.io/velda/pkg/utils"
 	agentpb "velda.io/velda/pkg/proto/agent"
+	"velda.io/velda/pkg/utils"
 )
 
 var (
-	configDir    string
-	profile      string
-	profileInput string
+	configDir        string
+	profile          string
+	profileInput     string
+	systemConfigPath string
 	// Only generated if the agent is running in a sandbox context.
 	agentConfig *agentpb.AgentConfig
 
@@ -41,6 +42,8 @@ var (
 func InitConfigFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&configDir, "config_dir", "", "config directory. Defaults to ~/.config/velda")
 	cmd.PersistentFlags().StringVar(&profileInput, "profile", "", "The user profile to use.")
+	cmd.PersistentFlags().StringVar(&systemConfigPath, "system_config", "/run/velda/velda.yaml", "Path to the system configuration file. Defaults to /run/velda/velda.yaml")
+	cmd.PersistentFlags().MarkHidden("system_config")
 
 	// Legacy flags.
 	cmd.PersistentFlags().StringVar(&brokerAddrFlag, "broker", "novahub.dev:50051", "broker address")
@@ -48,7 +51,7 @@ func InitConfigFlags(cmd *cobra.Command) {
 }
 
 func InitConfig() {
-	_, err := os.Stat("/run/velda/velda.yaml")
+	_, err := os.Stat(systemConfigPath)
 	if err != nil {
 		// User login.
 		if configDir == "" {
@@ -69,7 +72,7 @@ func InitConfig() {
 	} else {
 		// Agent daemon.
 		agentConfig = &agentpb.AgentConfig{}
-		if err := utils.LoadProto("/run/velda/velda.yaml", agentConfig); err != nil {
+		if err := utils.LoadProto(systemConfigPath, agentConfig); err != nil {
 			log.Printf("Failed to load agent config: %v", err)
 		}
 		brokerAddrFlag = agentConfig.Broker.Address
