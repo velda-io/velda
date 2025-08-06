@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,6 @@
 package cmd
 
 import (
-	"log"
 	"os"
 	"path"
 
@@ -22,8 +21,6 @@ import (
 
 	"velda.io/velda/pkg/clientlib"
 )
-
-var Debug *bool
 
 var rootCmd = &cobra.Command{
 	Use:          "velda",
@@ -34,14 +31,12 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+func DebugLog(format string, args ...interface{}) {
+	clientlib.DebugLog(format, args...)
+}
+
 // Exported for addition from other packages
 var RootCmd = rootCmd
-
-func DebugLog(format string, args ...interface{}) {
-	if *Debug {
-		log.Printf(format, args...)
-	}
-}
 
 func Execute() {
 	execName := path.Base(os.Args[0])
@@ -61,5 +56,4 @@ func Execute() {
 
 func init() {
 	clientlib.InitConfigFlags(rootCmd)
-	Debug = rootCmd.PersistentFlags().Bool("debug", false, "Enable debug mode")
 }

@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -43,6 +43,10 @@ var configSetCmd = &cobra.Command{
 		}
 		if flags.Changed("broker") {
 			cobra.CheckErr(cfg.SetConfig("broker", flags.Lookup("broker").Value.String()))
+			updated = true
+		}
+		if flags.Changed("identity-file") {
+			cobra.CheckErr(cfg.SetConfig("identity-file", flags.Lookup("identity-file").Value.String()))
 			updated = true
 		}
 		if !updated {

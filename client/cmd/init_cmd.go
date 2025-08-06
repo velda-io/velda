@@ -11,14 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package main
+package cmd
 
 import (
 	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"velda.io/velda/client/cmd"
 	"velda.io/velda/pkg/clientlib"
 )
 
@@ -61,7 +60,7 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	cmd.RootCmd.AddCommand(initCmd)
+	RootCmd.AddCommand(initCmd)
 	initCmd.Flags().String("broker", "", "The address of broker")
 	initCmd.MarkFlagRequired("broker")
 }
