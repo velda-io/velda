@@ -72,8 +72,8 @@ func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPl
 func providePid1Runner(requestPlugin *agent2.SessionRequestPlugin, authPlugin agent2.AuthPluginType, pivotRootPlugin *agent2.PivotRootPlugin, waiterPlugin *agent2.WaiterPlugin, completionSignalPlugin *agent2.CompletionSignalPlugin, sshdPlugin *agent2.SshdPlugin, statusPlugin *agent2.ReportStatusPlugin, batchPlugin *agent2.BatchPlugin, completionWaiter *agent2.CompletionWaitPlugin) Pid1Runner {
 	return agent2.NewPluginRunner(
 		requestPlugin,
-		authPlugin,
 		pivotRootPlugin,
+		authPlugin,
 		waiterPlugin,
 		completionSignalPlugin,
 		sshdPlugin,

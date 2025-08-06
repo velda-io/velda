@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,10 +16,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 	"google.golang.org/grpc"
+	cmdlib "velda.io/velda/client/cmd"
 	"velda.io/velda/pkg/clientlib"
 	"velda.io/velda/pkg/proto"
 )
@@ -53,10 +55,30 @@ func (o ossAuthProvider) SshDial(cmd *cobra.Command, sshConn *proto.ExecutionSta
 		return nil, fmt.Errorf("Error parsing host key: %v", err)
 	}
 
+	authMethods := []ssh.AuthMethod{}
+	var keyPath string
+	if clientlib.IsInSession() {
+		keyPath = "/.velda/velda_key"
+	} else {
+		keyPath, _ = cmd.Flags().GetString("identity-file")
+	}
+
+	cmdlib.DebugLog("Using SSH key file: %s", keyPath)
+	if keyPath != "" {
+		keyData, err := os.ReadFile(keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("Error reading SSH key file %s: %v", keyPath, err)
+		}
+
+		key, err := ssh.ParsePrivateKey(keyData)
+		if err != nil {
+			return nil, fmt.Errorf("Error parsing SSH key file %s: %v", keyPath, err)
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(key))
+	}
 	clientConfig := &ssh.ClientConfig{
-		User: user,
-		// TODO: Add support for SSH keys.
-		Auth:            []ssh.AuthMethod{},
+		User:            user,
+		Auth:            authMethods,
 		HostKeyCallback: ssh.FixedHostKey(hostKey),
 	}
 
@@ -64,7 +86,7 @@ func (o ossAuthProvider) SshDial(cmd *cobra.Command, sshConn *proto.ExecutionSta
 	if err != nil {
 		return nil, fmt.Errorf("Error dialing ssh: %v", err)
 	}
-	return &clientlib.SshClient{client, ""}, nil
+	return &clientlib.SshClient{Client: client, ShutdownMessage: ""}, nil
 }
 
 func unaryAuthInterceptor(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {

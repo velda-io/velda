@@ -61,8 +61,8 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 func providePid1Runner(requestPlugin *agent.SessionRequestPlugin, authPlugin agent.AuthPluginType, pivotRootPlugin *agent.PivotRootPlugin, waiterPlugin *agent.WaiterPlugin, completionSignalPlugin *agent.CompletionSignalPlugin, sshdPlugin *agent.SshdPlugin, statusPlugin *agent.ReportStatusPlugin, batchPlugin *agent.BatchPlugin, completionWaiter *agent.CompletionWaitPlugin) Pid1Runner {
 	return agent.NewPluginRunner(
 		requestPlugin,
-		authPlugin,
 		pivotRootPlugin,
+		authPlugin,
 		waiterPlugin,
 		completionSignalPlugin,
 		sshdPlugin,
