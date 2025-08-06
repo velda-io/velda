@@ -48,3 +48,6 @@ Join our community here:
 - 🌟 [Star us on GitHub](https://github.com/velda-io/velda)
 - 👋 [Join our Discord community](https://discord.gg/MJQbeE33)
 - 📜 [Read our blog posts](https://blog.velda.io)
+
+# Learn more
+Checkout [velda.io](https://velda.io) to learn more about Velda and our hosted/enterprise offering.
