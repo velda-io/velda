@@ -143,7 +143,20 @@ message SessionRequest {
   // This should not be set by the client.
   bool checkpointed = 16;
 
+  // Additional information for the agent to execute the session.
+  AgentSessionInfo agent_session_info = 17;
+
   reserved 7;
+}
+
+message AgentSessionInfo {
+  message NfsMount {
+    string nfs_server = 1;
+    string nfs_path = 2;
+  }
+  oneof file_mount {
+    NfsMount nfs_mount = 1;
+  }
 }
 
 message SessionInitResponse {

@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,13 +15,77 @@ package broker
 
 import (
 	"context"
+	"fmt"
+	"log"
+	"net"
+	"os/exec"
 
 	"velda.io/velda/pkg/proto"
 )
 
-type SimpleAuth struct{}
+type SimpleAuth struct {
+	diskRoot string
+}
+
+func NewSimpleAuth(diskRoot string) *SimpleAuth {
+	return &SimpleAuth{
+		diskRoot: diskRoot,
+	}
+}
 
 func (n *SimpleAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
+	instanceID := session.Request.InstanceId
+	exportPath := fmt.Sprintf("%s/%d", n.diskRoot, instanceID)
+	agentHost := agent.Host
+
+	// Use exportfs command to export NFS
+	err := exportNFS(exportPath, agentHost.String())
+	if err != nil {
+		return err
+	}
+	session.Request.AgentSessionInfo = &proto.AgentSessionInfo{
+		FileMount: &proto.AgentSessionInfo_NfsMount_{
+			NfsMount: &proto.AgentSessionInfo_NfsMount{
+				NfsServer: agent.PeerInfo.LocalAddr.(*net.TCPAddr).IP.String(),
+				NfsPath:   exportPath,
+			},
+		},
+	}
+	return nil
+}
+
+// exportNFS is a helper function to handle NFS export logic using exportfs command
+func exportNFS(path, host string) error {
+	log.Printf("Exporting NFS path %s to host %s", path, host)
+	cmd := exec.Command("sudo", "exportfs", "-o", "rw,async,no_root_squash", host+":"+path)
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to export NFS: %w", err)
+	}
+	return nil
+}
+
+func (n *SimpleAuth) RevokeAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
+	// TODO: Add reference counting for same peer IP.
+	instanceID := session.Request.InstanceId
+	exportPath := fmt.Sprintf("%s/%d", n.diskRoot, instanceID)
+	agentHost := agent.Host
+
+	// Use exportfs command to unexport NFS
+	err := unexportNFS(exportPath, agentHost.String())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// unexportNFS is a helper function to handle NFS unexport logic using exportfs command
+func unexportNFS(path, host string) error {
+	cmd := exec.Command("sudo", "exportfs", "-u", host+":"+path)
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to unexport NFS: %w", err)
+	}
 	return nil
 }
 

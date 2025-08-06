@@ -31,6 +31,10 @@ func NewZfs(pool string) *Zfs {
 	}
 }
 
+func (z *Zfs) Pool() string {
+	return z.pool
+}
+
 func (z *Zfs) CreateInstance(ctx context.Context, instanceId int64) error {
 	err := z.runCommand(
 		ctx,

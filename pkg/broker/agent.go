@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,6 +29,7 @@ import (
 
 type agentDelegate interface {
 	GrantAccessToAgent(context.Context, *Agent, *Session) error
+	RevokeAccessToAgent(context.Context, *Agent, *Session) error
 	UpdateTaskResult(context.Context, *Session, *proto.BatchTaskResult) error
 }
 
@@ -60,6 +61,7 @@ type Agent struct {
 	id         string
 	Pool       string
 	Host       net.IP
+	PeerInfo   *peer.Peer
 	delegate   agentDelegate
 	scheduler  *Scheduler
 	slots      int
@@ -88,6 +90,7 @@ func newAgent(initialReq *proto.AgentUpdateRequest, peerInfo *peer.Peer, schedul
 		id:            identity.AgentId,
 		Pool:          identity.Pool,
 		Host:          addr.IP,
+		PeerInfo:      peerInfo,
 		sessionReq:    make(chan SessionRequest, concurrency),
 		slots:         int(concurrency),
 		scheduler:     scheduler,
@@ -350,6 +353,10 @@ func (a *Agent) handleSessionCompletion(ctx context.Context, resp *proto.Session
 		a.scheduler.AddAgent(a)
 		a.scheduler.PoolManager.MarkIdle(a.id, a.slots-len(a.mySessions))
 		a.receiving = true
+	}
+	err := a.delegate.RevokeAccessToAgent(ctx, a, session)
+	if err != nil {
+		return fmt.Errorf("failed to revoke access to agent %s for session %s: %w", a.id, sessionKey, err)
 	}
 	return nil
 }

@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc/peer"
 
 	"velda.io/velda/pkg/db"
-	"velda.io/velda/pkg/rbac"
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/rbac"
 )
 
 const (
@@ -39,6 +39,7 @@ type TaskDb interface {
 
 type AuthHelper interface {
 	GrantAccessToAgent(context.Context, *Agent, *Session) error
+	RevokeAccessToAgent(context.Context, *Agent, *Session) error
 	GrantAccessToClient(context.Context, *Session, *proto.ExecutionStatus) error
 }
 

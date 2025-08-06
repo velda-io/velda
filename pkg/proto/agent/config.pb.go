@@ -149,6 +149,7 @@ type AgentDiskSource struct {
 	// Types that are valid to be assigned to Source:
 	//
 	//	*AgentDiskSource_MountedDiskSource_
+	//	*AgentDiskSource_NfsMountSource_
 	Source        isAgentDiskSource_Source `protobuf_oneof:"source"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -200,6 +201,15 @@ func (x *AgentDiskSource) GetMountedDiskSource() *AgentDiskSource_MountedDiskSou
 	return nil
 }
 
+func (x *AgentDiskSource) GetNfsMountSource() *AgentDiskSource_NfsMountSource {
+	if x != nil {
+		if x, ok := x.Source.(*AgentDiskSource_NfsMountSource_); ok {
+			return x.NfsMountSource
+		}
+	}
+	return nil
+}
+
 type isAgentDiskSource_Source interface {
 	isAgentDiskSource_Source()
 }
@@ -208,7 +218,13 @@ type AgentDiskSource_MountedDiskSource_ struct {
 	MountedDiskSource *AgentDiskSource_MountedDiskSource `protobuf:"bytes,1,opt,name=mounted_disk_source,json=mountedDiskSource,proto3,oneof"` // The disk source is pre-mounted on the host.
 }
 
+type AgentDiskSource_NfsMountSource_ struct {
+	NfsMountSource *AgentDiskSource_NfsMountSource `protobuf:"bytes,2,opt,name=nfs_mount_source,json=nfsMountSource,proto3,oneof"` // The disk source is an NFS mount.
+}
+
 func (*AgentDiskSource_MountedDiskSource_) isAgentDiskSource_Source() {}
+
+func (*AgentDiskSource_NfsMountSource_) isAgentDiskSource_Source() {}
 
 type SandboxConfig struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
@@ -502,6 +518,51 @@ func (x *AgentDiskSource_MountedDiskSource) GetLocalPath() string {
 	return ""
 }
 
+type AgentDiskSource_NfsMountSource struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Server & location will be provided by the broker.
+	MountOptions  string `protobuf:"bytes,1,opt,name=mount_options,json=mountOptions,proto3" json:"mount_options,omitempty"` // Additional mount options.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentDiskSource_NfsMountSource) Reset() {
+	*x = AgentDiskSource_NfsMountSource{}
+	mi := &file_agent_config_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentDiskSource_NfsMountSource) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentDiskSource_NfsMountSource) ProtoMessage() {}
+
+func (x *AgentDiskSource_NfsMountSource) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_config_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentDiskSource_NfsMountSource.ProtoReflect.Descriptor instead.
+func (*AgentDiskSource_NfsMountSource) Descriptor() ([]byte, []int) {
+	return file_agent_config_proto_rawDescGZIP(), []int{1, 1}
+}
+
+func (x *AgentDiskSource_NfsMountSource) GetMountOptions() string {
+	if x != nil {
+		return x.MountOptions
+	}
+	return ""
+}
+
 type DaemonConfig_Network struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Default is private_cidr_range at 172.80.0.0/24
@@ -521,7 +582,7 @@ type DaemonConfig_Network struct {
 
 func (x *DaemonConfig_Network) Reset() {
 	*x = DaemonConfig_Network{}
-	mi := &file_agent_config_proto_msgTypes[6]
+	mi := &file_agent_config_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -533,7 +594,7 @@ func (x *DaemonConfig_Network) String() string {
 func (*DaemonConfig_Network) ProtoMessage() {}
 
 func (x *DaemonConfig_Network) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_config_proto_msgTypes[6]
+	mi := &file_agent_config_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -614,7 +675,7 @@ type AgentConfig_Broker struct {
 
 func (x *AgentConfig_Broker) Reset() {
 	*x = AgentConfig_Broker{}
-	mi := &file_agent_config_proto_msgTypes[7]
+	mi := &file_agent_config_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -626,7 +687,7 @@ func (x *AgentConfig_Broker) String() string {
 func (*AgentConfig_Broker) ProtoMessage() {}
 
 func (x *AgentConfig_Broker) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_config_proto_msgTypes[7]
+	mi := &file_agent_config_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -661,7 +722,7 @@ var file_agent_config_proto_rawDesc = []byte{
 	0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x12, 0x16, 0x0a, 0x06, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74,
 	0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74, 0x12, 0x1d,
 	0x0a, 0x0a, 0x72, 0x65, 0x61, 0x64, 0x5f, 0x77, 0x72, 0x69, 0x74, 0x65, 0x18, 0x03, 0x20, 0x01,
-	0x28, 0x08, 0x52, 0x09, 0x72, 0x65, 0x61, 0x64, 0x57, 0x72, 0x69, 0x74, 0x65, 0x22, 0xb7, 0x01,
+	0x28, 0x08, 0x52, 0x09, 0x72, 0x65, 0x61, 0x64, 0x57, 0x72, 0x69, 0x74, 0x65, 0x22, 0xc7, 0x02,
 	0x0a, 0x0f, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x44, 0x69, 0x73, 0x6b, 0x53, 0x6f, 0x75, 0x72, 0x63,
 	0x65, 0x12, 0x60, 0x0a, 0x13, 0x6d, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x64, 0x5f, 0x64, 0x69, 0x73,
 	0x6b, 0x5f, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x2e,
@@ -669,10 +730,19 @@ var file_agent_config_proto_rawDesc = []byte{
 	0x6e, 0x74, 0x44, 0x69, 0x73, 0x6b, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x2e, 0x4d, 0x6f, 0x75,
 	0x6e, 0x74, 0x65, 0x64, 0x44, 0x69, 0x73, 0x6b, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x48, 0x00,
 	0x52, 0x11, 0x6d, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x64, 0x44, 0x69, 0x73, 0x6b, 0x53, 0x6f, 0x75,
-	0x72, 0x63, 0x65, 0x1a, 0x38, 0x0a, 0x11, 0x4d, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x64, 0x44, 0x69,
-	0x73, 0x6b, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x12, 0x1d, 0x0a, 0x0a, 0x6c, 0x6f, 0x63, 0x61,
-	0x6c, 0x5f, 0x70, 0x61, 0x74, 0x68, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x6c, 0x6f,
-	0x63, 0x61, 0x6c, 0x50, 0x61, 0x74, 0x68, 0x4a, 0x04, 0x08, 0x02, 0x10, 0x03, 0x42, 0x08, 0x0a,
+	0x72, 0x63, 0x65, 0x12, 0x57, 0x0a, 0x10, 0x6e, 0x66, 0x73, 0x5f, 0x6d, 0x6f, 0x75, 0x6e, 0x74,
+	0x5f, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x2b, 0x2e,
+	0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e, 0x41, 0x67, 0x65, 0x6e,
+	0x74, 0x44, 0x69, 0x73, 0x6b, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x2e, 0x4e, 0x66, 0x73, 0x4d,
+	0x6f, 0x75, 0x6e, 0x74, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x48, 0x00, 0x52, 0x0e, 0x6e, 0x66,
+	0x73, 0x4d, 0x6f, 0x75, 0x6e, 0x74, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x1a, 0x38, 0x0a, 0x11,
+	0x4d, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x64, 0x44, 0x69, 0x73, 0x6b, 0x53, 0x6f, 0x75, 0x72, 0x63,
+	0x65, 0x12, 0x1d, 0x0a, 0x0a, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x5f, 0x70, 0x61, 0x74, 0x68, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x50, 0x61, 0x74, 0x68,
+	0x4a, 0x04, 0x08, 0x02, 0x10, 0x03, 0x1a, 0x35, 0x0a, 0x0e, 0x4e, 0x66, 0x73, 0x4d, 0x6f, 0x75,
+	0x6e, 0x74, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x12, 0x23, 0x0a, 0x0d, 0x6d, 0x6f, 0x75, 0x6e,
+	0x74, 0x5f, 0x6f, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x0c, 0x6d, 0x6f, 0x75, 0x6e, 0x74, 0x4f, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x42, 0x08, 0x0a,
 	0x06, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x22, 0x82, 0x03, 0x0a, 0x0d, 0x53, 0x61, 0x6e, 0x64,
 	0x62, 0x6f, 0x78, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12, 0x3d, 0x0a, 0x0b, 0x64, 0x69, 0x73,
 	0x6b, 0x5f, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c,
@@ -767,7 +837,7 @@ func file_agent_config_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_config_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agent_config_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_agent_config_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agent_config_proto_goTypes = []any{
 	(DaemonConfig_Network_NetworkMode)(0),     // 0: velda.agent.DaemonConfig.Network.NetworkMode
 	(*HostMount)(nil),                         // 1: velda.agent.HostMount
@@ -776,25 +846,27 @@ var file_agent_config_proto_goTypes = []any{
 	(*DaemonConfig)(nil),                      // 4: velda.agent.DaemonConfig
 	(*AgentConfig)(nil),                       // 5: velda.agent.AgentConfig
 	(*AgentDiskSource_MountedDiskSource)(nil), // 6: velda.agent.AgentDiskSource.MountedDiskSource
-	(*DaemonConfig_Network)(nil),              // 7: velda.agent.DaemonConfig.Network
-	(*AgentConfig_Broker)(nil),                // 8: velda.agent.AgentConfig.Broker
-	(*durationpb.Duration)(nil),               // 9: google.protobuf.Duration
+	(*AgentDiskSource_NfsMountSource)(nil),    // 7: velda.agent.AgentDiskSource.NfsMountSource
+	(*DaemonConfig_Network)(nil),              // 8: velda.agent.DaemonConfig.Network
+	(*AgentConfig_Broker)(nil),                // 9: velda.agent.AgentConfig.Broker
+	(*durationpb.Duration)(nil),               // 10: google.protobuf.Duration
 }
 var file_agent_config_proto_depIdxs = []int32{
-	6, // 0: velda.agent.AgentDiskSource.mounted_disk_source:type_name -> velda.agent.AgentDiskSource.MountedDiskSource
-	2, // 1: velda.agent.SandboxConfig.disk_source:type_name -> velda.agent.AgentDiskSource
-	1, // 2: velda.agent.SandboxConfig.host_mounts:type_name -> velda.agent.HostMount
-	9, // 3: velda.agent.SandboxConfig.max_time:type_name -> google.protobuf.Duration
-	7, // 4: velda.agent.DaemonConfig.network:type_name -> velda.agent.DaemonConfig.Network
-	8, // 5: velda.agent.AgentConfig.broker:type_name -> velda.agent.AgentConfig.Broker
-	3, // 6: velda.agent.AgentConfig.sandbox_config:type_name -> velda.agent.SandboxConfig
-	4, // 7: velda.agent.AgentConfig.daemon_config:type_name -> velda.agent.DaemonConfig
-	0, // 8: velda.agent.DaemonConfig.Network.network_mode:type_name -> velda.agent.DaemonConfig.Network.NetworkMode
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	6,  // 0: velda.agent.AgentDiskSource.mounted_disk_source:type_name -> velda.agent.AgentDiskSource.MountedDiskSource
+	7,  // 1: velda.agent.AgentDiskSource.nfs_mount_source:type_name -> velda.agent.AgentDiskSource.NfsMountSource
+	2,  // 2: velda.agent.SandboxConfig.disk_source:type_name -> velda.agent.AgentDiskSource
+	1,  // 3: velda.agent.SandboxConfig.host_mounts:type_name -> velda.agent.HostMount
+	10, // 4: velda.agent.SandboxConfig.max_time:type_name -> google.protobuf.Duration
+	8,  // 5: velda.agent.DaemonConfig.network:type_name -> velda.agent.DaemonConfig.Network
+	9,  // 6: velda.agent.AgentConfig.broker:type_name -> velda.agent.AgentConfig.Broker
+	3,  // 7: velda.agent.AgentConfig.sandbox_config:type_name -> velda.agent.SandboxConfig
+	4,  // 8: velda.agent.AgentConfig.daemon_config:type_name -> velda.agent.DaemonConfig
+	0,  // 9: velda.agent.DaemonConfig.Network.network_mode:type_name -> velda.agent.DaemonConfig.Network.NetworkMode
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agent_config_proto_init() }
@@ -804,8 +876,9 @@ func file_agent_config_proto_init() {
 	}
 	file_agent_config_proto_msgTypes[1].OneofWrappers = []any{
 		(*AgentDiskSource_MountedDiskSource_)(nil),
+		(*AgentDiskSource_NfsMountSource_)(nil),
 	}
-	file_agent_config_proto_msgTypes[6].OneofWrappers = []any{
+	file_agent_config_proto_msgTypes[7].OneofWrappers = []any{
 		(*DaemonConfig_Network_PrivateCidrRange)(nil),
 		(*DaemonConfig_Network_DetectGcpAliasIpRanges)(nil),
 	}
@@ -815,7 +888,7 @@ func file_agent_config_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_agent_config_proto_rawDesc,
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
