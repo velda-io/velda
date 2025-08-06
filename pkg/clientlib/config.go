@@ -35,6 +35,7 @@ var (
 	systemConfigPath string
 	// Only generated if the agent is running in a sandbox context.
 	agentConfig *agentpb.AgentConfig
+	Debug       bool
 
 	profileNotFoundError = errors.New("Profile not found")
 )
@@ -42,10 +43,18 @@ var (
 func InitConfigFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&configDir, "config_dir", "", "config directory. Defaults to env VELDA_CONFIG_DIR or ~/.config/velda")
 	cmd.PersistentFlags().StringVar(&profileInput, "profile", "", "The user profile to use.")
+	cmd.PersistentFlags().BoolVar(&Debug, "debug", false, "Enable debug mode")
+	cmd.PersistentFlags().String("identity-file", "", "Path to the private key for SSH authentication")
 
 	// Legacy flags.
 	cmd.PersistentFlags().StringVar(&brokerAddrFlag, "broker", "novahub.dev:50051", "broker address")
 	cmd.PersistentFlags().MarkHidden("broker")
+}
+
+func DebugLog(format string, args ...interface{}) {
+	if Debug {
+		log.Printf(format, args...)
+	}
 }
 
 func InitConfig() {
@@ -332,4 +341,16 @@ func GetAgentSandboxConfig() *agentpb.SandboxConfig {
 
 func GetAgentDaemonConfig() *agentpb.DaemonConfig {
 	return agentConfig.DaemonConfig
+}
+
+func GetFlagValue(cmd *cobra.Command, flagName string) (string, error) {
+	if cmd.Flags().Changed(flagName) {
+		value, _ := cmd.Flags().GetString(flagName)
+		return value, nil
+	}
+	cfg, err := CurrentConfig()
+	if err != nil {
+		return "", err
+	}
+	return cfg.GetConfig(flagName)
 }

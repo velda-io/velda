@@ -18,9 +18,10 @@ package main
 
 import (
 	"velda.io/velda/client/cmd"
+	"velda.io/velda/pkg/clientlib"
 )
 
 func main() {
-	cmd.RootCmd.PersistentFlags().String("identity-file", "", "Path to the private key for SSH authentication")
+	clientlib.SetAuthProvider(clientlib.OssAuthProvider{})
 	cmd.Execute()
 }
