@@ -21,5 +21,6 @@ import (
 )
 
 func main() {
+	cmd.RootCmd.PersistentFlags().String("identity-file", "", "Path to the private key for SSH authentication")
 	cmd.Execute()
 }
