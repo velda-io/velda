@@ -46,6 +46,8 @@ New images can be created from any existing instance.
 ./apiserver --config config.yaml
 ```
 
+The control plane is now ready. It's strongly recommended to ensure only authorized people(e.g. admin) have access to the control plane. Granting the access could grant all file access.
+
 ### Start a runner
 Runner is the node that runs the workload.
 System requirements:
@@ -113,3 +115,39 @@ velda run --instance first-instance
 velda config set --instance first-instance # This is only needed one time.
 velda run
 ```
+
+# What's next
+
+### Control the access to an instance
+<details>
+For the Open-source edition, access control is implemented through SSH keys.
+
+By default, every instance is accessible to everyone in the same network.
+
+Access control will be enforced if any authorized key is added.
+
+Authorized keys are stored at `/.velda/authorized_keys`.
+
+```bash
+# Generate an SSH key
+ssh-keygen -f ~/.ssh/velda -t ed25519
+# Add the key to authorized_keys
+cat ~/.ssh/velda.pub | velda run -u root bash -c 'cat >> /.velda/authorized_keys'
+velda config set --identity-file ~/.ssh/velda
+```
+
+To access the instance after setting up the identity file:
+```bash
+velda run
+```
+Alternatively, use the full command:
+```bash
+velda run --instance [instance-name] --identity-file [path-to-private-key]
+```
+
+#### Reset access
+If you lose access, a cluster admin may recover access by removing the `authorized_keys` file:
+
+1. Identify your numeric instance ID by running `velda instance list`
+2. From the control plane, remove `/zpool/[instance-id]/.velda/authorized_keys`
+</details>
