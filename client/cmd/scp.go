@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -60,12 +60,12 @@ var scpCmd = &cobra.Command{
 					return fmt.Errorf("Multiple instances specified: %s and %s", instance, instanceCur)
 				}
 				instance = instanceCur
-				break
 			}
 		}
 
+		DebugLog("Using instance %s", instance)
 		instanceId, err := clientlib.ParseInstanceId(
-			cmd.Context(), instance, clientlib.FallbackToSession)
+			cmd.Context(), instance, !clientlib.FallbackToSession)
 
 		if err != nil {
 			return err
@@ -445,7 +445,7 @@ func init() {
 	scpCmd.Flags().Bool("preserve-times", false, "Preserve file modification and access times")
 
 	// Add a short alias for the preserve flag
-	scpCmd.Flags().Bool("preserve", false, "Preserve file mode, owner, and times")
+	scpCmd.Flags().BoolP("preserve", "p", false, "Preserve file mode, owner, and times")
 
 	// Bind the preserve flag to enable all sub-flags
 	scpCmd.PreRunE = func(cmd *cobra.Command, args []string) error {

@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,8 +34,9 @@ type ZfsInstanceDb struct {
 
 func NewZfsInstanceDb(fs *Zfs) *ZfsInstanceDb {
 	return &ZfsInstanceDb{
-		fs:        fs,
-		instances: make(map[string]int64),
+		fs:             fs,
+		instances:      make(map[string]int64),
+		nextInstanceId: 1,
 	}
 }
 
@@ -56,6 +57,16 @@ func (d *ZfsInstanceDb) getName(ctx context.Context, instanceId int64) (string, 
 		return "", fmt.Errorf("failed to get name for instance %d: %w", instanceId, err)
 	}
 	return name, nil
+}
+
+func (d *ZfsInstanceDb) setName(ctx context.Context, name string, instanceId int64) error {
+	return d.fs.runCommand(
+		ctx,
+		"zfs",
+		"set",
+		":name="+name,
+		fmt.Sprintf("%s/%d", d.fs.pool, instanceId),
+	)
 }
 
 func (d *ZfsInstanceDb) Init() error {
@@ -84,34 +95,44 @@ func (d *ZfsInstanceDb) Init() error {
 		if !strings.HasPrefix(parts[0], d.fs.pool+"/") {
 			continue
 		}
-		name := parts[1]
-		if name == "-" {
-			continue
-		}
 		idString := strings.TrimPrefix(parts[0], d.fs.pool+"/")
 		id, err := strconv.ParseInt(idString, 10, 64)
 		if err != nil {
 			continue
 		}
-		d.instances[name] = id
 		if id >= d.nextInstanceId {
 			d.nextInstanceId = id + 1
 		}
+		name := parts[1]
+		if name == "-" {
+			continue
+		}
+		d.instances[name] = id
 	}
 	return nil
 }
 
 type createCommitter struct {
-	db   *ZfsInstanceDb
-	name string
+	ctx       context.Context
+	db        *ZfsInstanceDb
+	name      string
+	id        int64
+	committed bool
 }
 
 func (c *createCommitter) Commit() error {
-	// Do nothing.
+	err := c.db.setName(c.ctx, c.name, c.id)
+	if err != nil {
+		return err
+	}
+	c.committed = true
 	return nil
 }
 
 func (c *createCommitter) Rollback() error {
+	if c.committed {
+		return nil
+	}
 	c.db.mu.Lock()
 	defer c.db.mu.Unlock()
 
@@ -133,7 +154,7 @@ func (d *ZfsInstanceDb) CreateInstance(ctx context.Context, in *proto.Instance) 
 	}
 	d.instances[in.InstanceName] = out.Id
 	d.nextInstanceId++
-	return out, &createCommitter{db: d, name: in.InstanceName}, nil
+	return out, &createCommitter{ctx: ctx, db: d, name: in.InstanceName, id: out.Id}, nil
 }
 
 func (d *ZfsInstanceDb) GetInstance(ctx context.Context, in *proto.GetInstanceRequest) (*proto.Instance, error) {

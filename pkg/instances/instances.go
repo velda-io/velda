@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -76,7 +76,6 @@ func (s *service) CreateInstance(ctx context.Context, in *proto.CreateInstanceRe
 	if err := checkInstanceName(in.Instance.InstanceName); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid instance name: %v", err)
 	}
-	user := rbac.UserFromContext(ctx)
 	shardId := 0
 	if in.GetSnapshot() != nil {
 		// Must follow source's shard.
@@ -94,8 +93,8 @@ func (s *service) CreateInstance(ctx context.Context, in *proto.CreateInstanceRe
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("User %d: Creating instance %s on shard %d, instance Id: %x",
-		user, in.Instance.InstanceName, shardId, instance.Id)
+	log.Printf("Creating instance %s on shard %d, instance Id: %x",
+		in.Instance.InstanceName, shardId, instance.Id)
 	defer committer.Rollback()
 	// TODO: DB should track status of snapshot creation.
 	switch in.Source.(type) {

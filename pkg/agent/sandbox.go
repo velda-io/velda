@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -186,19 +186,22 @@ func (p *PivotRootPlugin) Run(ctx context.Context) error {
 	if err := syscall.Mount("proc", "/proc", "proc", 0, ""); err != nil {
 		die("Mount proc", err)
 	}
-	// Set up mounts from /etc/fstab by invoking "mount -a -O nolazy"
-	cmd := exec.Command("mount", "-a", "-O", "nox-lazy")
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		exitError, ok := err.(*exec.ExitError)
-		if !ok {
-			die("Failed start mount -a -O nolazy", err)
+	if _, err := os.Stat("/etc/fstab"); err == nil {
+		// Set up mounts from /etc/fstab by invoking "mount -a -O nolazy"
+		cmd := exec.Command("mount", "-a", "-O", "nox-lazy")
+		cmd.Stderr = os.Stderr
+		// Failures are non-fatal.
+		if err := cmd.Run(); err != nil {
+			exitError, ok := err.(*exec.ExitError)
+			if !ok {
+				log.Printf("Failed start mount -a -O nolazy", err)
+			}
+			waitStatus, ok := exitError.Sys().(syscall.WaitStatus)
+			if !ok {
+				log.Printf("Failed to wait mount -a -O nolazy", err)
+			}
+			log.Printf("Failed to mount -a -O nolazy: Return code %d", waitStatus.ExitStatus())
 		}
-		waitStatus, ok := exitError.Sys().(syscall.WaitStatus)
-		if !ok {
-			die("Failed to wait mount -a -O nolazy", err)
-		}
-		log.Printf("Failed to mount -a -O nolazy: Return code %d", waitStatus.ExitStatus())
 	}
 	return p.RunNext(ctx)
 }
