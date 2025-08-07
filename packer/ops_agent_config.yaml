@@ -1,0 +1,18 @@
+logging:
+  receivers:
+    journald:
+      type: systemd_journald
+  processors:
+    add-labels:
+      type: modify_fields
+      fields:
+        labels.journald-unit:
+          copy_from: jsonPayload._SYSTEMD_UNIT
+
+  service:
+    pipelines:
+      journald:
+        receivers:
+        - journald
+        processors:
+        - add-labels
