@@ -1,0 +1,21 @@
+[Unit]
+Description=Velda API server
+After=network-online.target
+Wants=network-online.target
+
+# EC2 Cloud-Init
+After=cloud-final.service
+
+# GCE Guest Agent
+After=google-startup-scripts.service
+
+[Service]
+ExecStart=/bin/velda-apiserver --config /etc/velda.yaml
+Restart=always
+RestartSec=5
+Environment="PATH=/usr/bin:/bin:/snap/bin"
+Environment="HOME=/root"
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
