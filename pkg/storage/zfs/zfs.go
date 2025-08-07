@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,11 +32,25 @@ func NewZfs(pool string) *Zfs {
 }
 
 func (z *Zfs) CreateInstance(ctx context.Context, instanceId int64) error {
-	return z.runCommand(
+	err := z.runCommand(
 		ctx,
 		"zfs",
 		"create",
 		fmt.Sprintf("%s/%d", z.pool, instanceId))
+	if err != nil {
+		return fmt.Errorf("failed to create ZFS instance %d: %w", instanceId, err)
+	}
+	// Make a minimal filesystem structure
+	for _, dir := range []string{"proc", "sys", "dev", "run", "etc"} {
+		err = z.runCommand(
+			ctx,
+			"mkdir",
+			fmt.Sprintf("/%s/%d/%s", z.pool, instanceId, dir))
+		if err != nil {
+			return fmt.Errorf("failed to create directory %s in instance %d: %w", dir, instanceId, err)
+		}
+	}
+	return nil
 }
 
 func (z *Zfs) CreateInstanceFromSnapshot(ctx context.Context, instanceId int64, snapshotInstanceId int64, snapshotName string) error {

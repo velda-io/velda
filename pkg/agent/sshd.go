@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -238,6 +238,25 @@ func (s *SSHD) Shutdown(message string) {
 }
 
 func (s *SSHD) lookupUser(username string) (*User, error) {
+	// Provide fallback for root user, e.g. unsupported or uninitialized OS.
+	user, err := s.lookupUserPosix(username)
+	if err != nil && username == "root" {
+		return &User{
+			UserName: "root",
+			Name:     "root",
+			HomeDir:  "/",
+			Shell:    "/bin/bash",
+			Credential: &syscall.Credential{
+				Uid:    0,
+				Gid:    0,
+				Groups: []uint32{0},
+			},
+		}, nil
+	}
+	return user, err
+}
+
+func (s *SSHD) lookupUserPosix(username string) (*User, error) {
 	user, err := s.lookupUserInfo(username)
 	if err != nil {
 		return nil, err
