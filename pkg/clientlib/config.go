@@ -332,6 +332,10 @@ func DeleteCurrentProfile() error {
 	return nil
 }
 
+func GetAgentConfig() *agentpb.AgentConfig {
+	return agentConfig
+}
+
 func GetAgentSandboxConfig() *agentpb.SandboxConfig {
 	if agentConfig.GetSandboxConfig() == nil {
 		return &agentpb.SandboxConfig{}

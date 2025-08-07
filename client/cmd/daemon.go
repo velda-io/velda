@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -62,6 +63,12 @@ var daemonCmd = &cobra.Command{
 			return err
 		}
 		runner := agentd.NewRunner(workDir, networkDaemon)
+		if agentPool == "" {
+			agentPool = clientlib.GetAgentConfig().GetPool()
+		}
+		if agentPool == "" {
+			return errors.New("agent pool is not specified")
+		}
 		ag := agentd.NewAgent(brokerClient, runner, agentPool, daemonConfig)
 
 		// Wait until SIGTERM
@@ -86,7 +93,7 @@ var daemonCmd = &cobra.Command{
 
 func init() {
 	AgentCmd.AddCommand(daemonCmd)
-	daemonCmd.Flags().StringVarP(&agentPool, "pool", "p", "cpu", "Agent pool")
+	daemonCmd.Flags().StringVarP(&agentPool, "pool", "p", "", "Agent pool")
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {
