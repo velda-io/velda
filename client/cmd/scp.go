@@ -32,11 +32,12 @@ import (
 
 // Define a struct to encapsulate boolean options
 type CopyOptions struct {
-	Recursive     bool
-	Verbose       bool
-	PreserveMode  bool
-	PreserveOwner bool
-	PreserveTimes bool
+	Recursive      bool
+	Verbose        bool
+	PreserveMode   bool
+	PreserveOwner  bool
+	PreserveTimes  bool
+	FollowSymlinks bool
 }
 
 // scpCmd represents the scp command
@@ -105,11 +106,12 @@ var scpCmd = &cobra.Command{
 		sources := args[:len(args)-1]
 
 		options := CopyOptions{
-			Recursive:     cmd.Flags().Lookup("recursive").Value.String() == "true",
-			Verbose:       cmd.Flags().Lookup("verbose").Value.String() == "true",
-			PreserveMode:  cmd.Flags().Lookup("preserve-mode").Value.String() == "true",
-			PreserveOwner: cmd.Flags().Lookup("preserve-owner").Value.String() == "true",
-			PreserveTimes: cmd.Flags().Lookup("preserve-times").Value.String() == "true",
+			Recursive:      cmd.Flags().Lookup("recursive").Value.String() == "true",
+			Verbose:        cmd.Flags().Lookup("verbose").Value.String() == "true",
+			PreserveMode:   cmd.Flags().Lookup("preserve-mode").Value.String() == "true",
+			PreserveOwner:  cmd.Flags().Lookup("preserve-owner").Value.String() == "true",
+			PreserveTimes:  cmd.Flags().Lookup("preserve-times").Value.String() == "true",
+			FollowSymlinks: cmd.Flags().Lookup("follow-symlinks").Value.String() == "true",
 		}
 
 		// Check if destination is remote (contains ":")
@@ -135,9 +137,35 @@ func copyLocalToRemote(ctx context.Context, sftpClient *sftp.Client, sources []s
 			return fmt.Errorf("cannot copy from remote to remote")
 		}
 
-		info, err := os.Stat(source)
+		var info os.FileInfo
+		var err error
+		if options.FollowSymlinks {
+			info, err = os.Stat(source)
+		} else {
+			info, err = os.Lstat(source)
+		}
 		if err != nil {
 			return fmt.Errorf("Error stat'ing source %s: %v", source, err)
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 && !options.FollowSymlinks {
+			// Copy symlink as symlink
+			linkTarget, err := os.Readlink(source)
+			if err != nil {
+				return fmt.Errorf("Error reading symlink %s: %v", source, err)
+			}
+			// Determine remote symlink path
+			remoteFilePath := remoteDest
+			if stat, err := sftpClient.Stat(remoteDest); err == nil && stat.IsDir() {
+				remoteFilePath = filepath.Join(remoteDest, filepath.Base(source))
+			}
+			if err := sftpClient.Symlink(linkTarget, remoteFilePath); err != nil {
+				return fmt.Errorf("Error creating remote symlink %s -> %s: %v", remoteFilePath, linkTarget, err)
+			}
+			if options.Verbose {
+				fmt.Printf("symlink '%s' -> '%s'\n", source, remoteFilePath)
+			}
+			continue
 		}
 
 		if info.IsDir() {
@@ -243,24 +271,36 @@ func copyDirToRemote(ctx context.Context, sftpClient *sftp.Client, localDir stri
 	}
 
 	// Walk through local directory and copy files
-	return filepath.Walk(localDir, func(path string, info os.FileInfo, err error) error {
+	walkFn := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-
 		// Skip the root directory itself
 		if path == localDir {
 			return nil
 		}
-
 		// Get the relative path from the source directory
 		relPath, err := filepath.Rel(localDir, path)
 		if err != nil {
 			return fmt.Errorf("Error getting relative path: %v", err)
 		}
-
 		// Construct the destination path on the remote
 		remoteDestPath := filepath.Join(remoteDest, relPath)
+
+		if info.Mode()&os.ModeSymlink != 0 && !options.FollowSymlinks {
+			// Copy symlink as symlink
+			linkTarget, err := os.Readlink(path)
+			if err != nil {
+				return fmt.Errorf("Error reading symlink %s: %v", path, err)
+			}
+			if err := sftpClient.Symlink(linkTarget, remoteDestPath); err != nil {
+				return fmt.Errorf("Error creating remote symlink %s -> %s: %v", remoteDestPath, linkTarget, err)
+			}
+			if options.Verbose {
+				fmt.Printf("symlink '%s' -> '%s'\n", path, remoteDestPath)
+			}
+			return nil
+		}
 
 		if info.IsDir() {
 			// Create directory on the remote
@@ -281,9 +321,23 @@ func copyDirToRemote(ctx context.Context, sftpClient *sftp.Client, localDir stri
 			// Copy file to remote
 			return copyFileToRemote(ctx, sftpClient, path, remoteDestPath, options)
 		}
-
 		return nil
-	})
+	}
+	if options.FollowSymlinks {
+		return filepath.Walk(localDir, walkFn)
+	} else {
+		return filepath.WalkDir(localDir, func(path string, d os.DirEntry, err error) error {
+			var info os.FileInfo
+			if err != nil {
+				return err
+			}
+			info, err = os.Lstat(path)
+			if err != nil {
+				return err
+			}
+			return walkFn(path, info, nil)
+		})
+	}
 }
 
 func copyRemoteToLocal(ctx context.Context, sftpClient *sftp.Client, sources []string, localDest string, options CopyOptions) error {
@@ -293,9 +347,35 @@ func copyRemoteToLocal(ctx context.Context, sftpClient *sftp.Client, sources []s
 		}
 
 		remotePath := strings.Split(source, ":")[1]
-		remoteInfo, err := sftpClient.Stat(remotePath)
+		var remoteInfo os.FileInfo
+		var err error
+		if options.FollowSymlinks {
+			remoteInfo, err = sftpClient.Stat(remotePath)
+		} else {
+			remoteInfo, err = sftpClient.Lstat(remotePath)
+		}
 		if err != nil {
 			return fmt.Errorf("Error stat'ing remote path %s: %v", remotePath, err)
+		}
+
+		if remoteInfo.Mode()&os.ModeSymlink != 0 && !options.FollowSymlinks {
+			// Copy symlink as symlink
+			linkTarget, err := sftpClient.ReadLink(remotePath)
+			if err != nil {
+				return fmt.Errorf("Error reading remote symlink %s: %v", remotePath, err)
+			}
+			// Determine local symlink path
+			localFilePath := localDest
+			if info, err := os.Stat(localDest); err == nil && info.IsDir() {
+				localFilePath = filepath.Join(localDest, filepath.Base(remotePath))
+			}
+			if err := os.Symlink(linkTarget, localFilePath); err != nil {
+				return fmt.Errorf("Error creating local symlink %s -> %s: %v", localFilePath, linkTarget, err)
+			}
+			if options.Verbose {
+				fmt.Printf("symlink '%s' -> '%s'\n", remotePath, localFilePath)
+			}
+			continue
 		}
 
 		if remoteInfo.IsDir() {
@@ -402,7 +482,6 @@ func copyDirToLocal(ctx context.Context, sftpClient *sftp.Client, remoteDir stri
 		return fmt.Errorf("local destination %s is not a directory", localDest)
 	}
 
-	// List all files in the remote directory
 	files, err := sftpClient.ReadDir(remoteDir)
 	if err != nil {
 		return fmt.Errorf("Error reading remote directory %s: %v", remoteDir, err)
@@ -412,10 +491,24 @@ func copyDirToLocal(ctx context.Context, sftpClient *sftp.Client, remoteDir stri
 		fmt.Printf("'%s' -> '%s'\n", remoteDir, localDest)
 	}
 
-	// Copy each file and directory
 	for _, file := range files {
 		remotePath := filepath.Join(remoteDir, file.Name())
 		localPath := filepath.Join(localDest, file.Name())
+
+		if file.Mode()&os.ModeSymlink != 0 && !options.FollowSymlinks {
+			// Copy symlink as symlink
+			linkTarget, err := sftpClient.ReadLink(remotePath)
+			if err != nil {
+				return fmt.Errorf("Error reading remote symlink %s: %v", remotePath, err)
+			}
+			if err := os.Symlink(linkTarget, localPath); err != nil {
+				return fmt.Errorf("Error creating local symlink %s -> %s: %v", localPath, linkTarget, err)
+			}
+			if options.Verbose {
+				fmt.Printf("symlink '%s' -> '%s'\n", remotePath, localPath)
+			}
+			continue
+		}
 
 		if file.IsDir() {
 			// Recursively copy directory
@@ -443,6 +536,7 @@ func init() {
 	scpCmd.Flags().Bool("preserve-mode", false, "Preserve file mode (permissions)")
 	scpCmd.Flags().Bool("preserve-owner", false, "Preserve file owner")
 	scpCmd.Flags().Bool("preserve-times", false, "Preserve file modification and access times")
+	scpCmd.Flags().Bool("follow-symlinks", false, "Follow symlinks and copy the target file/directory instead of the symlink itself")
 
 	// Add a short alias for the preserve flag
 	scpCmd.Flags().BoolP("preserve", "p", false, "Preserve file mode, owner, and times")
