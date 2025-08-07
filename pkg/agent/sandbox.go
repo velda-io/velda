@@ -192,15 +192,7 @@ func (p *PivotRootPlugin) Run(ctx context.Context) error {
 		cmd.Stderr = os.Stderr
 		// Failures are non-fatal.
 		if err := cmd.Run(); err != nil {
-			exitError, ok := err.(*exec.ExitError)
-			if !ok {
-				log.Printf("Failed start mount -a -O nolazy", err)
-			}
-			waitStatus, ok := exitError.Sys().(syscall.WaitStatus)
-			if !ok {
-				log.Printf("Failed to wait mount -a -O nolazy", err)
-			}
-			log.Printf("Failed to mount -a -O nolazy: Return code %d", waitStatus.ExitStatus())
+			log.Printf("Failed start mount -a -O nolazy: %v", err)
 		}
 	}
 	return p.RunNext(ctx)
