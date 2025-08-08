@@ -4,50 +4,47 @@
 
 # Velda
 
-Velda is a cloud-native development & HPC (High Performance Computing) environment.
+Velda is a cloud-native development, workload orchestration & HPC (High Performance Computing) platform. Directly scale your application from your development environment, no extra setup required.
 
-## Scale your workload in one second:
-Velda allows each developer to create their individualized development-sandbox, and run workloads with additional compute nodes in one command.
+## Code on Velda
 
-1. **Create your "Instance".**
-Instance is similar to a Virtual Machine, but the compute is dynamically allocated and runs like a container. Creating an instance will create the disk, but not immediately allocate any compute resource.
+Velda provides a seamless development experience.
+* Connect with your favorite IDE (e.g., SSH, VS Code, Cursor, Windsurf), or code and run notebooks directly in your browser (hosted or enterprise only).
+* Onboard new developers instantly by cloning from a pre-configured image, or customize your own.
+* Compatible with most libraries, tools, or package managers. All your environment modifications and customizations are persisted and isolated from other users.
 
-2. **Connect to the instance.**
-Use ssh or IDE to connect to your instance. During connection, your instance will be attached to a compute node, which is typically lightweight to run your IDE services.
+## Scale in seconds
+Velda provides the simplest way to scale or run workloads with different hardware requirements:
+* `vrun` is all you need. Prefix `vrun` to your command, and run your workload with the resource you requested.
+* Run any workload: machine learning training, batch processing, or host a microservice cluster.
+* Unbounded capacity: Access as many machines as you need from your cloud provider.
+* Your environment is always consistent. All your code, data, dependencies, and environment will be mounted on the new machine.
 
-3. **See the magic**
-Run any command with `vrun` prefix: It will allocate additional compute nodes per your request (can be GPU) and run the command, and shutdown automatically. All your code, data, dependencies will be synced, input/output streamed, same experience like running them locally. Example:
-```
-vrun -P gpu ./training_script.sh
-```
+## Save $$$
+Save instantly with Velda:
+* No more idle GPUs, sandboxes, or machines. Only allocate the resources you need. Stop paying for GPUs while coding or in meetings.
+* Save engineering time building, updating, and maintaining container images.
+* Optionally, skip Kubernetes cluster management and scale directly with VMs from your cloud provider.
 
-## Features
-* **Simplicity**: `vrun` prefix is all you need to scale. Similar experience like running it locally.
-* **Efficiency**: Skip the time-consuming steps of building container images, or push/pull image cycles. Your workload starts in less than a second.
-* **Customizable & consistent environment**: Every developer may customize their environment and will not affect others.
-Velda is compatible with most package managers and frameworks and does not require any restriction on your workload.
-On the other hand, all sessions created by `vrun` will share the exact same environment as your launching instance. This eliminates any discrepancy between your local run VS running in the cluster.
+# Getting started
+We support various deployment methods.
+* Set up a new cluster:
+  * [Directly on machines](docs/cluster_setup.md)
+  * [Google Cloud](docs/terraform_gcp.md)
+  * AWS & other cloud providers coming soon.
+* [Connect to a cluster](docs/connect.md)
 
-* **Scale ondemand**: All the compute nodes can be dynamically allocated based on requests. It can scale up to a few thousands nodes, and no waste or idle nodes when not in use.
-
-* **Run anywhere**: The compute nodes can be anywhere, including major cloud providers (e.g. AWS, Google Cloud), on-prem, or any Kubernetes cluster.
-* **Instant onboarding**: Onboard new developers instantly from a pre-built image.
-
-## Getting started
-* [Setup a new cluster](docs/cluster_setup.md)
-* [Connect to a cluster](docs/cluster_setup.md#connect)
-
-## 🤝 Contributing
+# 🤝 Contributing
 We love contributions from our community ❤️. Pull requests are welcome!
 
-## 👥 Community
-We are super excited for community contributions of all kinds - whether it's code improvements, documentation updates, issue reports, feature requests, and discussions in our Discord.
+# 👥 Community
+We are super excited for community contributions of all kinds - whether it's code improvements, documentation updates, issue reports, feature requests, or discussions in our Discord.
 
 Join our community here:
 
-- 🌟 [Star us on GitHub](https://github.com/velda-io/velda)
-- 👋 [Join our Discord community](https://discord.gg/MJQbeE33)
-- 📜 [Read our blog posts](https://blog.velda.io)
+* 🌟 [Star us on GitHub](https://github.com/velda-io/velda)
+* 👋 [Join our Discord community](https://discord.gg/MJQbeE33)
+* 📜 [Read our blog posts](https://blog.velda.io)
 
 # Learn more
-Checkout [velda.io](https://velda.io) to learn more about Velda and our hosted/enterprise offering.
+Check out [velda.io](https://velda.io) to learn more about Velda and our hosted/enterprise offerings.
