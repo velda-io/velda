@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/user"
+	"path/filepath"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -57,6 +59,23 @@ func DebugLog(format string, args ...interface{}) {
 	}
 }
 
+func getUserConfigDir() (string, error) {
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser != "" {
+		// If running under sudo, get the home directory of the original user.
+		u, err := user.Lookup(sudoUser)
+		if err != nil {
+			log.Fatalf("Unable to lookup home directory for user %s: %v", sudoUser, err)
+		}
+		return filepath.Join(u.HomeDir, ".config", "velda"), nil
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(homeDir, ".config", "velda"), nil
+}
+
 func InitConfig() {
 	systemConfigPath = os.Getenv("VELDA_SYSTEM_CONFIG")
 	if systemConfigPath == "" {
@@ -70,13 +89,10 @@ func InitConfig() {
 		}
 		if configDir == "" {
 			// Try to use the user's home directory
-			homedir, err := os.UserHomeDir()
-			if err == nil {
-				configDir = homedir + "/.config/velda"
-			}
+			configDir, err = getUserConfigDir()
 		}
 		if configDir == "" {
-			log.Fatalf("Unable to determine the config directory. Please set --config_dir or $VELDA_CONFIG_DIR environment variable.")
+			log.Fatalf("Unable to determine the config directory. Please set --config_dir or $VELDA_CONFIG_DIR environment variable: %v", err)
 		}
 		os.MkdirAll(configDir, 0755)
 		profile = profileInput
