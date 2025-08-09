@@ -9,7 +9,7 @@ Velda is a cloud-native development, workload orchestration & HPC (High Performa
 ## Code on Velda
 
 Velda provides a seamless development experience.
-* Connect with your favorite IDE (e.g., SSH, VS Code, Cursor, Windsurf), or code and run notebooks directly in your browser (hosted or enterprise only).
+* Connect with your favorite IDE (e.g., SSH, VS Code, Cursor, Windsurf), or code and run directly from your browser (hosted or enterprise only).
 * Onboard new developers instantly by cloning from a pre-configured image, or customize your own.
 * Compatible with most libraries, tools, or package managers. All your environment modifications and customizations are persisted and isolated from other users.
 
