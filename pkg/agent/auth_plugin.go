@@ -126,7 +126,7 @@ func loadOrGenerateSshKey(instanceId int64) error {
 	}
 
 	// Ensure the .velda directory exists
-	if err := os.MkdirAll("/.velda", 0700); err != nil {
+	if err := os.MkdirAll("/.velda", 0755); err != nil {
 		return fmt.Errorf("failed to create .velda directory: %w", err)
 	}
 
