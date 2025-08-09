@@ -131,7 +131,11 @@ func (p *LinuxNamespacePlugin) setupMounts(ctx context.Context, workDir string) 
 	}
 
 	if err := syscall.Mount(path.Join(workDir, "hosts"), path.Join(workspaceDir, "etc/hosts"), "", syscall.MS_BIND, ""); err != nil {
-		die("Mount hosts", err)
+		if !os.IsNotExist(err) {
+			die("Mount hosts", err)
+		} else {
+			log.Printf("Warning: /etc/hosts not found, skipping mount")
+		}
 	}
 
 	for _, mount := range p.SandboxConfig.GetHostMounts() {
