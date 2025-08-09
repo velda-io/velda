@@ -30,9 +30,14 @@ message AgentDiskSource {
     string local_path = 1;
     reserved 2;
   }
+  message NfsMountSource {
+    // Server & location will be provided by the broker.
+    string mount_options = 1; // Additional mount options.
+  }
   oneof source {
     MountedDiskSource mounted_disk_source =
         1; // The disk source is pre-mounted on the host.
+    NfsMountSource nfs_mount_source = 2; // The disk source is an NFS mount.
   };
 }
 

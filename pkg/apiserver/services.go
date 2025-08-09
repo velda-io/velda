@@ -119,7 +119,7 @@ func (s *OssService) InitServices() error {
 	// Initialize task tracker
 	taskTrackerId := uuid.New().String()
 	s.TaskTracker = broker.NewTaskTracker(s.Schedulers, s.Sessions, s.Db.(broker.TaskQueueDb), taskTrackerId)
-	simpleAuth := &broker.SimpleAuth{}
+	simpleAuth := broker.NewSimpleAuth("/" + s.Storage.(*zfs.Zfs).Pool())
 	s.BrokerService = broker.NewBrokerServer(s.Schedulers, s.Sessions, s.Permissions, s.TaskTracker, simpleAuth, s.Db.(broker.TaskDb))
 
 	// Initialize other services
