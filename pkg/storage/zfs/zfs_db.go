@@ -41,9 +41,6 @@ func NewZfsInstanceDb(fs *Zfs) *ZfsInstanceDb {
 }
 
 func (d *ZfsInstanceDb) getName(ctx context.Context, instanceId int64) (string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	name, err := d.fs.runCommandGetOutput(
 		ctx,
 		"zfs",
@@ -56,7 +53,7 @@ func (d *ZfsInstanceDb) getName(ctx context.Context, instanceId int64) (string, 
 	if err != nil {
 		return "", fmt.Errorf("failed to get name for instance %d: %w", instanceId, err)
 	}
-	return name, nil
+	return strings.TrimSpace(name), nil
 }
 
 func (d *ZfsInstanceDb) setName(ctx context.Context, name string, instanceId int64) error {
