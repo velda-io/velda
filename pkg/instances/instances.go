@@ -156,11 +156,12 @@ func (s *service) DeleteInstance(ctx context.Context, in *proto.DeleteInstanceRe
 	if err := s.permissions.Check(ctx, ActionDeleteInsance, fmt.Sprintf("instances/%d", in.InstanceId)); err != nil {
 		return nil, err
 	}
-	committer, _, err := s.db.DeleteInstance(ctx, in)
+	committer, inst, err := s.db.DeleteInstance(ctx, in)
 	if err != nil {
 		return nil, err
 	}
 	defer committer.Rollback()
+	log.Printf("Deleting instance %d %s", in.InstanceId, inst.InstanceName)
 	if err := s.storage.DeleteInstance(ctx, in.InstanceId); err != nil {
 		return nil, fmt.Errorf("error deleting instance: %v", err)
 	}

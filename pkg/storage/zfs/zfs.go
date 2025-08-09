@@ -80,6 +80,7 @@ func (z *Zfs) DeleteInstance(ctx context.Context, instanceId int64) error {
 		ctx,
 		"zfs",
 		"destroy",
+		"-r",
 		fmt.Sprintf("%s/%d", z.pool, instanceId))
 }
 
