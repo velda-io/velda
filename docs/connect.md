@@ -1,36 +1,27 @@
 
 # Connect to your Velda cluster
 
-### Create and initialize your first instance
-Once you have both apiserver and runner set up, the cluster is ready to use.
-We will set up your client to connect to the cluster and create your instance.
+With the API server and at least one agent running, your cluster is ready to use.
 
-Please note: If you're using the same machine as the runner and the client, there's a risk of config conflict.
+1. Install the client commandline tool (CLI) from the [releases page](https://github.com/velda-io/velda/releases).
 
-1. Locate the address of the apiserver:
-```bash
-export APISERVER=127.0.0.1 # Replace with IP of the apiserver.
-```
-
-2. Install the client commandline tool (CLI) from the [releases page](https://github.com/velda-io/velda/releases).
-
-3. Set the apiserver address:
+2. Initialize the client to connect to the cluster.
 ```bash
 velda init --broker=${APISERVER}:50051
 ```
 
-4. Create your instance:
+3. Create an instance from an image
 ```bash
-velda instance create first-instance --from-image ubuntu_24
+velda instance create my-instance --from-image [image-name]
 ```
 
-5. Connect to your instance:
+4. Your instance is ready to use. Connect to your instance and open a shell:
 ```bash
-velda run --instance first-instance
-
-# Alternatively, set first-instance as your default instance
-velda config set --instance first-instance # This is only needed one time.
+velda config set --instance my-instance # This is only needed one time.
 velda run
+
+# Alternatively, explicitly specify instance at every command
+velda run --instance my-instance
 ```
 
 # What's next
