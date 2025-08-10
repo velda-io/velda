@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -224,7 +224,8 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	} else {
 		DebugLog("Running from default env")
 		// Join arg with space
-		command := strings.Join(args, " ")
+		command := strings.Join(escapeArgsForShell(args), " ")
+		DebugLog("Running command: %s", command)
 		if err := session.Exec(command); err != nil {
 			return fmt.Errorf("Error executing command: %v", err)
 		}
@@ -307,6 +308,41 @@ func getWorkload(cmd *cobra.Command, args []string) (*proto.Workload, error) {
 		Gid:         uint32(gid),
 		Groups:      groupsUint32,
 	}, nil
+}
+
+// escapeArgsForShell escapes command line arguments to be safely used in shell commands.
+// It handles special characters and spaces to prevent shell injection.
+func escapeArgsForShell(args []string) []string {
+	escaped := make([]string, len(args))
+	for i, arg := range args {
+		// If the argument is empty, use empty quotes
+		if arg == "" {
+			escaped[i] = "''"
+			continue
+		}
+
+		// Check if the argument needs escaping
+		needsEscaping := false
+		for _, c := range arg {
+			if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+				c == '/' || c == '.' || c == '_' || c == '-' || c == '+' || c == '=' || c == ':' || c == ',') {
+				needsEscaping = true
+				break
+			}
+		}
+
+		// If no special characters, use as is
+		if !needsEscaping {
+			escaped[i] = arg
+			continue
+		}
+
+		// For arguments with special characters, use single quotes
+		// Replace any single quotes in the argument with '\'' (close quote, escaped quote, open quote)
+		escapedArg := strings.ReplaceAll(arg, "'", "'\\''")
+		escaped[i] = "'" + escapedArg + "'"
+	}
+	return escaped
 }
 
 func removeLocalEnvs() []string {
