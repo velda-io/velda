@@ -17,7 +17,6 @@ We will use ZFS to store developers' data, and serve them to compute nodes throu
 ```bash
 sudo apt update && sudo apt install zfsutils-linux nfs-kernel-server nfs-common
 sudo zpool create zpool /dev/[DEV_ID] # Use losetup if you want to simulate a block device.
-sudo exportfs -o rw,no_root_squash :/zpool
 ```
 
 2. Download the Velda API server from the [release page](https://github.com/velda-io/velda/releases).
@@ -50,7 +49,7 @@ New images can be created from any existing instance.
 
 The control plane is now ready. It's strongly recommended to ensure only authorized people (e.g., admin) have access to the control plane. Unauthorized access could grant complete access to all files in the system.
 
-### Start a runner
+## Start a runner
 Runner is the node that runs the workload.
 System requirements:
 * Linux AMD64 or ARM64
@@ -59,7 +58,7 @@ System requirements:
 * Must have CGroup v2 enabled, and cgroup v1 disabled
 * Recommended at least 1 vCPU & 4 GB memory
 
-#### Install the runner
+### Install the runner
 1. Locate the address of the apiserver:
 ```bash
 export APISERVER=127.0.0.1 # Replace with IP of the apiserver.
@@ -88,4 +87,48 @@ sudo journalctl -fu velda-agent.service
 
 Repeat the steps above for all the worker nodes.
 
-With the api server and at least one agent running, your cluster is ready to use. See [connect to your cluster](connect.md).
+
+## Initialize the first instance & image in the cluster from a docker container
+
+With the api server and at least one agent running, your cluster is ready to use.
+Let's start with creating a velda instance from a docker container image, and save it as an image to create other instances.
+
+1. Locate the address of the apiserver:
+```bash
+export APISERVER=127.0.0.1 # Replace with IP of the apiserver.
+```
+
+2. Install the client commandline tool (CLI) from the [releases page](https://github.com/velda-io/velda/releases).
+
+3. Initialize the client to connect to the cluster.
+```bash
+velda init --broker=${APISERVER}:50051
+```
+
+4. Create an empty instance, and initialize it with a container image:
+```bash
+velda instance create first-instance
+./misc/init_instance_from_docker.sh ubuntu:24.04 first-instance
+```
+Most images do not have development dependencies installed. To add some basic dependencies:
+```bash
+velda run -u root -i first-instance bash -c 'apt update && apt install less curl git man sudo bash-completion ca-certificates psmisc -y --no-install-recommends;
+which unminimize || apt install unminimize && yes | unminimize'
+```
+
+5. Your instance is ready to use. Connect to your instance:
+```bash
+velda config set --instance first-instance # This is only needed one time.
+velda run
+
+# Alternatively, explicity specify instance at every command
+velda run --instance first-instance
+```
+
+6. Install necessary dependencies. Create an image for everyone to use.
+```bash
+velda image create --from-instance first-instance base-image
+```
+
+## Create instances from an image / Connect to instances
+See [connect to your cluster](connect.md).
