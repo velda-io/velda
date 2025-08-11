@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 package cases
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -51,11 +52,19 @@ func runVeldaWithOutput(args ...string) (string, error) {
 	}
 	// Execute the command
 	cmd := exec.Command(veldaPath, args...)
-	output, err := cmd.CombinedOutput()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil {
+		err = fmt.Errorf("command %s failed: %w, stderr: %s", args, err, stderr.String())
+	}
 	return string(output), err
 }
+
+type Feature string
 
 type Runner interface {
 	Setup(t *testing.T)
 	TearDown(t *testing.T)
+	Supports(feature Feature) bool
 }

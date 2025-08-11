@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -40,7 +39,8 @@ func NewCmdPoolBackend(startCmd, stopCmd, listCmd string) broker.ResourcePoolBac
 }
 
 func (c *cmdPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
-	command := exec.Command("sh", "-c", c.startCmd)
+	command := exec.Command("bash")
+	command.Stdin = strings.NewReader(c.startCmd)
 	command.Stderr = os.Stderr
 	output, err := command.Output()
 	if err != nil {
@@ -50,8 +50,8 @@ func (c *cmdPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 }
 
 func (c *cmdPoolBackend) RequestDelete(ctx context.Context, workerName string) error {
-	cmd := fmt.Sprintf(c.stopCmd, workerName)
-	command := exec.Command("sh", "-c", cmd)
+	command := exec.Command("bash", "-s", workerName)
+	command.Stdin = strings.NewReader(c.stopCmd)
 	command.Stderr = os.Stderr
 	err := command.Run()
 	if err != nil {
@@ -61,8 +61,8 @@ func (c *cmdPoolBackend) RequestDelete(ctx context.Context, workerName string) e
 }
 
 func (c *cmdPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus, error) {
-	cmd := c.listCmd
-	command := exec.Command("sh", "-c", cmd)
+	command := exec.Command("bash")
+	command.Stdin = strings.NewReader(c.listCmd)
 	command.Stderr = os.Stderr
 	output, err := command.Output()
 	if err != nil {
