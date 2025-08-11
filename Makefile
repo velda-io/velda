@@ -3,7 +3,7 @@
 all: client apiserver 
 
 client:
-	CGO_ENABLED=0 go build -p 3 -o bin/client ./client
+	CGO_ENABLED=0 go build -p 3 -o bin/velda ./client
 
 apiserver:
 	go build -p 3 -o bin/apiserver ./servers/apiserver
