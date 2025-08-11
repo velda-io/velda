@@ -1,4 +1,4 @@
-.PHONY: apiserver client format gen test
+.PHONY: apiserver client format gen test unittest
 
 all: client apiserver 
 
@@ -26,14 +26,11 @@ gen:
 	go generate ./...
 	(cd pkg/agent_runner/; go generate .)
 
-test:
+unittest:
 	go test ./pkg/broker/ ./pkg/db/sql/ ./pkg/auth ./pkg/agent ./pkg/storage
 
-gce-test:
-	GCE_BACKEND=skyworkstation/us-west1-a/instance-group-1 go test ./pkg/broker/backends/gce/
-
-k8s-test:
-	go test ./pkg/broker/backends/k8s/
+test:
+	go test ./tests --tags simple
 
 tidy:
 	go mod tidy
