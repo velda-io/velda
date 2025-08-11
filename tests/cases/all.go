@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,13 @@ import "testing"
 func RunAllTests(t *testing.T, runner Runner) {
 	runner.Setup(t)
 	defer runner.TearDown(t)
-	t.Run("SCPCommand", testScpCommand)
-	t.Run("ImagesCommand", testImagesCommand)
+	t.Run("Basic", func(t *testing.T) {
+		t.Run("SCPCommand", testScpCommand)
+		t.Run("ImagesCommand", testImagesCommand)
+	})
+	t.Run("Ubuntu", func(t *testing.T) {
+		if !runner.Supports("ubuntu") {
+			t.Skip("Ubuntu tests are not supported by this runner")
+		}
+	})
 }
