@@ -11,6 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+// The runner that start a local server with a root ZFS pool for testing purposes.
+// It creates a sub-volume for the entire test suite and cleans it up after the tests are done.
+// Use tests/init_zpool.sh to initialize the images used for the tests.
 package runner
 
 import (
@@ -18,9 +22,11 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"velda.io/velda/tests/cases"
 )
 
@@ -58,6 +64,7 @@ func (r *LocalZfsRunner) Setup(t *testing.T) {
 			t.Errorf("Failed to start detached process to destroy ZFS dataset %s: %v", suiteName, err)
 		}
 	})
+	initializeImages(t, r.zfsRoot, suiteName)
 	configDir := t.TempDir()
 
 	agentConfig := (`
@@ -100,14 +107,14 @@ agent_pools:
      command:
        start: |
           name=agent-test-${RANDOM}
-          docker run  -d --name $name --add-host=host.docker.internal:host-gateway  -e AGENT_NAME=$name -v %s/agent.yaml:/run/velda/velda.yaml -h $name  --mount type=volume,target=/tmp/agent --rm -v %s:/velda --privileged -q veldaio/agent:latest
+          docker run  -d --name $name --add-host=host.docker.internal:host-gateway  -e AGENT_NAME=$name -v %s/agent.yaml:/run/velda/velda.yaml -h $name  --mount type=volume,target=/tmp/agent --rm -v %s:/velda --privileged -q veldaio/agent:latest > /dev/null
           echo $name
        stop: |
          name=$1
          docker rm -f $name -v >/dev/null
        list: |
          docker ps -a --format '{{.Names}}' | egrep "agent-test-[0-9]+\$" | grep -v -- -1926 || true
-    max_agents: 2
+    max_agents: 5
     min_idle_agents: 0
     max_idle_agents: 3
     idle_decay: 40s
@@ -157,6 +164,32 @@ agent_pools:
 	os.Setenv("VELDA_CONFIG_DIR", r.configDir+"/client_cfg")
 	if err := exec.Command(veldaBin, "init", "--broker", "localhost:50051").Run(); err != nil {
 		t.Fatalf("Failed to initialize Velda client: %v", err)
+	}
+}
+
+func initializeImages(t *testing.T, zfsRoot, target string) {
+	if out, err := exec.Command("sudo", "zfs", "create", fmt.Sprintf("%s/images", target)).CombinedOutput(); err != nil {
+		t.Fatalf("Failed to create ZFS images dataset: %v (output: %s)", err, out)
+	}
+	imagesOut, err := exec.Command("sudo", "zfs", "list", "-H", "-d1", "-o", "name", fmt.Sprintf("%s/seed", zfsRoot)).Output()
+	require.NoError(t, err, "Failed to list ZFS images")
+	images := strings.Split(string(imagesOut), "\n")
+	for _, image := range images {
+		if !strings.HasPrefix(image, fmt.Sprintf("%s/seed/", zfsRoot)) {
+			continue
+		}
+		imageName := strings.TrimPrefix(image, fmt.Sprintf("%s/seed/", zfsRoot))
+		// Create a clone for each image
+		if out, err := exec.Command("sudo", "zfs", "clone",
+			fmt.Sprintf("%s@image", image),
+			fmt.Sprintf("%s/images/%s", target, imageName)).CombinedOutput(); err != nil {
+			t.Fatalf("Failed to clone image %s: %v (output: %s)", imageName, err, out)
+		}
+		// Create image snapshot
+		if out, err := exec.Command("sudo", "zfs", "snapshot",
+			fmt.Sprintf("%s/images/%s@image", target, imageName)).CombinedOutput(); err != nil {
+			t.Fatalf("Failed to create snapshot for image %s: %v (output: %s)", imageName, err, out)
+		}
 	}
 }
 

@@ -26,5 +26,6 @@ func RunAllTests(t *testing.T, runner Runner) {
 		if !runner.Supports("ubuntu") {
 			t.Skip("Ubuntu tests are not supported by this runner")
 		}
+		testUbuntu(t)
 	})
 }

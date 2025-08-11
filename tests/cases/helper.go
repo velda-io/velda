@@ -14,6 +14,7 @@
 package cases
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -51,7 +52,12 @@ func runVeldaWithOutput(args ...string) (string, error) {
 	}
 	// Execute the command
 	cmd := exec.Command(veldaPath, args...)
-	output, err := cmd.CombinedOutput()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil {
+		err = fmt.Errorf("command %s failed: %w, stderr: %s", args, err, stderr.String())
+	}
 	return string(output), err
 }
 
