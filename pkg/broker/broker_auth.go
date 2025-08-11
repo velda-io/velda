@@ -58,8 +58,9 @@ func (n *SimpleAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, sessi
 func exportNFS(path, host string) error {
 	log.Printf("Exporting NFS path %s to host %s", path, host)
 	cmd := exec.Command("sudo", "exportfs", "-o", "rw,async,no_root_squash", host+":"+path)
-	err := cmd.Run()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Printf("Failed to export NFS %s for host %s: %s", path, host, out)
 		return fmt.Errorf("failed to export NFS: %w", err)
 	}
 	return nil
@@ -81,9 +82,11 @@ func (n *SimpleAuth) RevokeAccessToAgent(ctx context.Context, agent *Agent, sess
 
 // unexportNFS is a helper function to handle NFS unexport logic using exportfs command
 func unexportNFS(path, host string) error {
+	log.Printf("Unexporting NFS path %s for host %s", path, host)
 	cmd := exec.Command("sudo", "exportfs", "-u", host+":"+path)
-	err := cmd.Run()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Printf("Failed to unexport NFS %s for host %s: %s", path, host, out)
 		return fmt.Errorf("failed to unexport NFS: %w", err)
 	}
 	return nil
