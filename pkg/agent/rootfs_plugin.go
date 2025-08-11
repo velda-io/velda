@@ -71,7 +71,7 @@ func (p *RootfsPlugin) Run(ctx context.Context) error {
 func umountAll(dir string) {
 	err := doUmountAll(dir)
 	if err != nil {
-		log.Printf("Failed to unmount %s: %v", dir, err)
+		log.Print(err)
 	}
 }
 
@@ -102,7 +102,7 @@ func doUmountAll(dir string) error {
 	// Unmount all mounts
 	for i := len(mounts) - 1; i >= 0; i-- {
 		if err := syscall.Unmount(mounts[i], 0); err != nil {
-			return err
+			return fmt.Errorf("failed to unmount %s: %w", mounts[i], err)
 		}
 	}
 	return nil

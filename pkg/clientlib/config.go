@@ -94,6 +94,8 @@ func InitConfig() {
 		if configDir == "" {
 			log.Fatalf("Unable to determine the config directory. Please set --config_dir or $VELDA_CONFIG_DIR environment variable: %v", err)
 		}
+		configDir := filepath.Clean(configDir)
+		DebugLog("Using config directory: %s", configDir)
 		os.MkdirAll(configDir, 0755)
 		profile = profileInput
 		if profile == "" {
@@ -102,6 +104,7 @@ func InitConfig() {
 				log.Printf("Failed to get current profile: %v", err)
 			}
 		}
+		DebugLog("Using profile: %s", profile)
 	} else {
 		// Agent daemon.
 		agentConfig = &agentpb.AgentConfig{}
