@@ -208,6 +208,14 @@ func (s *service) CreateImage(ctx context.Context, in *proto.CreateImageRequest)
 	if err := s.permissions.Check(ctx, ActionCreateSnapshot, fmt.Sprintf("instances/%d", in.InstanceId)); err != nil {
 		return nil, err
 	}
+	if in.SnapshotName == "" {
+		// Create a snapshot first
+		snapshotName := fmt.Sprintf("image-snapshot-%d", time.Now().Unix())
+		if err := s.storage.CreateSnapshot(ctx, in.InstanceId, snapshotName); err != nil {
+			return nil, fmt.Errorf("error creating snapshot for image: %v", err)
+		}
+		in.SnapshotName = snapshotName
+	}
 	if err := s.storage.CreateImageFromSnapshot(ctx, in.ImageName, in.InstanceId, in.SnapshotName); err != nil {
 		return nil, fmt.Errorf("error creating image: %v", err)
 	}

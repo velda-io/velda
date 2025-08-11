@@ -17,18 +17,44 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"time"
 )
 
 type Zfs struct {
 	pool string
 }
 
-func NewZfs(pool string) *Zfs {
-	return &Zfs{
+func NewZfs(pool string) (*Zfs, error) {
+	z := &Zfs{
 		pool: pool,
 	}
+	err := z.init()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize ZFS storage: %w", err)
+	}
+	return z, nil
+}
+
+func (z *Zfs) init() error {
+	// Check if the ZFS pool exists
+	err := z.runCommand(context.Background(), "zfs", "list", z.pool)
+	if err != nil {
+		return fmt.Errorf("failed to list ZFS pools: %w", err)
+	}
+	// Check if the required ZFS volumes exist, and create them if they don't
+	requiredVolumes := []string{"images", "image_archive"}
+	for _, volume := range requiredVolumes {
+		volumePath := fmt.Sprintf("%s/%s", z.pool, volume)
+		if err := z.runCommand(context.Background(), "zfs", "list", volumePath); err != nil {
+			if createErr := z.runCommand(context.Background(), "zfs", "create", volumePath); createErr != nil {
+				return fmt.Errorf("failed to create ZFS volume %s: %w", volumePath, createErr)
+			}
+		}
+	}
+	return nil
 }
 
 func (z *Zfs) Pool() string {
@@ -109,20 +135,48 @@ func (z *Zfs) CreateImageFromSnapshot(ctx context.Context, imageName string, sna
 		fmt.Sprintf("%s/images/%s", z.pool, imageName)); err != nil {
 		return err
 	}
-	return z.runCommand(
+	if err := z.runCommand(
 		ctx,
 		"zfs",
 		"promote",
-		fmt.Sprintf("%s/images/%s", z.pool, imageName))
+		fmt.Sprintf("%s/images/%s", z.pool, imageName)); err != nil {
+		return fmt.Errorf("failed to promote image %s: %w", imageName, err)
+	}
+	if err := z.runCommand(
+		ctx,
+		"zfs",
+		"rename",
+		fmt.Sprintf("%s/images/%s@%s", z.pool, imageName, snapshotName),
+		fmt.Sprintf("%s/images/%s@image", z.pool, imageName)); err != nil {
+		return fmt.Errorf("failed to set mountpoint for image %s: %w", imageName, err)
+	}
+	return nil
 }
 
 func (z *Zfs) DeleteImage(ctx context.Context, imageName string) error {
-	return z.runCommand(
+	err := z.runCommand(
 		ctx,
 		"zfs",
 		"destroy",
 		"-r",
 		fmt.Sprintf("%s/images/%s", z.pool, imageName))
+	if err != nil {
+		// Try to rename the image to archive.
+		archiveName := fmt.Sprintf("%s-archived-%d", imageName, time.Now().Unix())
+		err = z.runCommand(
+			ctx,
+			"zfs",
+			"rename",
+			fmt.Sprintf("%s/images/%s", z.pool, imageName),
+			fmt.Sprintf("%s/image_archive/%s", z.pool, archiveName))
+		if err != nil {
+			return fmt.Errorf("failed to archive image %s: %w", imageName, err)
+		}
+		log.Printf("Image %s archived to %s", imageName, archiveName)
+		return nil
+	}
+	log.Printf("Image %s deleted successfully", imageName)
+	return nil
 }
 
 func (z *Zfs) ListImages(ctx context.Context) ([]string, error) {
