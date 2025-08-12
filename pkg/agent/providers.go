@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -65,8 +65,8 @@ func ProvideLinuxNamespacePlugin(workDir WorkDir, sandboxConfig *agentpb.Sandbox
 	return NewLinuxNamespacePlugin(string(workDir), sandboxConfig, requestPlugin)
 }
 
-func ProvideNvidiaPlugin(workDir WorkDir) *NvidiaPlugin {
-	return NewNvidiaPlugin(string(workDir))
+func ProvideNvidiaPlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig) *NvidiaPlugin {
+	return NewNvidiaPlugin(string(workDir), sandboxConfig)
 }
 
 func ProvideRunPid1Plugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig, agentDaemonPlugin *AgentDaemonPlugin, requestPlugin *SessionRequestPlugin) *RunPid1Plugin {

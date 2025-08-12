@@ -24,7 +24,7 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	rootfsPlugin := agent2.ProvideRootfsPlugin(workDir, mounter, sandboxConfig, sessionRequestPlugin)
 	autoFsDaemonPlugin := agent2.ProvideAutoFsDaemonPlugin()
 	linuxNamespacePlugin := agent2.ProvideLinuxNamespacePlugin(workDir, sandboxConfig, sessionRequestPlugin)
-	nvidiaPlugin := agent2.ProvideNvidiaPlugin(workDir)
+	nvidiaPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
 	runPid1Plugin := agent2.ProvideRunPid1Plugin(workDir, sandboxConfig, agentDaemonPlugin, sessionRequestPlugin)
 	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, rootfsPlugin, autoFsDaemonPlugin, linuxNamespacePlugin, nvidiaPlugin, runPid1Plugin)
 	return shimRunner
@@ -39,7 +39,7 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	waiterPlugin := agent2.ProvideWaiterPlugin()
 	completionSignalPlugin := agent2.ProvideCompletionSignalPlugin()
 	agentName := agent2.ProvideAgentName(cmd)
-	nvidiaPlugin := agent2.ProvideNvidiaPlugin(workDir)
+	nvidiaPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
 	sshdPlugin := agent2.ProvideSshdPlugin(agentName, authPluginType, waiterPlugin, sessionRequestPlugin, completionSignalPlugin, nvidiaPlugin)
 	reportStatusPlugin := agent2.ProvideReportStatusPlugin(sshdPlugin)
 	batchPlugin := agent2.ProvideBatchPlugin(waiterPlugin, sessionRequestPlugin, completionSignalPlugin)

@@ -61,6 +61,10 @@ message SandboxConfig {
 
   // The apparmor profile to run workload.
   string apparmor_profile = 7;
+
+  // The directory where the NVIDIA driver is installed.
+  // It must contain bin & lib for the user-space NVIDIA driver libraries.
+  string nvidia_driver_install_dir = 8;
 }
 
 message DaemonConfig {
