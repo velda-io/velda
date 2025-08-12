@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,16 +23,19 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/unix"
+	agentpb "velda.io/velda/pkg/proto/agent"
 )
 
 type NvidiaPlugin struct {
 	PluginBase
 	WorkspaceDir string
+	config       *agentpb.SandboxConfig
 }
 
-func NewNvidiaPlugin(workspaceDir string) *NvidiaPlugin {
+func NewNvidiaPlugin(workspaceDir string, config *agentpb.SandboxConfig) *NvidiaPlugin {
 	return &NvidiaPlugin{
 		WorkspaceDir: workspaceDir,
+		config:       config,
 	}
 }
 
@@ -62,6 +65,9 @@ func copyNod(src, dst string) error {
 
 func (p *NvidiaPlugin) Run(ctx context.Context) error {
 	nvidia_libs := os.Getenv("VELDA_NVIDIA_DIR")
+	if nvidia_libs == "" {
+		nvidia_libs = p.config.GetNvidiaDriverInstallDir()
+	}
 	if nvidia_libs == "" {
 		return p.RunNext(ctx)
 	}
@@ -101,5 +107,5 @@ func (p *NvidiaPlugin) Run(ctx context.Context) error {
 }
 
 func (p *NvidiaPlugin) HasGpu() bool {
-	return os.Getenv("VELDA_NVIDIA_DIR") != ""
+	return os.Getenv("VELDA_NVIDIA_DIR") != "" && p.config.GetNvidiaDriverInstallDir() != ""
 }
