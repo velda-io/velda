@@ -92,10 +92,8 @@ func patchConfig(config *agentpb.SandboxConfig) {
 	}
 	if config.GetDiskSource() == nil {
 		config.DiskSource = &agentpb.AgentDiskSource{
-			Source: &agentpb.AgentDiskSource_MountedDiskSource_{
-				MountedDiskSource: &agentpb.AgentDiskSource_MountedDiskSource{
-					LocalPath: "/tmp/agentdisk",
-				},
+			Source: &agentpb.AgentDiskSource_NfsMountSource_{
+				NfsMountSource: &agentpb.AgentDiskSource_NfsMountSource{},
 			},
 		}
 	}
