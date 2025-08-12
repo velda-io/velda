@@ -87,9 +87,6 @@ func init() {
 }
 
 func patchConfig(config *agentpb.SandboxConfig) {
-	if config.GetHostLocalMountBaseDir() == "" {
-		config.HostLocalMountBaseDir, _ = os.MkdirTemp("", "velda-sandbox-host-local-mount")
-	}
 	if config.GetDiskSource() == nil {
 		config.DiskSource = &agentpb.AgentDiskSource{
 			Source: &agentpb.AgentDiskSource_NfsMountSource_{

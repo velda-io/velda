@@ -65,6 +65,9 @@ func (m *SimpleMounter) Mount(ctx context.Context, session *proto.SessionRequest
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("Mount NFS disk: %v, output: %s", err, output)
 		}
+		if err := syscall.Mount("", workspaceDir, "", syscall.MS_REC|syscall.MS_SHARED, ""); err != nil {
+			return nil, fmt.Errorf("Remount workspace: %w", err)
+		}
 		return nil, nil
 
 	default:
