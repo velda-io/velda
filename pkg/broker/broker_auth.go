@@ -23,17 +23,17 @@ import (
 	"velda.io/velda/pkg/proto"
 )
 
-type SimpleAuth struct {
+type NfsExportAuth struct {
 	diskRoot string
 }
 
-func NewSimpleAuth(diskRoot string) *SimpleAuth {
-	return &SimpleAuth{
+func NewNfsExportAuth(diskRoot string) *NfsExportAuth {
+	return &NfsExportAuth{
 		diskRoot: diskRoot,
 	}
 }
 
-func (n *SimpleAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
+func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
 	instanceID := session.Request.InstanceId
 	exportPath := fmt.Sprintf("%s/%d", n.diskRoot, instanceID)
 	agentHost := agent.Host
@@ -66,7 +66,7 @@ func exportNFS(path, host string) error {
 	return nil
 }
 
-func (n *SimpleAuth) RevokeAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
+func (n *NfsExportAuth) RevokeAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
 	// TODO: Add reference counting for same peer IP.
 	instanceID := session.Request.InstanceId
 	exportPath := fmt.Sprintf("%s/%d", n.diskRoot, instanceID)
@@ -92,6 +92,6 @@ func unexportNFS(path, host string) error {
 	return nil
 }
 
-func (n *SimpleAuth) GrantAccessToClient(ctx context.Context, session *Session, status *proto.ExecutionStatus) error {
+func (n *NfsExportAuth) GrantAccessToClient(ctx context.Context, session *Session, status *proto.ExecutionStatus) error {
 	return nil
 }
