@@ -90,6 +90,9 @@ message AutoscalerBackendAWSLaunchTemplate {
   // The prefix of the instance name.
   // If not set, will use launch_template_name as the prefix.
   string instance_name_prefix = 3;
+  // If set, will use instance ID as the name.
+  // Otherwise, it will use Name tag as the name.
+  bool use_instance_id_as_name = 4;
 }
 
 message AutoscalerBackendKubernetes {
