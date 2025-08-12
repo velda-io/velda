@@ -79,9 +79,10 @@ source "amazon-ebs" "velda-agent" {
   instance_type   = var.instance_type
   ssh_username    = var.ssh_username
   ami_name        = "velda-agent-${var.version}"
+  ami_virtualization_type = "hvm"
   ami_description = "AMI for Velda Agent"
   ami_regions     = var.ami_regions
-  ami_users       = ["all"]
+  ami_groups       = ["all"]
   run_tags = {
     Name = "Packer Builder"
   }
@@ -115,7 +116,7 @@ build {
   }
 
   provisioner "file" {
-    source      = "../bin/client-amd64"
+    source      = "../bin/velda-amd64"
     destination = "/tmp/velda-install/client"
   }
 
@@ -130,18 +131,13 @@ build {
 [Unit]
 Description=Velda agent
 
-After=network-online.target
-Wants=network-online.target
-
-# EC2 Cloud-Init
-After=cloud-final.service
-
-# GCE Guest Agent
-After=google-startup-scripts.service
+# Wait until the config is provided.
+After=cloud-init.service google-startup-scripts.service
 
 After=nvidia-init.service
 
 [Service]
+Type=simple
 ExecStart=/bin/velda-agent agent daemon
 Restart=always
 RestartSec=5
@@ -152,7 +148,7 @@ OOMPolicy=continue
 LimitNOFILE=524288:524288
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=network-online.target
 EOF
     destination = "/tmp/velda-install/velda-agent.service"
   }
