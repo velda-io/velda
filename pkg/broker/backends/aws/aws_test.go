@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,8 +34,9 @@ func TestAWSBackend(t *testing.T) {
 	configpb := &cfgpb.AutoscalerBackend{
 		Backend: &cfgpb.AutoscalerBackend_AwsLaunchTemplate{
 			AwsLaunchTemplate: &cfgpb.AutoscalerBackendAWSLaunchTemplate{
-				Region:             aws_backend[0],
-				LaunchTemplateName: aws_backend[1],
+				Region:              aws_backend[0],
+				LaunchTemplateName:  aws_backend[1],
+				UseInstanceIdAsName: true,
 			},
 		},
 	}
