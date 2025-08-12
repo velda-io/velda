@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -49,6 +49,12 @@ func (p *SandboxFsPlugin) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("InitAgentDir: %w", err)
 	}
+	defer func() {
+		if err := syscall.Unmount(path.Join(p.WorkspaceDir, "velda/velda"), syscall.MNT_DETACH); err != nil {
+			fmt.Printf("Unmount velda: %v\n", err)
+		}
+		os.RemoveAll(p.WorkspaceDir)
+	}()
 	return p.RunNext(ctx)
 }
 

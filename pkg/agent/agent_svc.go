@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -50,7 +50,11 @@ func (s *AgentDaemonService) Mount(ctx context.Context, req *proto.MountRequest)
 	source := req.Source
 	if emptyDirRegex.MatchString(source) {
 		var err error
-		source, err = os.MkdirTemp(s.tempDir, "emptydir-")
+		baseTempDir := s.tempDir
+		if baseTempDir == "" {
+			baseTempDir = s.workDir
+		}
+		source, err = os.MkdirTemp(baseTempDir, "emptydir-")
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to create empty dir: %v", err)
 		}
