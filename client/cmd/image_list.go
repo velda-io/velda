@@ -52,6 +52,7 @@ Examples:
 		}
 
 		response, err := client.ListImages(cmd.Context(), request)
+		cmd.SetOut(cmd.OutOrStdout())
 		if err != nil {
 			return fmt.Errorf("Error listing images: %v", err)
 		}
