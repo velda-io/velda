@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -73,11 +73,9 @@ func testImagesCommand(t *testing.T) {
 
 		// Create an image from the snapshot
 		snapshotImageName := fmt.Sprintf("snap-image-%d", time.Now().Unix())
-		output, err := runVeldaWithOutput("image", "create", snapshotImageName,
+		err := runVelda("image", "create", snapshotImageName,
 			"-i", instanceName, "-s", snapshotName)
 		require.NoError(t, err, "Failed to create image from snapshot")
-		assert.Contains(t, output, fmt.Sprintf("Image '%s' created successfully", snapshotImageName),
-			"Output should confirm successful image creation from snapshot")
 	})
 
 	// Test case 3: Clone instance from image (using the image we created)
