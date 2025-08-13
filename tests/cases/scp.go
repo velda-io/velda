@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -117,5 +117,68 @@ func testScpCommand(t *testing.T) {
 		}
 
 		assert.Equal(t, 3, fileCount, "Should have downloaded 3 files")
+	})
+	// Test case 3: Test preserve options
+	t.Run("PreserveOptions", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp("", "velda-scp-preserve-*.txt")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		content := "Preserve test file content"
+		if _, err := tmpFile.WriteString(content); err != nil {
+			t.Fatalf("Failed to write to temp file: %v", err)
+		}
+		if err := tmpFile.Close(); err != nil {
+			t.Fatalf("Failed to close temp file: %v", err)
+		}
+
+		// Set custom permissions and timestamps
+		origMode := os.FileMode(0640)
+		if err := os.Chmod(tmpFile.Name(), origMode); err != nil {
+			t.Fatalf("Failed to chmod: %v", err)
+		}
+		atime := time.Now().Add(-2 * time.Hour)
+		mtime := time.Now().Add(-1 * time.Hour)
+		if err := os.Chtimes(tmpFile.Name(), atime, mtime); err != nil {
+			t.Fatalf("Failed to chtimes: %v", err)
+		}
+
+		destPath := "/scp-preserve-test.txt"
+
+		// Upload with preserve flags
+		require.NoError(t, runVelda("scp", "-u", "root", "-p", tmpFile.Name(), fmt.Sprintf("%s:%s", instanceName, destPath)))
+
+		// Download back with preserve flags
+		downloadDir, err := os.MkdirTemp("", "velda-scp-preserve-download")
+		if err != nil {
+			t.Fatalf("Failed to create temp directory: %v", err)
+		}
+		defer os.RemoveAll(downloadDir)
+
+		require.NoError(t, runVelda("scp", "-u", "root", "-p", fmt.Sprintf("%s:%s", instanceName, destPath), downloadDir))
+
+		downloadedPath := filepath.Join(downloadDir, filepath.Base(destPath))
+		stat, err := os.Stat(downloadedPath)
+		if err != nil {
+			t.Fatalf("Failed to stat downloaded file: %v", err)
+		}
+		assert.Equal(t, origMode, stat.Mode().Perm(), "File mode should be preserved")
+
+		// Check timestamps (allowing 2s slack for transfer)
+		info, err := os.Stat(downloadedPath)
+		if err != nil {
+			t.Fatalf("Failed to stat downloaded file: %v", err)
+		}
+		dt := info.ModTime().Sub(mtime)
+		assert.LessOrEqual(t, dt.Abs().Seconds(), 2.0, "Modification time should be preserved")
+
+		// Check content
+		data, err := os.ReadFile(downloadedPath)
+		if err != nil {
+			t.Fatalf("Failed to read downloaded file: %v", err)
+		}
+		assert.Equal(t, content, string(data), "File content should match")
 	})
 }
