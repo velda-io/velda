@@ -24,6 +24,20 @@ velda run
 velda run --instance my-instance
 ```
 
+# Connect with SSH or IDEs
+To use other SSH client, ensure you can use `velda run` to connect in previous section, and add the following configs to `~/.ssh/config`:
+```
+Host [instance-name]
+  HostName [instance-name]
+  Port 2222
+  User user
+  ProxyCommand velda port-forward -W -p %p --instance %h -s ssh
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  User user
+```
+Replace `[instance-name]` with the actual instance name.
+
 # What's next
 
 ## Control the access to an instance
