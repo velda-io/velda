@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -80,12 +80,15 @@ func (p *RunPid1Plugin) Run(ctx context.Context) error {
 	sigfinish := make(chan struct{})
 	defer close(sigfinish)
 	sigtermChan := make(chan os.Signal, 1)
-	signal.Notify(sigtermChan, syscall.SIGTERM)
+	signal.Notify(sigtermChan, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		for {
 			select {
 			case sig := <-sigtermChan:
-				if cmd != nil {
+				if sig == syscall.SIGQUIT {
+					err := killWithCgroup()
+					log.Printf("Received SIGQUIT, killing with cgroup: %v", err)
+				} else if cmd != nil {
 					cmd.Signal(sig)
 				}
 			case <-sigfinish:
@@ -134,12 +137,12 @@ func (p *RunPid1Plugin) Run(ctx context.Context) error {
 	}
 }
 
-func extractCgroupFD() (int, error) {
+func currentCgroupPath() (string, error) {
 	cgroupBasePath := "/sys/fs/cgroup"
 	cgFile := "/proc/self/cgroup"
 	data, err := os.ReadFile(cgFile)
 	if err != nil {
-		return -1, fmt.Errorf("failed to read cgroup file: %w", err)
+		return "", fmt.Errorf("failed to read cgroup file: %w", err)
 	}
 	cgroupDir := ""
 	lines := string(data)
@@ -152,9 +155,30 @@ func extractCgroupFD() (int, error) {
 		}
 	}
 	if cgroupDir == "" {
-		return -1, fmt.Errorf("could not determine cgroup v2 path")
+		return "", fmt.Errorf("could not determine cgroup v2 path")
 	}
-	newCgroupPath := fmt.Sprintf("%s%s/workload", cgroupBasePath, cgroupDir)
+	return fmt.Sprintf("%s%s", cgroupBasePath, cgroupDir), nil
+}
+
+func killWithCgroup() error {
+	cgPath, err := currentCgroupPath()
+	if err != nil {
+		return fmt.Errorf("failed to get current cgroup path: %w", err)
+	}
+	cgKillPath := fmt.Sprintf("%s/workload/cgroup.kill", cgPath)
+	err = os.WriteFile(cgKillPath, []byte("1"), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write to cgroup kill file: %w", err)
+	}
+	return nil
+}
+
+func extractCgroupFD() (int, error) {
+	cgPath, err := currentCgroupPath()
+	if err != nil {
+		return -1, fmt.Errorf("failed to get current cgroup path: %w", err)
+	}
+	newCgroupPath := fmt.Sprintf("%s/workload", cgPath)
 	if err := os.MkdirAll(newCgroupPath, 0755); err != nil {
 		return -1, fmt.Errorf("failed to create new cgroup: %w", err)
 	}

@@ -243,6 +243,33 @@ func (r *Runner) Run(agentaName string, session *proto.SessionRequest, completio
 	}, nil
 }
 
+func (r *Runner) Kill(key SessionKey, force bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cmd, ok := r.processes[key]
+	if !ok {
+		log.Printf("No process found for session %s", key.SessionId)
+		return
+	}
+	if cmd.Process == nil {
+		log.Printf("Process for session %s is not running", key.SessionId)
+		return
+	}
+	if force {
+		if err := cmd.Process.Signal(syscall.SIGQUIT); err != nil {
+			log.Printf("Failed to kill process for session %s: %v", key.SessionId, err)
+		} else {
+			log.Printf("Killed process for session %s", key.SessionId)
+		}
+	} else {
+		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			log.Printf("Failed to terminate process for session %s: %v", key.SessionId, err)
+		} else {
+			log.Printf("Terminated process for session %s", key.SessionId)
+		}
+	}
+}
+
 func (r *Runner) Cleanup(key SessionKey) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
