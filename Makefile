@@ -10,13 +10,13 @@ apiserver:
 
 server-release:
 	GOOS=linux GOARCH=amd64 go build -p 3 -o bin/apiserver-amd64 ./servers/apiserver
-	GOOS=linux GOARCH=amd64 go build -p 3 -o bin/client-amd64 ./client
+	GOOS=linux GOARCH=amd64 go build -p 3 -o bin/velda-amd64 ./client
 
 macclient:
-	GOOS=darwin GOARCH=arm64 go build -p 3 -o bin/client_mac ./client
+	GOOS=darwin GOARCH=arm64 go build -p 3 -o bin/velda-mac-arm64 ./client
 
 macclient-amd64:
-	GOOS=darwin GOARCH=amd64 go build -p 3 -o bin/client_mac_amd64 ./client
+	GOOS=darwin GOARCH=amd64 go build -p 3 -o bin/velda-mac-amd64 ./client
 
 format:
 	go fmt ./...
