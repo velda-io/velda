@@ -1,0 +1,42 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+
+      - name: Build server-release
+        run: make server-release
+
+      - name: Build macclient
+        run: make macclient macclient-amd64
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bin/apiserver-amd64
+            bin/velda-amd64
+            bin/velda-mac-arm64
+            bin/velda-mac-amd64
+          tag_name: ${{ github.ref_name }} # Gets the tag name from the push event
+          release_name: Release ${{ github.ref_name }} # Creates a release title "Release vX.X.X"
+          body: |
+            **Tag:** ${{ github.ref_name }}
+            **Commit:** ${{ github.sha }}
+          draft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
