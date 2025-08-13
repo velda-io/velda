@@ -21,7 +21,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/pkg/sftp"
 	"github.com/spf13/cobra"
@@ -237,9 +236,11 @@ func copyFileToRemote(ctx context.Context, sftpClient *sftp.Client, localPath st
 	// Set timestamps if preserveTimes flag is set
 	if options.PreserveTimes {
 		if stat, ok := localInfo.Sys().(*syscall.Stat_t); ok {
-			atime := stat.Atim
-			mtime := stat.Mtim
-			if err = sftpClient.Chtimes(remoteFilePath, time.Unix(atime.Sec, atime.Nsec), time.Unix(mtime.Sec, mtime.Nsec)); err != nil {
+			atime, mtime, err := stat_getTimes(stat)
+			if err != nil {
+				return fmt.Errorf("Error getting timestamps for %s: %v", localPath, err)
+			}
+			if err = sftpClient.Chtimes(remoteFilePath, atime, mtime); err != nil {
 				return fmt.Errorf("Error setting timestamps for %s: %v", remoteFilePath, err)
 			}
 		}
@@ -445,21 +446,25 @@ func copyFileToLocal(ctx context.Context, sftpClient *sftp.Client, remotePath st
 
 	// Set ownership if preserveOwner flag is set
 	if options.PreserveOwner {
-		if stat, ok := remoteInfo.Sys().(*syscall.Stat_t); ok {
-			if err = os.Chown(localFilePath, int(stat.Uid), int(stat.Gid)); err != nil {
+		if stat, ok := remoteInfo.Sys().(*sftp.FileStat); ok {
+			if err = os.Chown(localFilePath, int(stat.UID), int(stat.GID)); err != nil {
 				return fmt.Errorf("Error setting ownership for %s: %v", localFilePath, err)
 			}
+		} else {
+			return fmt.Errorf("Error getting file system info for %s: %v", remotePath, err)
 		}
 	}
 
 	// Set timestamps if preserveTimes flag is set
 	if options.PreserveTimes {
-		if stat, ok := remoteInfo.Sys().(*syscall.Stat_t); ok {
-			atime := stat.Atim
-			mtime := stat.Mtim
-			if err = os.Chtimes(localFilePath, time.Unix(atime.Sec, atime.Nsec), time.Unix(mtime.Sec, mtime.Nsec)); err != nil {
+		if stat, ok := remoteInfo.Sys().(*sftp.FileStat); ok {
+			atime := stat.AccessTime()
+			mtime := stat.ModTime()
+			if err = os.Chtimes(localFilePath, atime, mtime); err != nil {
 				return fmt.Errorf("Error setting timestamps for %s: %v", localFilePath, err)
 			}
+		} else {
+			return fmt.Errorf("Error getting file system info for %s: %v, %t", remotePath, err, remoteInfo.Sys())
 		}
 	}
 
