@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,7 @@ package broker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -520,13 +521,32 @@ func (p *AutoScaledPool) deleteOneWorkerLocked() bool {
 	return true
 }
 
-func (p *AutoScaledPool) InspectWorkers(f func(name string, status WorkerStatusCode, statusChan chan AgentStatusRequest) bool) {
+type InspectWorkerFunc func(ctx context.Context) (*AgentStatusResponse, error)
+type InspectFunc func(name string, status WorkerStatusCode, inspectWorker InspectWorkerFunc) bool
+
+func (p *AutoScaledPool) InspectWorkers(f InspectFunc) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for status, workers := range p.workersByStatus {
 		for name := range workers {
 			statusChan := p.workerDetail[name].statusChan
-			if !f(name, status, statusChan) {
+			inspectWorker := func(ctx context.Context) (*AgentStatusResponse, error) {
+				if statusChan == nil {
+					return nil, fmt.Errorf("worker %s is not available for inspection", name)
+				}
+				responseChan := make(chan *AgentStatusResponse, 1)
+				statusChan <- AgentStatusRequest{
+					response: responseChan,
+					ctx:      ctx,
+				}
+				select {
+				case response := <-responseChan:
+					return response, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			if !f(name, status, inspectWorker) {
 				return
 			}
 		}
