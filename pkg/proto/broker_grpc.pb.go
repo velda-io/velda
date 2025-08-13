@@ -25,6 +25,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -35,6 +36,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	BrokerService_AgentUpdate_FullMethodName    = "/velda.BrokerService/AgentUpdate"
 	BrokerService_RequestSession_FullMethodName = "/velda.BrokerService/RequestSession"
+	BrokerService_KillSession_FullMethodName    = "/velda.BrokerService/KillSession"
 	BrokerService_ListSessions_FullMethodName   = "/velda.BrokerService/ListSessions"
 )
 
@@ -46,6 +48,7 @@ const (
 type BrokerServiceClient interface {
 	AgentUpdate(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentUpdateRequest, AgentUpdateResponse], error)
 	RequestSession(ctx context.Context, in *SessionRequest, opts ...grpc.CallOption) (*ExecutionStatus, error)
+	KillSession(ctx context.Context, in *KillSessionRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
 }
 
@@ -80,6 +83,16 @@ func (c *brokerServiceClient) RequestSession(ctx context.Context, in *SessionReq
 	return out, nil
 }
 
+func (c *brokerServiceClient) KillSession(ctx context.Context, in *KillSessionRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, BrokerService_KillSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *brokerServiceClient) ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListSessionsResponse)
@@ -98,6 +111,7 @@ func (c *brokerServiceClient) ListSessions(ctx context.Context, in *ListSessions
 type BrokerServiceServer interface {
 	AgentUpdate(grpc.BidiStreamingServer[AgentUpdateRequest, AgentUpdateResponse]) error
 	RequestSession(context.Context, *SessionRequest) (*ExecutionStatus, error)
+	KillSession(context.Context, *KillSessionRequest) (*emptypb.Empty, error)
 	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
 	mustEmbedUnimplementedBrokerServiceServer()
 }
@@ -114,6 +128,9 @@ func (UnimplementedBrokerServiceServer) AgentUpdate(grpc.BidiStreamingServer[Age
 }
 func (UnimplementedBrokerServiceServer) RequestSession(context.Context, *SessionRequest) (*ExecutionStatus, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RequestSession not implemented")
+}
+func (UnimplementedBrokerServiceServer) KillSession(context.Context, *KillSessionRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method KillSession not implemented")
 }
 func (UnimplementedBrokerServiceServer) ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSessions not implemented")
@@ -164,6 +181,24 @@ func _BrokerService_RequestSession_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BrokerService_KillSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KillSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BrokerServiceServer).KillSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BrokerService_KillSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BrokerServiceServer).KillSession(ctx, req.(*KillSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _BrokerService_ListSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListSessionsRequest)
 	if err := dec(in); err != nil {
@@ -192,6 +227,10 @@ var BrokerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RequestSession",
 			Handler:    _BrokerService_RequestSession_Handler,
+		},
+		{
+			MethodName: "KillSession",
+			Handler:    _BrokerService_KillSession_Handler,
 		},
 		{
 			MethodName: "ListSessions",

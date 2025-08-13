@@ -18,6 +18,7 @@ package velda;
 import "execution.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "velda.io/velda/pkg/proto";
@@ -30,7 +31,7 @@ message AgentIdentity {
 
 message AgentUpdateRequest {
   AgentIdentity agent_identity = 1;
- 
+
   SessionInitResponse session_init_response = 2;
   SessionCompletion session_completion = 3;
 
@@ -118,7 +119,7 @@ message SessionRequest {
 
   // When requesting with a service name only, a new session will always be
   // created.
-  // 
+  //
   // Used to create multiple sessions for the same service name.
   // If not set, it will reuse the existing session if available.
   // Note: This API may change, we may use dedicated manifest to configure
@@ -154,9 +155,7 @@ message AgentSessionInfo {
     string nfs_server = 1;
     string nfs_path = 2;
   }
-  oneof file_mount {
-    NfsMount nfs_mount = 1;
-  }
+  oneof file_mount { NfsMount nfs_mount = 1; }
 }
 
 message SessionInitResponse {
@@ -177,8 +176,16 @@ message SessionCompletion {
   bool checkpointed = 4;
 }
 
+message KillSessionAgentRequest {
+  int64 instance_id = 1;
+  string session_id = 2;
+
+  bool force = 3;
+}
+
 message AgentUpdateResponse {
   SessionRequest session_request = 1;
+  KillSessionAgentRequest kill_session_request = 2;
 }
 
 message ExecutionStatus {
@@ -211,7 +218,7 @@ message ExecutionStatus {
     // before connecting to the agent.
     bytes host_key = 3;
 
-    reserved 4,5;
+    reserved 4, 5;
   }
   SshConnection ssh_connection = 5;
 }
@@ -233,31 +240,45 @@ message Session {
   string internal_ip_address = 8;
 }
 
-message ListSessionsResponse {
-  repeated Session sessions = 1;
-}
+message ListSessionsResponse { repeated Session sessions = 1; }
 
 message AttachSessionRequest {
   int64 instance_id = 1;
   string session_id = 2;
 }
 
+message KillSessionRequest {
+  int64 instance_id = 1;
+  string session_id = 2;
+  string service_name = 3;
+
+  // If true, will kill through Cgroup's kill switch.
+  // If false, will send a SIGTERM to the main daemon.
+  bool force = 4;
+}
+
 // The broker service.
 service BrokerService {
   rpc AgentUpdate(stream AgentUpdateRequest)
-     returns (stream AgentUpdateResponse);
+      returns (stream AgentUpdateResponse);
 
   rpc RequestSession(SessionRequest) returns (ExecutionStatus) {
     option (google.api.http) = {
-      post: "/broker/v1/session"
-      body: "*"
+      post : "/broker/v1/session"
+      body : "*"
+    };
+  }
+
+  rpc KillSession(KillSessionRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post : "/broker/v1/session/kill"
+      body : "*"
     };
   }
 
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse) {
     option (google.api.http) = {
-			get: "/broker/v1/sessions"
-		};
+      get : "/broker/v1/sessions"
+    };
   }
 }
-

@@ -15,7 +15,9 @@ package cases
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,5 +55,60 @@ func testUbuntu(t *testing.T) {
 		output, err := runCommandGetOutput("vrun", "cat", "testfile2")
 		assert.NoError(t, err, "Failed to read test file")
 		assert.Equal(t, "foo\n", output, "File content should match expected output")
+	})
+
+	t.Run("KillSession", func(t *testing.T) {
+		complete := make(chan struct{})
+		go func() {
+			start := time.Now()
+			runCommand("vrun", "-s", "victim", "sleep", "10")
+			assert.Less(t, time.Since(start), 5*time.Second, "Session should be killed before 5 seconds")
+			close(complete)
+		}()
+		started := false
+		for {
+			output, err := runVeldaWithOutput("ls", "--instance", instanceName)
+			require.NoError(t, err, "Failed to list sessions")
+			if strings.Contains(output, "RUNNING  victim") {
+				break
+			}
+			if strings.Contains(output, "victim") {
+				started = true
+				time.Sleep(10 * time.Millisecond)
+			} else if started {
+				t.FailNow()
+			}
+		}
+
+		require.NoError(t, runVelda("kill-session", "--instance", instanceName, "-s", "victim"))
+		<-complete
+	})
+
+	t.Run("KillSessionForce", func(t *testing.T) {
+		complete := make(chan struct{})
+		go func() {
+			start := time.Now()
+			log.Printf("Starting session %s", "victim")
+			runCommand("-s", "victim", "bash", "-c", "trap \"\" SIGTERM; sleep 100; ls")
+			assert.Less(t, time.Since(start), 5*time.Second, "Session should be killed before 5 seconds")
+			close(complete)
+		}()
+		started := false
+		for {
+			output, err := runVeldaWithOutput("ls", "--instance", instanceName)
+			require.NoError(t, err, "Failed to list sessions")
+			if strings.Contains(output, "RUNNING  victim") {
+				break
+			}
+			if strings.Contains(output, "victim") {
+				started = true
+				time.Sleep(10 * time.Millisecond)
+			} else if started {
+				t.FailNow()
+			}
+		}
+
+		require.NoError(t, runVelda("kill-session", "--instance", instanceName, "-s", "victim", "--force"))
+		<-complete
 	})
 }

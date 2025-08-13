@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"velda.io/velda/pkg/db"
 	"velda.io/velda/pkg/proto"
@@ -210,6 +211,40 @@ func (s *server) ListSessions(ctx context.Context, req *proto.ListSessionsReques
 		resp.Sessions = append(resp.Sessions, sessionProto)
 	}
 	return resp, nil
+}
+
+func (s *server) KillSession(ctx context.Context, req *proto.KillSessionRequest) (*emptypb.Empty, error) {
+	if err := s.permissions.Check(ctx, rbac.Action("instance.kill_session"), fmt.Sprintf("instances/%d", req.InstanceId)); err != nil {
+		return nil, err
+	}
+
+	var sessions []*Session
+	if req.ServiceName != "" {
+		var err error
+		sessions, err = s.sessions.ListSessionForService(req.InstanceId, req.ServiceName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list sessions for service %s: %v", req.ServiceName, err)
+		}
+		if len(sessions) == 0 {
+			return nil, fmt.Errorf("no sessions found for service %s", req.ServiceName)
+		}
+	} else {
+		session, err := s.sessions.GetSession(req.InstanceId, req.SessionId)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get session: %v", err)
+		}
+		if session == nil {
+			return nil, fmt.Errorf("session %s not found", req.SessionId)
+		}
+		sessions = []*Session{session}
+	}
+	log.Printf("Killing %d session for instance %d with service name %s", len(sessions), req.InstanceId, req.ServiceName)
+	for _, session := range sessions {
+		if err := session.Kill(ctx, req.Force); err != nil {
+			return nil, fmt.Errorf("failed to kill session: %v", err)
+		}
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func (s *server) UpdateTaskResult(ctx context.Context, session *Session, result *proto.BatchTaskResult) error {

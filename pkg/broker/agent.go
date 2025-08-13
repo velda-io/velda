@@ -67,6 +67,7 @@ type Agent struct {
 	slots      int
 	mySessions map[SessionKey]*Session
 	statusChan chan AgentStatusRequest
+	killChan   chan *proto.KillSessionAgentRequest
 
 	receiving bool
 	stopping  bool
@@ -98,6 +99,7 @@ func newAgent(initialReq *proto.AgentUpdateRequest, peerInfo *peer.Peer, schedul
 		cancelConfirm: make(chan struct{}, 1),
 		mySessions:    make(map[SessionKey]*Session),
 		statusChan:    make(chan AgentStatusRequest, 1),
+		killChan:      make(chan *proto.KillSessionAgentRequest, 1),
 	}
 }
 
@@ -211,6 +213,16 @@ func (a *Agent) Run(
 				err = nil
 			}
 			stop(err)
+		case kill := <-a.killChan:
+			resChan <- func() {
+				response := &proto.AgentUpdateResponse{
+					KillSessionRequest: kill,
+				}
+				if err := stream.Send(response); err != nil {
+					log.Printf("Failed to send kill request for session %s to agent %s: %v", kill.SessionId, a.id, err)
+					stop(err)
+				}
+			}
 		case reqData := <-a.sessionReq:
 			a.receiving = false
 			if a.stopping {
@@ -270,6 +282,23 @@ func (a *Agent) Run(
 	}
 
 	return finalErr
+}
+
+func (a *Agent) RequestKill(ctx context.Context, instanceId int64, sessionId string, force bool) error {
+	key := SessionKey{
+		InstanceId: instanceId,
+		SessionId:  sessionId,
+	}
+	_, ok := a.mySessions[key]
+	if !ok {
+		return fmt.Errorf("session %s not found on agent %s", key, a.id)
+	}
+	a.killChan <- &proto.KillSessionAgentRequest{
+		InstanceId: instanceId,
+		SessionId:  sessionId,
+		Force:      force,
+	}
+	return nil
 }
 
 func (a *Agent) handleSessionUpdate(ctx context.Context, resp *proto.AgentUpdateRequest) error {

@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -364,6 +364,16 @@ func (s *Session) Complete(finalStatus proto.SessionExecutionFinalState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.completeLocked(finalStatus)
+}
+
+func (s *Session) Kill(ctx context.Context, force bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status.Status == proto.ExecutionStatus_STATUS_RUNNING {
+		return s.agent.RequestKill(ctx, s.Request.InstanceId, s.Request.SessionId, force)
+	}
+	// TODO: Maybe remove from the queue?
+	return fmt.Errorf("Session %s is not running, cannot kill", s.id)
 }
 
 func (s *Session) completeLocked(finalStatus proto.SessionExecutionFinalState) {
