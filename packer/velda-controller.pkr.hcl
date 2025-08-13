@@ -39,9 +39,10 @@ source "amazon-ebs" "velda-controller" {
 
   instance_type   = var.instance_type
   ssh_username    = var.ssh_username
+  ami_virtualization_type = "hvm"
   ami_name        = "velda-controller-${var.version}"
   ami_description = "AMI for Velda controller"
-  ami_users       = ["all"]
+  ami_groups       = ["all"]
   run_tags = {
     Name = "Controller Packer Builder"
   }

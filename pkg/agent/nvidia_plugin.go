@@ -107,5 +107,5 @@ func (p *NvidiaPlugin) Run(ctx context.Context) error {
 }
 
 func (p *NvidiaPlugin) HasGpu() bool {
-	return os.Getenv("VELDA_NVIDIA_DIR") != "" && p.config.GetNvidiaDriverInstallDir() != ""
+	return os.Getenv("VELDA_NVIDIA_DIR") != "" || p.config.GetNvidiaDriverInstallDir() != ""
 }
