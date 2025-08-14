@@ -1,10 +1,12 @@
+//go:build k8s
+
 // Copyright 2025 Velda Inc
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,7 +24,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"velda.io/velda/pkg/broker/backends/backend_testing"
@@ -72,17 +73,13 @@ func TestK8sBackend(t *testing.T) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	assert.NoError(t, err)
 
-	// Create Kubernetes client
-	clientset, err := kubernetes.NewForConfig(config)
-	assert.NoError(t, err)
-
 	decoder := yaml.NewYAMLToJSONDecoder(strings.NewReader(agentTemplate))
 	pod := &corev1.Pod{}
 	if !assert.NoError(t, decoder.Decode(pod)) {
 		t.FailNow()
 	}
 
-	backend := NewK8sPoolBackend(clientset, pod, agentSelector)
+	backend := NewK8sPoolBackend(config, pod, agentSelector)
 
 	backend_testing.TestSimpleScaleUpDown(t, backend)
 }

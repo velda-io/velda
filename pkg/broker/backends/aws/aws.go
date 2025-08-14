@@ -1,3 +1,5 @@
+//go:build aws
+
 // Copyright 2025 Velda Inc
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,9 +20,10 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
@@ -33,41 +36,49 @@ type awsPoolBackend struct {
 	launchTemplateId    string
 	instanceNamePrefix  string
 	useInstanceIdAsName bool
-	svc                 *ec2.EC2
-	lastOp              *ec2.DescribeInstancesOutput
-	instanceIdMap       map[string]string
+	// Do not store ec2.Client here, as it will export all methods of ec2.Client and expode the binary size.
+	// Seems awsPoolBackend[UsedInIface] will export all fields of awsPoolBackend.
+	awsCfg        aws.Config
+	lastOp        *ec2.DescribeInstancesOutput
+	instanceIdMap map[string]string
 }
 
 func NewAWSPoolBackend(region, launchTemplateId, instanceNamePrefix string, useInstanceIdAsName bool,
-	svc *ec2.EC2) broker.ResourcePoolBackend {
+	awsCfg aws.Config) broker.ResourcePoolBackend {
 	// Fetch template ID from name
 	return &awsPoolBackend{
 		region:              region,
 		launchTemplateId:    launchTemplateId,
 		instanceNamePrefix:  instanceNamePrefix,
 		useInstanceIdAsName: useInstanceIdAsName,
-		svc:                 svc,
+		awsCfg:              awsCfg,
 		instanceIdMap:       make(map[string]string),
 	}
+}
+
+func (a *awsPoolBackend) svc() *ec2.Client {
+	return ec2.NewFromConfig(a.awsCfg, func(o *ec2.Options) {
+		o.Region = a.region
+	})
 }
 
 func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	nameSuffix := utils.RandString(5)
 	input := &ec2.RunInstancesInput{
-		LaunchTemplate: &ec2.LaunchTemplateSpecification{
+		LaunchTemplate: &ec2types.LaunchTemplateSpecification{
 			LaunchTemplateId: aws.String(a.launchTemplateId),
 			Version:          aws.String("$Default"),
 		},
-		MinCount: aws.Int64(1),
-		MaxCount: aws.Int64(1),
+		MinCount: aws.Int32(1),
+		MaxCount: aws.Int32(1),
 	}
 	var name string
 	if !a.useInstanceIdAsName {
 		name = fmt.Sprintf("%s%s", a.instanceNamePrefix, nameSuffix)
-		input.TagSpecifications = []*ec2.TagSpecification{
+		input.TagSpecifications = []ec2types.TagSpecification{
 			{
-				ResourceType: aws.String("instance"),
-				Tags: []*ec2.Tag{
+				ResourceType: ec2types.ResourceTypeInstance,
+				Tags: []ec2types.Tag{
 					{
 						Key:   aws.String("Name"),
 						Value: aws.String(name),
@@ -76,7 +87,7 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 			},
 		}
 	}
-	result, err := a.svc.RunInstancesWithContext(ctx, input)
+	result, err := a.svc().RunInstances(ctx, input)
 	if err != nil {
 		return "", err
 	}
@@ -101,14 +112,14 @@ func (a *awsPoolBackend) RequestDelete(ctx context.Context, workerName string) e
 		if !ok {
 			// Query from EC2
 			input := &ec2.DescribeInstancesInput{
-				Filters: []*ec2.Filter{
+				Filters: []ec2types.Filter{
 					{
 						Name:   aws.String("tag:Name"),
-						Values: []*string{aws.String(workerName)},
+						Values: []string{workerName},
 					},
 				},
 			}
-			result, err := a.svc.DescribeInstancesWithContext(ctx, input)
+			result, err := a.svc().DescribeInstances(ctx, input)
 			if err != nil {
 				return fmt.Errorf("Failed to find instance %s: %v", workerName, err)
 			}
@@ -119,9 +130,9 @@ func (a *awsPoolBackend) RequestDelete(ctx context.Context, workerName string) e
 		}
 	}
 	input := &ec2.TerminateInstancesInput{
-		InstanceIds: []*string{aws.String(instanceId)},
+		InstanceIds: []string{instanceId},
 	}
-	_, err := a.svc.TerminateInstancesWithContext(ctx, input)
+	_, err := a.svc().TerminateInstances(ctx, input)
 	if err != nil {
 		return err
 	}
@@ -132,20 +143,20 @@ func (a *awsPoolBackend) RequestDelete(ctx context.Context, workerName string) e
 func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus, error) {
 	// Filter by template ID
 	input := &ec2.DescribeInstancesInput{}
-	input.Filters = []*ec2.Filter{
+	input.Filters = []ec2types.Filter{
 		{
 			Name:   aws.String("tag:aws:ec2launchtemplate:id"),
-			Values: []*string{aws.String(a.launchTemplateId)},
+			Values: []string{a.launchTemplateId},
 		},
 	}
-	result, err := a.svc.DescribeInstancesWithContext(ctx, input)
+	result, err := a.svc().DescribeInstances(ctx, input)
 	if err != nil {
 		return nil, err
 	}
 	var res []broker.WorkerStatus
 	for _, reservation := range result.Reservations {
 		for _, instance := range reservation.Instances {
-			if *instance.State.Name == "terminated" || *instance.State.Name == "shutting-down" {
+			if instance.State.Name == "terminated" || instance.State.Name == "shutting-down" {
 				continue
 			}
 			name := ""
@@ -189,22 +200,21 @@ func (f *awsPoolFactory) CanHandle(pb *proto.AutoscalerBackend) bool {
 }
 
 func (f *awsPoolFactory) NewBackend(pb *proto.AutoscalerBackend) (broker.ResourcePoolBackend, error) {
+	ctx := context.Background()
 	awsTemplate := pb.GetAwsLaunchTemplate()
 	prefix := awsTemplate.InstanceNamePrefix
 	if prefix == "" {
 		prefix = awsTemplate.LaunchTemplateName + "-"
 	}
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(awsTemplate.Region),
-	})
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
-	svc := ec2.New(sess)
+	svc := ec2.NewFromConfig(cfg)
 	// Find template ID
 	var input ec2.DescribeLaunchTemplatesInput
-	input.LaunchTemplateNames = []*string{aws.String(awsTemplate.LaunchTemplateName)}
-	result, err := svc.DescribeLaunchTemplates(&input)
+	input.LaunchTemplateNames = []string{awsTemplate.LaunchTemplateName}
+	result, err := svc.DescribeLaunchTemplates(ctx, &input)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +222,7 @@ func (f *awsPoolFactory) NewBackend(pb *proto.AutoscalerBackend) (broker.Resourc
 		return nil, fmt.Errorf("Launch template %s not found", awsTemplate.LaunchTemplateName)
 	}
 	launchTemplateId := *result.LaunchTemplates[0].LaunchTemplateId
-	return NewAWSPoolBackend(awsTemplate.Region, launchTemplateId, prefix, awsTemplate.UseInstanceIdAsName, svc), nil
+	return NewAWSPoolBackend(awsTemplate.Region, launchTemplateId, prefix, awsTemplate.UseInstanceIdAsName, cfg), nil
 }
 
 func init() {
