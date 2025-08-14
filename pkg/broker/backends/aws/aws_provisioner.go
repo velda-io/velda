@@ -1,10 +1,12 @@
+//go:build aws
+
 // Copyright 2025 Velda Inc
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,9 +22,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ssm"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
+
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 	"velda.io/velda/pkg/broker"
@@ -32,7 +36,7 @@ import (
 
 type AwsPoolProvisioner struct {
 	schedulerSet    *broker.SchedulerSet
-	ssmClient       *ssm.SSM
+	ssmClient       *ssm.Client
 	lastSeenVersion map[string]time.Time
 	lastSeenTime    map[string]time.Time
 	cfg             *configpb.AWSProvisioner
@@ -55,7 +59,7 @@ func (p *AwsPoolProvisioner) run(ctx context.Context) {
 		var nextToken *string
 
 		for {
-			output, err := p.ssmClient.GetParametersByPath(&ssm.GetParametersByPathInput{
+			output, err := p.ssmClient.GetParametersByPath(ctx, &ssm.GetParametersByPathInput{
 				Path:      aws.String(p.cfg.ConfigPrefix + "/"),
 				NextToken: nextToken,
 			})
@@ -67,7 +71,7 @@ func (p *AwsPoolProvisioner) run(ctx context.Context) {
 			for _, param := range output.Parameters {
 				lastVersion, ok := p.lastSeenVersion[*param.Name]
 				if !ok || lastVersion.Before(*param.LastModifiedDate) {
-					err := p.update(ctx, param, !ok)
+					err := p.update(ctx, &param, !ok)
 					if err != nil {
 						log.Printf("Failed to update pool %s: %v", *param.Name, err)
 					}
@@ -102,7 +106,7 @@ func (p *AwsPoolProvisioner) run(ctx context.Context) {
 	}
 }
 
-func (p *AwsPoolProvisioner) update(ctx context.Context, param *ssm.Parameter, new bool) error {
+func (p *AwsPoolProvisioner) update(ctx context.Context, param *ssmtypes.Parameter, new bool) error {
 	cfg := param.Value
 	obj := &configpb.AgentPool{}
 	var yamlObj map[string]interface{}
@@ -139,13 +143,12 @@ type AwsPoolProvisionerFactory struct{}
 
 func (*AwsPoolProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedulers *broker.SchedulerSet) (backends.Provisioner, error) {
 	cfgAws := cfg.GetAws()
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(cfgAws.Region),
-	})
+	awsCfg, err := config.LoadDefaultConfig(context.TODO())
+
 	if err != nil {
 		return nil, err
 	}
-	ssmClient := ssm.New(sess)
+	ssmClient := ssm.NewFromConfig(awsCfg)
 	return &AwsPoolProvisioner{
 		schedulerSet: schedulers,
 		ssmClient:    ssmClient,

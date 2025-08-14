@@ -1,10 +1,12 @@
+//go:build k8s
+
 // Copyright 2025 Velda Inc
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,7 +35,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
@@ -98,7 +99,7 @@ func toAgentPool(obj interface{}) (*AgentPool, error) {
 type K8sProvisioner struct {
 	schedulerSet *broker.SchedulerSet
 	client       dynamic.ResourceInterface
-	clientset    *kubernetes.Clientset
+	cfg          *rest.Config
 }
 
 func (p *K8sProvisioner) Run(ctx context.Context) {
@@ -163,7 +164,7 @@ func (p *K8sProvisioner) update(obj interface{}, new bool) error {
 	}
 	filter := strings.Join(filters, ",")
 
-	backend := NewK8sPoolBackend(p.clientset, &template, filter)
+	backend := NewK8sPoolBackend(p.cfg, &template, filter)
 	// TODO: Should reset current backend?
 	pool.PoolManager.UpdateConfig(&broker.AutoScaledPoolConfig{
 		Backend:              backend,
@@ -220,12 +221,6 @@ func (*K8sProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedule
 		return nil, err
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
-
-	if err != nil {
-		return nil, err
-	}
-
 	// Define GVR for the custom resource
 	gvr := schema.GroupVersionResource{
 		Group:    "velda.io",
@@ -235,7 +230,7 @@ func (*K8sProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedule
 
 	return &K8sProvisioner{
 		client:       client.Resource(gvr).Namespace(cfg.GetKubernetes().Namespace),
-		clientset:    clientset,
+		cfg:          config,
 		schedulerSet: schedulers,
 	}, nil
 }
