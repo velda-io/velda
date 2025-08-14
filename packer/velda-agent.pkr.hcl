@@ -30,11 +30,6 @@ variable "driver_version" {
   default = "570.172.08"
 }
 
-variable "ssh_username" {
-  type    = string
-  default = "ubuntu"
-}
-
 variable "ami_regions" {
   type    = list(string)
   default = []
@@ -60,7 +55,7 @@ source "googlecompute" "velda-agent" {
   zone                   = var.gce_zone
   source_image_family    = "ubuntu-2404-lts-amd64"
   machine_type           = var.machine_type
-  ssh_username           = var.ssh_username
+  ssh_username           = "ubuntu"
   disk_size              = 10
   image_name             = "velda-agent-${var.version}"
   image_family           = "velda-agent"
@@ -74,7 +69,7 @@ source "amazon-ebs" "velda-agent" {
   region = var.aws_region
   source_ami_filter {
     filters = {
-      name                = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
+      name                = "ubuntu-minimal/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-minimal-*"
       virtualization-type = "hvm"
       root-device-type    = "ebs"
     }
@@ -82,7 +77,7 @@ source "amazon-ebs" "velda-agent" {
     most_recent = true
   }
   instance_type   = var.instance_type
-  ssh_username    = var.ssh_username
+  ssh_username    = "ubuntu"
   ami_name        = "velda-agent-${var.version}"
   ami_virtualization_type = "hvm"
   ami_description = "AMI for Velda Agent"
@@ -102,12 +97,37 @@ build {
     "source.googlecompute.velda-agent"
   ]
 
-  // Remove snapd for faster boot time.
+  // Make boot faster
   provisioner "shell" {
-    only = ["googlecompute.velda-agent"]
     inline = [
-      "sudo apt purge snapd -y",
-      "sudo systemctl disable getty@tty1.service",
+      // Mask unnecessary services.
+      "sudo systemctl mask getty@tty1.service",
+      "sudo systemctl mask man-db.service apt-daily.service apt-daily-upgrade.service",
+      "sudo systemctl mask snapd.service snapd.seeded.service",
+      "sudo systemctl mask unattended-upgrades.service",
+      // Only probe for Ec2 metadata server.
+      <<-EOT
+      cat << EOF | sudo tee /etc/cloud/cloud.cfg.d/99-disable-cloud-init-networking.cfg
+      datasource:
+        Ec2:
+          metadata_urls: [ "http://169.254.169.254" ]
+          strict_id: true
+      EOF
+      EOT
+      ,
+      // Move ssh init to cloud-init-config stage
+      <<-EOF
+      sudo sed -E -i.bak '
+      # Save indentation from ssh_import_id line and insert ssh before it
+      /^([[:space:]]*)- ssh_import_id/ {
+        h                              # store ssh_import_id line
+        s//\1- ssh/                    # replace with ssh (same indent)
+        G                              # append original ssh_import_id after ssh
+      }
+      # Delete any existing - ssh line elsewhere in the file
+      /^([[:space:]]*)- ssh$/d
+      ' /etc/cloud/cloud.cfg
+      EOF
     ]
   }
 
@@ -115,7 +135,6 @@ build {
     inline = [
       "sudo apt-get update",
       "sudo apt-get install -y nfs-common --no-install-recommends",
-      "sudo mkdir -p /tmp/agentdisk",
       "mkdir /tmp/velda-install"
     ]
   }
@@ -139,11 +158,11 @@ Description=Velda agent
 # Wait until the config is provided.
 After=cloud-init.service google-startup-scripts.service
 
-After=nvidia-init.service
+After=dev-nvidiactl.device
 
 [Service]
 Type=simple
-ExecStart=/bin/velda-agent agent daemon
+ExecStart=sh -c 'echo start && exec /bin/velda-agent agent daemon'
 Restart=always
 RestartSec=5
 Environment="PATH=/usr/bin:/bin:/snap/bin"
@@ -178,27 +197,9 @@ EOF
     ]
   }
 
-  provisioner "file" {
-    content     = <<EOF
-[Unit]
-Description=Initialize NVIDIA devices at boot
-
-[Service]
-Type=oneshot
-ExecStart=sh -c "lspci | grep -q NVIDIA && /var/nvidia/bin/nvidia-smi"
-Environment="LD_LIBRARY_PATH=/var/nvidia/lib"
-
-[Install]
-WantedBy=sysinit.target
-EOF
-    destination = "/tmp/nvidia-init.service"
-  }
-
   provisioner "shell" {
     inline = [
       // Unattended upgrader may upgrade the kernel and break the nvidia driver.
-      "sudo cp /tmp/nvidia-init.service /usr/lib/systemd/system/nvidia-init.service",
-      "sudo systemctl enable nvidia-init.service",
       "echo Downloading nvidia driver",
       "wget -q https://developer.download.nvidia.com/compute/nvidia-driver/redist/nvidia_driver/linux-x86_64/nvidia_driver-linux-x86_64-${var.driver_version}-archive.tar.xz",
       "echo Unpacking nvidia driver",
@@ -222,6 +223,15 @@ EOF
       # Build the kernel driver.
       "cd nvidia_driver-linux-x86_64-${var.driver_version}-archive/kernel && make -j $(nproc) && sudo make -j $(nproc) modules_install && sudo depmod -a",
       "rm -rf nvidia_driver-linux-x86_64-${var.driver_version}-archive*",
+      <<-EOT
+      cat <<EOF | sudo tee /etc/modules-load.d/nvidia.conf
+      nvidia
+      nvidia_uvm
+      nvidia_modeset
+      nvidia_drm
+      EOF
+      EOT
+      ,
     ]
   }
   post-processor "manifest" {
