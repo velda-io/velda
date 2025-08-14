@@ -22,7 +22,12 @@ variable "aws_region" {
 
 variable "instance_type" {
   type    = string
-  default = "t2.micro"
+  default = "m4.2xlarge"
+}
+
+variable "driver_version" {
+  type    = string
+  default = "570.172.08"
 }
 
 variable "ssh_username" {
@@ -47,7 +52,7 @@ variable "gce_zone" {
 
 variable "machine_type" {
   type    = string
-  default = "e2-medium"
+  default = "e2-standard-4"
 }
 
 source "googlecompute" "velda-agent" {
@@ -173,6 +178,52 @@ EOF
     ]
   }
 
+  provisioner "file" {
+    content     = <<EOF
+[Unit]
+Description=Initialize NVIDIA devices at boot
+
+[Service]
+Type=oneshot
+ExecStart=sh -c "lspci | grep -q NVIDIA && /var/nvidia/bin/nvidia-smi"
+Environment="LD_LIBRARY_PATH=/var/nvidia/lib"
+
+[Install]
+WantedBy=sysinit.target
+EOF
+    destination = "/tmp/nvidia-init.service"
+  }
+
+  provisioner "shell" {
+    inline = [
+      // Unattended upgrader may upgrade the kernel and break the nvidia driver.
+      "sudo cp /tmp/nvidia-init.service /usr/lib/systemd/system/nvidia-init.service",
+      "sudo systemctl enable nvidia-init.service",
+      "echo Downloading nvidia driver",
+      "wget -q https://developer.download.nvidia.com/compute/nvidia-driver/redist/nvidia_driver/linux-x86_64/nvidia_driver-linux-x86_64-${var.driver_version}-archive.tar.xz",
+      "echo Unpacking nvidia driver",
+      "tar -xf nvidia_driver-linux-x86_64-${var.driver_version}-archive.tar.xz",
+      "sudo mkdir -p /var/nvidia/lib",
+      "sudo mkdir -p /var/nvidia/bin",
+      "echo Instaling nvidia driver for kernel $(uname -r)",
+      "sudo apt install -y linux-headers-$(uname -r) gcc make",
+      "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/lib/* /var/nvidia/lib",
+      "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/sbin/* /var/nvidia/bin",
+
+      "sudo mkdir -p /var/nvidia/x11/extensions",
+      "sudo mkdir -p /var/nvidia/x11/drivers",
+      "sudo ln -s ../../lib/libglxserver_nvidia.so.${var.driver_version} /var/nvidia/x11/extensions/glx.so",
+      "sudo ln -s ../../lib/nvidia_drv.so /var/nvidia/x11/drivers/nvidia_drv.so",
+      # Create name based on SONAME. Skip if file already exists.
+      "for i in /var/nvidia/lib/*.so.*; do sudo ln -s $(basename $i) $(dirname $i)/$(echo $(basename $i) | grep -o .*so)1 || true; done",
+      "for i in /var/nvidia/lib/*.so.*.*; do sudo ln -s $(basename $i) $(dirname $i)/$(objdump -p $i | grep SONAME | awk '{print $2}') || true; done",
+      # Some library references libcuda.so instead of SONAME, so we need to create a symlink.
+      "sudo ln -s libcuda.so.1 /var/nvidia/lib/libcuda.so",
+      # Build the kernel driver.
+      "cd nvidia_driver-linux-x86_64-${var.driver_version}-archive/kernel && make -j $(nproc) && sudo make -j $(nproc) modules_install && sudo depmod -a",
+      "rm -rf nvidia_driver-linux-x86_64-${var.driver_version}-archive*",
+    ]
+  }
   post-processor "manifest" {
     only   = ["amazon-ebs.velda-agent"]
     output = "base-aws.json"
