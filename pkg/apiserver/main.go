@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,6 @@ package apiserver
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/spf13/pflag"
 
 	_ "velda.io/velda/pkg/broker/backends/aws"
 	_ "velda.io/velda/pkg/broker/backends/cmd"
@@ -32,10 +32,10 @@ import (
 )
 
 var (
-	configPath = flag.String("config", "config.yaml", "Configuration file")
+	configPath string
 	// If set to false, the service will exit on configuration change
 	// This will allow the service to be restarted by a systemd service or other process manager
-	restartOnConfigChange = flag.Bool("restart-on-config-change", false, "Restart service on configuration change")
+	restartOnConfigChange bool
 	allMetrics            = prometheus.NewRegistry()
 )
 
@@ -74,15 +74,21 @@ func initService(s Service, configPath string) error {
 	return nil
 }
 
-func Main(s Service) {
-	flag.Parse()
+func AddFlags(flags *pflag.FlagSet) {
+	flags.String("config", "config.yaml", "Path to the configuration file")
+	flags.Bool("restart-on-config-change", true, "Restart service on configuration change")
+}
+
+func Main(s Service, flags *pflag.FlagSet) {
+	configPath, _ = flags.GetString("config")
+	restartOnConfigChange, _ = flags.GetBool("restart-on-config-change")
 	go func() {
 		http.Handle("/metrics", promhttp.HandlerFor(allMetrics, promhttp.HandlerOpts{}))
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 	for {
 		err := runService(s)
-		if errors.Is(err, ConfigChanged) && *restartOnConfigChange {
+		if errors.Is(err, ConfigChanged) && restartOnConfigChange {
 			log.Println("Configuration changed, restarting service")
 			continue
 		}
@@ -97,7 +103,7 @@ func runService(svc Service) error {
 	t := reflect.TypeOf(svc).Elem()
 	svc = reflect.New(t).Interface().(Service)
 
-	if err := initService(svc, *configPath); err != nil {
+	if err := initService(svc, configPath); err != nil {
 		return fmt.Errorf("Failed to initialize service: %v", err)
 	}
 	metrics := svc.ExportedMetrics()

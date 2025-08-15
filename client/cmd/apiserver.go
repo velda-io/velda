@@ -11,18 +11,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package main
+package cmd
 
 import (
-	"os"
-
-	"github.com/spf13/pflag"
+	"github.com/spf13/cobra"
 	"velda.io/velda/pkg/apiserver"
 )
 
-func main() {
-	flags := pflag.NewFlagSet("apiserver", pflag.ExitOnError)
-	apiserver.AddFlags(flags)
-	flags.Parse(os.Args[1:])
-	apiserver.Main(&apiserver.OssService{}, flags)
+var apiServerCmd = &cobra.Command{
+	Use:   "apiserver",
+	Short: "Start API server",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		apiserver.Main(&apiserver.OssService{}, cmd.Flags())
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(apiServerCmd)
+	apiserver.AddFlags(apiServerCmd.Flags())
 }
