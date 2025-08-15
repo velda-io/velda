@@ -22,7 +22,6 @@ import (
 	_ "net/http/pprof"
 	"reflect"
 
-	_ "github.com/jackc/pgx/v4/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
