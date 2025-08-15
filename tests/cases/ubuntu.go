@@ -14,9 +14,7 @@
 package cases
 
 import (
-	"fmt"
 	"log"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -25,10 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testUbuntu(t *testing.T) {
+func testUbuntu(t *testing.T, r Runner) {
 	// Create a unique test instance for image operations
-	instanceName := fmt.Sprintf("ubuntu-test-%d-%d", os.Getpid(), time.Now().Unix())
-	require.NoError(t, runVelda("instance", "create", instanceName, "--image", "ubuntu"))
+	instanceName := r.CreateTestInstance(t, "ubuntu-test", "ubuntu")
 	defer func() {
 		// Clean up the instance after tests
 		_ = runVelda("instance", "delete", instanceName)

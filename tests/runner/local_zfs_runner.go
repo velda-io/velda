@@ -199,3 +199,14 @@ func (r *LocalZfsRunner) TearDown(t *testing.T) {
 func (r *LocalZfsRunner) Supports(feature cases.Feature) bool {
 	return true
 }
+
+func (r *LocalZfsRunner) CreateTestInstance(t *testing.T, namePrefix string, image string) string {
+	instanceName := fmt.Sprintf("%s-%d", namePrefix, time.Now().Unix())
+	args := []string{"instance", "create", instanceName}
+	if image != "" {
+		args = append(args, "--image", image)
+	}
+	require.NoError(t, exec.Command("velda", args...).Run(),
+		"Failed to create test instance")
+	return instanceName
+}

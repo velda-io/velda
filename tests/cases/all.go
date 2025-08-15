@@ -19,13 +19,17 @@ func RunAllTests(t *testing.T, runner Runner) {
 	runner.Setup(t)
 	defer runner.TearDown(t)
 	t.Run("Basic", func(t *testing.T) {
-		t.Run("SCPCommand", testScpCommand)
-		t.Run("ImagesCommand", testImagesCommand)
+		t.Run("SCPCommand", func(t *testing.T) {
+			testScpCommand(t, runner)
+		})
+		t.Run("ImagesCommand", func(t *testing.T) {
+			testImagesCommand(t, runner)
+		})
 	})
 	t.Run("Ubuntu", func(t *testing.T) {
 		if !runner.Supports("ubuntu") {
 			t.Skip("Ubuntu tests are not supported by this runner")
 		}
-		testUbuntu(t)
+		testUbuntu(t, runner)
 	})
 }
