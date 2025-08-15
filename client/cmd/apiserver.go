@@ -29,6 +29,5 @@ var apiServerCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(apiServerCmd)
-	apiServerCmd.Flags().String("config", "config.yaml", "Configuration file")
-	apiServerCmd.Flags().Bool("restart-on-config-change", false, "Restart service on configuration change")
+	apiserver.AddFlags(apiServerCmd.Flags())
 }

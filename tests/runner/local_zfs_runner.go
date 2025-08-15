@@ -35,6 +35,7 @@ type LocalZfsRunner struct {
 	suiteName string
 	configDir string
 	apiServer *exec.Cmd
+	veldaBin  string
 }
 
 func NewLocalRunner(zfsRoot string) *LocalZfsRunner {
@@ -165,6 +166,7 @@ agent_pools:
 	if err := exec.Command(veldaBin, "init", "--broker", "localhost:50051").Run(); err != nil {
 		t.Fatalf("Failed to initialize Velda client: %v", err)
 	}
+	r.veldaBin = veldaBin
 }
 
 func initializeImages(t *testing.T, zfsRoot, target string) {
@@ -206,7 +208,7 @@ func (r *LocalZfsRunner) CreateTestInstance(t *testing.T, namePrefix string, ima
 	if image != "" {
 		args = append(args, "--image", image)
 	}
-	require.NoError(t, exec.Command("velda", args...).Run(),
+	require.NoError(t, exec.Command(r.veldaBin, args...).Run(),
 		"Failed to create test instance")
 	return instanceName
 }
