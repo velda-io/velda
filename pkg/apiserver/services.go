@@ -84,10 +84,12 @@ func (s *OssService) InitConfig(configPath string) error {
 	s.ExecError = make(chan error, 1)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
-	var err error
-	s.Config, err = utils.LoadConfig(configPath)
-	if err != nil {
-		return fmt.Errorf("Failed to load configuration: %v", err)
+	if s.Config == nil {
+		var err error
+		s.Config, err = utils.LoadConfig(configPath)
+		if err != nil {
+			return fmt.Errorf("Failed to load configuration: %v", err)
+		}
 	}
 	return nil
 }

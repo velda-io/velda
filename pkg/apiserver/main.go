@@ -87,9 +87,12 @@ func Main(s Service, flags *pflag.FlagSet) {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 	for {
-		err := runService(s)
+		err := RunService(s)
 		if errors.Is(err, ConfigChanged) && restartOnConfigChange {
 			log.Println("Configuration changed, restarting service")
+			// Reset the instance.
+			t := reflect.TypeOf(s).Elem()
+			s = reflect.New(t).Interface().(Service)
 			continue
 		}
 		if err != nil {
@@ -99,10 +102,7 @@ func Main(s Service, flags *pflag.FlagSet) {
 	}
 }
 
-func runService(svc Service) error {
-	t := reflect.TypeOf(svc).Elem()
-	svc = reflect.New(t).Interface().(Service)
-
+func RunService(svc Service) error {
 	if err := initService(svc, configPath); err != nil {
 		return fmt.Errorf("Failed to initialize service: %v", err)
 	}
