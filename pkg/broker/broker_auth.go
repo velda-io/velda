@@ -23,19 +23,23 @@ import (
 	"velda.io/velda/pkg/proto"
 )
 
-type NfsExportAuth struct {
-	diskRoot string
+type LocalDiskProvider interface {
+	GetRoot(instanceId int64) string
 }
 
-func NewNfsExportAuth(diskRoot string) *NfsExportAuth {
+type NfsExportAuth struct {
+	disk LocalDiskProvider
+}
+
+func NewNfsExportAuth(disk LocalDiskProvider) *NfsExportAuth {
 	return &NfsExportAuth{
-		diskRoot: diskRoot,
+		disk: disk,
 	}
 }
 
 func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
 	instanceID := session.Request.InstanceId
-	exportPath := fmt.Sprintf("%s/%d", n.diskRoot, instanceID)
+	exportPath := n.disk.GetRoot(instanceID)
 	agentHost := agent.Host
 
 	// Use exportfs command to export NFS
@@ -69,7 +73,7 @@ func exportNFS(path, host string) error {
 func (n *NfsExportAuth) RevokeAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
 	// TODO: Add reference counting for same peer IP.
 	instanceID := session.Request.InstanceId
-	exportPath := fmt.Sprintf("%s/%d", n.diskRoot, instanceID)
+	exportPath := n.disk.GetRoot(instanceID)
 	agentHost := agent.Host
 
 	// Use exportfs command to unexport NFS

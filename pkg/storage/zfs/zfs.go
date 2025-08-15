@@ -214,3 +214,7 @@ func (z *Zfs) runCommand(ctx context.Context, command ...string) error {
 	}
 	return nil
 }
+
+func (z *Zfs) GetRoot(instanceId int64) string {
+	return fmt.Sprintf("/%s/%d", z.pool, instanceId)
+}

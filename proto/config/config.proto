@@ -31,8 +31,12 @@ message Storage {
   message Zfs {
     string pool = 1;
   }
+  message MiniVelda {
+    string root = 1;
+  }
   oneof storage {
     Zfs zfs = 1;
+    MiniVelda mini = 4;
   }
   reserved 2, 3;
 }

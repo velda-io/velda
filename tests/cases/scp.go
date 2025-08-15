@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testScpCommand(t *testing.T) {
+func testScpCommand(t *testing.T, r Runner) {
 	// Create a temporary test file
 	testContent := "This is a test file for SCP command testing"
 	tmpFile, err := os.CreateTemp("", "velda-scp-test-*.txt")
@@ -39,8 +39,7 @@ func testScpCommand(t *testing.T) {
 	if err := tmpFile.Close(); err != nil {
 		t.Fatalf("Failed to close temp file: %v", err)
 	}
-	instanceName := fmt.Sprintf("scp-instance-%d-%d", os.Getpid(), time.Now().Unix())
-	require.NoError(t, runVelda("instance", "create", instanceName))
+	instanceName := r.CreateTestInstance(t, "scp-test-instance", "")
 
 	// Test case 1: Basic file upload to instance
 	// Note: This assumes a test instance is available, otherwise this will fail

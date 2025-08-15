@@ -24,10 +24,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testImagesCommand(t *testing.T) {
+func testImagesCommand(t *testing.T, r Runner) {
+	if !r.Supports(FeatureImage) {
+		t.Skip("Image operations are not supported by this runner")
+	}
 	// Create a unique test instance for image operations
-	instanceName := fmt.Sprintf("img-test-instance-%d-%d", os.Getpid(), time.Now().Unix())
-	require.NoError(t, runVelda("instance", "create", instanceName))
+	instanceName := r.CreateTestInstance(t, "image-test-instance", "")
 	defer func() {
 		// Clean up the instance after tests
 		_ = runVelda("instance", "delete", instanceName)

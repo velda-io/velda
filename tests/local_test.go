@@ -29,3 +29,8 @@ func TestLocal(t *testing.T) {
 	runner := runner.NewLocalRunner(*zfsRoot)
 	cases.RunAllTests(t, runner)
 }
+
+func TestMini(t *testing.T) {
+	runner := runner.NewLocalMiniRunner(*zfsRoot)
+	cases.RunAllTests(t, runner)
+}

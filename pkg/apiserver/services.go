@@ -40,6 +40,7 @@ import (
 	configpb "velda.io/velda/pkg/proto/config"
 	"velda.io/velda/pkg/rbac"
 	"velda.io/velda/pkg/storage"
+	"velda.io/velda/pkg/storage/mini"
 	"velda.io/velda/pkg/storage/zfs"
 	"velda.io/velda/pkg/tasks"
 	"velda.io/velda/pkg/utils"
@@ -99,7 +100,13 @@ func (s *OssService) InitDatabase() error {
 		return fmt.Errorf("Failed to build storage: %v", err)
 	}
 
-	s.Db = zfs.NewZfsInstanceDb(s.Storage.(*zfs.Zfs))
+	if zfsdb, ok := s.Storage.(*zfs.Zfs); ok {
+		s.Db = zfs.NewZfsInstanceDb(zfsdb)
+	} else if minidb, ok := s.Storage.(*mini.MiniStorage); ok {
+		s.Db = mini.NewMiniInstanceDb(minidb)
+	} else {
+		return fmt.Errorf("Unsupported storage type: %T", s.Storage)
+	}
 	if err := s.Db.Init(); err != nil {
 		return fmt.Errorf("Failed to Initialize database: %v", err)
 	}
@@ -119,7 +126,7 @@ func (s *OssService) InitServices() error {
 	// Initialize task tracker
 	taskTrackerId := uuid.New().String()
 	s.TaskTracker = broker.NewTaskTracker(s.Schedulers, s.Sessions, s.Db.(broker.TaskQueueDb), taskTrackerId)
-	nfsAuth := broker.NewNfsExportAuth("/" + s.Storage.(*zfs.Zfs).Pool())
+	nfsAuth := broker.NewNfsExportAuth(s.Storage.(broker.LocalDiskProvider))
 	s.BrokerService = broker.NewBrokerServer(s.Schedulers, s.Sessions, s.Permissions, s.TaskTracker, nfsAuth, s.Db.(broker.TaskDb))
 
 	// Initialize other services
@@ -265,6 +272,8 @@ func BuildStorage(config *configpb.Storage) (storage.Storage, error) {
 	switch config.Storage.(type) {
 	case *configpb.Storage_Zfs_:
 		return zfs.NewZfs(config.GetZfs().Pool)
+	case *configpb.Storage_Mini:
+		return mini.NewMiniStorage(config.GetMini().Root)
 	default:
 		return nil, fmt.Errorf("Unknown storage type: %v", config.String())
 	}
