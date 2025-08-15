@@ -90,6 +90,7 @@ message AutoscalerBackendGCEInstanceGroup {
 
 message AutoscalerBackendAWSLaunchTemplate {
   string region = 1;
+  // If not set, will create the template from scratch.
   string launch_template_name = 2;
   // The prefix of the instance name.
   // If not set, will use launch_template_name as the prefix.
@@ -97,6 +98,25 @@ message AutoscalerBackendAWSLaunchTemplate {
   // If set, will use instance ID as the name.
   // Otherwise, it will use Name tag as the name.
   bool use_instance_id_as_name = 4;
+
+  // Override some customizations for the launch template.
+  string instance_type = 5;
+
+  // Inject setup script to the instance to configure the agent.
+  string agent_config_content = 6;
+
+  // Restrict to a specific availability zone.
+  string zone = 7;
+
+  // The subnet ID to launch the instance in.
+  string subnet_id = 8;
+
+  // Additional tags to add to the instance.
+  // If set, this will also be used to identify instances launched by the pool.
+  map<string, string> tags = 9;
+
+  // AMI ID
+  string ami_id = 10;
 }
 
 message AutoscalerBackendKubernetes {
@@ -118,6 +138,7 @@ message Provisioner {
     AWSProvisioner aws = 2;
     KubernetesProvisioner kubernetes = 3;
     GCSProvisioner gcs = 4;
+    AWSAutoProvisioner aws_auto = 5;
   }
 }
 
@@ -132,6 +153,25 @@ message AWSProvisioner {
   string region = 1;
   string config_prefix = 2;
   google.protobuf.Duration update_interval = 3;
+}
+
+// Generate pools based on all available instance types in a region/zone.
+message AWSAutoProvisioner {
+  // The template for the instance spec.
+  AutoscalerBackendAWSLaunchTemplate template = 1;
+
+  // The prefix of pool names.
+  string pool_prefix = 2;
+
+  // Autoscaler config.
+  // backend will be automatically generated.
+  AgentPool.AutoScaler autoscaler_config = 3;
+
+  // Allowed instance type prefixes.
+  // If set, will only create pools for instance types that match
+  // these prefixes.
+  // If not set, will create pools for all available instance types.
+  repeated string instance_type_prefixes = 4;
 }
 
 message GCSProvisioner {

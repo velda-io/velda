@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -70,16 +70,19 @@ func AutoScaledConfigFromConfig(ctx context.Context, cfg *proto.AgentPool) (*bro
 	if err != nil {
 		return nil, err
 	}
+	return AutoScaledConfigFromBackend(ctx, backend, cfg.AutoScaler), nil
+}
+
+func AutoScaledConfigFromBackend(ctx context.Context, backend broker.ResourcePoolBackend, autoScalerCfg *proto.AgentPool_AutoScaler) *broker.AutoScaledPoolConfig {
 	return &broker.AutoScaledPoolConfig{
 		Context:              ctx,
 		Backend:              backend,
-		MinIdle:              int(cfg.AutoScaler.MinIdleAgents),
-		MaxIdle:              int(cfg.AutoScaler.MaxIdleAgents),
-		IdleDecay:            cfg.AutoScaler.IdleDecay.AsDuration(),
-		MaxSize:              int(cfg.AutoScaler.MaxAgents),
-		SyncLoopInterval:     cfg.AutoScaler.SyncLoopInterval.AsDuration(),
-		KillUnknownAfter:     cfg.AutoScaler.KillUnknownAfter.AsDuration(),
-		DefaultSlotsPerAgent: int(cfg.AutoScaler.DefaultSlotsPerAgent),
-	}, nil
-
+		MinIdle:              int(autoScalerCfg.MinIdleAgents),
+		MaxIdle:              int(autoScalerCfg.MaxIdleAgents),
+		IdleDecay:            autoScalerCfg.IdleDecay.AsDuration(),
+		MaxSize:              int(autoScalerCfg.MaxAgents),
+		SyncLoopInterval:     autoScalerCfg.SyncLoopInterval.AsDuration(),
+		KillUnknownAfter:     autoScalerCfg.KillUnknownAfter.AsDuration(),
+		DefaultSlotsPerAgent: int(autoScalerCfg.DefaultSlotsPerAgent),
+	}
 }

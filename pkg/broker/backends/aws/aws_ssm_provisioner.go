@@ -34,7 +34,7 @@ import (
 	configpb "velda.io/velda/pkg/proto/config"
 )
 
-type AwsPoolProvisioner struct {
+type AwsSmmPoolProvisioner struct {
 	schedulerSet    *broker.SchedulerSet
 	ssmClient       *ssm.Client
 	lastSeenVersion map[string]time.Time
@@ -42,13 +42,13 @@ type AwsPoolProvisioner struct {
 	cfg             *configpb.AWSProvisioner
 }
 
-func (p *AwsPoolProvisioner) Run(ctx context.Context) {
+func (p *AwsSmmPoolProvisioner) Run(ctx context.Context) {
 	p.lastSeenVersion = make(map[string]time.Time)
 	p.lastSeenTime = make(map[string]time.Time)
 	go p.run(ctx)
 }
 
-func (p *AwsPoolProvisioner) run(ctx context.Context) {
+func (p *AwsSmmPoolProvisioner) run(ctx context.Context) {
 	interval := p.cfg.UpdateInterval.AsDuration()
 	if interval == 0 {
 		interval = 60 * time.Second
@@ -106,7 +106,7 @@ func (p *AwsPoolProvisioner) run(ctx context.Context) {
 	}
 }
 
-func (p *AwsPoolProvisioner) update(ctx context.Context, param *ssmtypes.Parameter, new bool) error {
+func (p *AwsSmmPoolProvisioner) update(ctx context.Context, param *ssmtypes.Parameter, new bool) error {
 	cfg := param.Value
 	obj := &configpb.AgentPool{}
 	var yamlObj map[string]interface{}
@@ -149,7 +149,7 @@ func (*AwsPoolProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, sche
 		return nil, err
 	}
 	ssmClient := ssm.NewFromConfig(awsCfg)
-	return &AwsPoolProvisioner{
+	return &AwsSmmPoolProvisioner{
 		schedulerSet: schedulers,
 		ssmClient:    ssmClient,
 		cfg:          cfgAws,
