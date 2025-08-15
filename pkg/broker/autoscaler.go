@@ -378,7 +378,11 @@ func (p *AutoScaledPool) NotifyAgentAvailable(name string, busy bool, statusChan
 		oldStatus = p.setWorkerStatusLocked(name, WorkerStatusIdle, availableSlot)
 	}
 	if oldStatus == WorkerStatusNone {
-		p.logPrintf("Worker %s starting while not in pool", name)
+		if p.backend == nil {
+			p.logPrintf("Worker %s Connected", name)
+		} else {
+			p.logPrintf("Worker %s starting while not in pool", name)
+		}
 	} else if oldStatus == WorkerStatusUnknown {
 		p.logPrintf("Unknown worker %s reconnected. Busy: %t", name, busy)
 	}
