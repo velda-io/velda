@@ -611,3 +611,7 @@ func (p *AutoScaledPool) removeWorkerLocked(name string) WorkerStatusCode {
 func (p *AutoScaledPool) logPrintf(format string, args ...interface{}) {
 	log.Printf("Pool %s:\t"+format, append([]interface{}{p.name}, args...)...)
 }
+
+func (p *AutoScaledPool) Backend() ResourcePoolBackend {
+	return p.backend
+}

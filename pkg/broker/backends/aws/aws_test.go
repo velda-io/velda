@@ -16,7 +16,7 @@
 package aws
 
 // To run test:
-// AWS_BACKEND=us-west-1/velda-agent-shell go test -v ./pkg/broker/backends/aws
+// AWS_BACKEND=us-west-1/velda-agent-shell go test --tag aws -v ./pkg/broker/backends/aws
 
 import (
 	"os"
@@ -43,7 +43,7 @@ func TestAWSBackend(t *testing.T) {
 		},
 	}
 
-	factory := &awsPoolFactory{}
+	factory := &awsLaunchTemplatePoolFactory{}
 	backend, err := factory.NewBackend(configpb)
 	if err != nil {
 		t.Fatalf("Failed to create backend: %v", err)
