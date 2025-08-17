@@ -14,19 +14,13 @@
 package cmd
 
 import (
-	"archive/tar"
 	"fmt"
-	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"velda.io/velda/pkg/apiserver"
-
-	configpb "velda.io/velda/pkg/proto/config"
 )
 
 var miniStartCmd = &cobra.Command{
@@ -38,63 +32,40 @@ var miniStartCmd = &cobra.Command{
 		if sandboxDir == "" {
 			return cmd.Help()
 		}
-		if err := initMini(cmd, sandboxDir); err != nil {
-			return fmt.Errorf("failed to initialize mini: %w", err)
+		if sandboxDir[0] != '/' {
+			// If the path is not absolute, make it relative to the current directory
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get current working directory: %w", err)
+			}
+			sandboxDir = path.Join(cwd, sandboxDir)
 		}
-		if err := startMiniAgent(cmd, sandboxDir); err != nil {
-			return err
+		if stat, err := os.Stat(sandboxDir); err != nil || !stat.IsDir() {
+			return fmt.Errorf("sandbox directory %s does not exist or is not a directory: %w", sandboxDir, err)
 		}
-		defer stopMiniAgent(cmd)
-		if err := startMiniApiserver(sandboxDir); err != nil {
-			return err
-		}
-		return nil
+		return startMini(cmd, sandboxDir)
 	},
 }
 
 func init() {
 	MiniCmd.AddCommand(miniStartCmd)
-	miniStartCmd.Flags().String("agent-launcher", "docker", "The agent launcher to use (docker, shell)")
-	miniStartCmd.Flags().String("base-image", "ubuntu:24.04", "The docker image to initialize the sandbox")
+}
+
+func startMini(cmd *cobra.Command, sandboxDir string) error {
+	if err := startMiniAgent(cmd, sandboxDir); err != nil {
+		return err
+	}
+	defer stopMiniAgent(cmd)
+	if err := startMiniApiserver(sandboxDir); err != nil {
+		return err
+	}
+	return nil
 }
 
 func startMiniApiserver(sandboxDir string) error {
 	go apiserver.StartMetricServer("localhost:6060")
-	root := path.Join(sandboxDir, "root", "0", "1")
-	s := &apiserver.OssService{}
-	s.Config = &configpb.Config{
-		Server: &configpb.Server{
-			GrpcAddress: ":50051",
-			HttpAddress: ":8081",
-		},
-		Storage: &configpb.Storage{
-			Storage: &configpb.Storage_Mini{
-				Mini: &configpb.Storage_MiniVelda{
-					Root: root,
-				},
-			},
-		},
-		AgentPools: []*configpb.AgentPool{
-			{
-				Name: "shell",
-			},
-		},
-		Provisioners: []*configpb.Provisioner{
-			{
-				Provisioner: &configpb.Provisioner_AwsAuto{
-					AwsAuto: &configpb.AWSAutoProvisioner{
-						PoolPrefix: "aws:",
-						Template: &configpb.AutoscalerBackendAWSLaunchTemplate{
-							UseInstanceIdAsName: true,
-							// TODO: Remove these hard-coded values
-							Region:         "us-east-1",
-							SecurityGroups: []string{"DevInstance"},
-						},
-						InstanceTypePrefixes: []string{"t2", "g4", "g6", "m6g"},
-					},
-				},
-			},
-		},
+	s := &apiserver.OssService{
+		ConfigPath: path.Join(sandboxDir, "service.yaml"),
 	}
 	return apiserver.RunService(s)
 }
@@ -160,98 +131,4 @@ func stopMiniAgent(cmd *cobra.Command) {
 	default:
 		fmt.Printf("unknown agent launcher: %s\n", launcher)
 	}
-}
-
-func initMini(cmd *cobra.Command, sandboxDir string) error {
-	// Create the sandbox directory if it doesn't exist
-	if err := os.MkdirAll(sandboxDir, 0755); err != nil {
-		return fmt.Errorf("failed to create sandbox directory: %w", err)
-	}
-	rootDir := path.Join(sandboxDir, "root", "0", "1")
-	stat, err := os.Stat(rootDir)
-
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to stat root directory: %w", err)
-	}
-	if err == nil && !stat.IsDir() {
-		return fmt.Errorf("root directory %s exists but is not a directory", rootDir)
-	}
-	if err == nil {
-		return nil
-	}
-	baseImage, _ := cmd.Flags().GetString("base-image")
-	log.Printf("Creating dev-sandbox from docker image %s", baseImage)
-	// Initialize the root directory
-	if err := os.MkdirAll(rootDir, 0755); err != nil {
-		return fmt.Errorf("failed to create root directory: %w", err)
-	}
-	createCmd := exec.Command(
-		"docker", "create", baseImage,
-	)
-	createCmd.Stderr = os.Stderr
-	container, err := createCmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to create base image container: %w", err)
-	}
-	containerID := string(container[:len(container)-1]) // Remove trailing newline
-	defer func() {
-		exec.Command("docker", "rm", containerID).Run()
-	}()
-	exportCmd := exec.Command(
-		"docker", "export", containerID,
-	)
-
-	p, err := exportCmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	if err := exportCmd.Start(); err != nil {
-		return fmt.Errorf("failed to start export command: %w", err)
-	}
-	tr := tar.NewReader(p)
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read tar header: %v\n", err)
-		}
-
-		target := filepath.Join(rootDir, header.Name)
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
-				return fmt.Errorf("failed to create directory: %v\n", err)
-			}
-		case tar.TypeReg:
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
-			if err != nil {
-				return fmt.Errorf("failed to create file: %v\n", err)
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return fmt.Errorf("failed to write file: %v\n", err)
-			}
-			f.Close()
-			if err := os.Chown(target, header.Uid, header.Gid); err != nil {
-				return fmt.Errorf("Failed to update owner")
-			}
-		case tar.TypeSymlink:
-			if err := os.Symlink(header.Linkname, target); err != nil {
-				return fmt.Errorf("failed to create symlink: %v\n", err)
-			}
-		}
-	}
-
-	if err := exportCmd.Wait(); err != nil {
-		return fmt.Errorf("failed to wait for export command: %w", err)
-	}
-
-	os.Symlink("/run/velda/velda", path.Join(rootDir, "bin", "velda"))
-	os.Symlink("/run/velda/velda", path.Join(rootDir, "bin", "vrun"))
-	os.Symlink("/run/velda/velda", path.Join(rootDir, "bin", "vbatch"))
-	os.Symlink("/run/velda/velda", path.Join(rootDir, "bin", "/sbin/mount.host"))
-	return nil
 }

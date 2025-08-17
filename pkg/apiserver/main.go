@@ -32,15 +32,11 @@ import (
 )
 
 var (
-	configPath string
-	// If set to false, the service will exit on configuration change
-	// This will allow the service to be restarted by a systemd service or other process manager
-	restartOnConfigChange bool
-	allMetrics            = prometheus.NewRegistry()
+	allMetrics = prometheus.NewRegistry()
 )
 
 type Service interface {
-	InitConfig(configPath string) error
+	InitConfig() error
 	InitDatabase() error
 	InitServices() error
 	InitGrpcServer() error
@@ -50,8 +46,8 @@ type Service interface {
 	ExportedMetrics() *prometheus.Registry
 }
 
-func initService(s Service, configPath string) error {
-	if err := s.InitConfig(configPath); err != nil {
+func initService(s Service) error {
+	if err := s.InitConfig(); err != nil {
 		return fmt.Errorf("Failed to Initialize service configuration: %v", err)
 	}
 
@@ -85,8 +81,7 @@ func StartMetricServer(endpoint string) error {
 }
 
 func Main(s Service, flags *pflag.FlagSet) {
-	configPath, _ = flags.GetString("config")
-	restartOnConfigChange, _ = flags.GetBool("restart-on-config-change")
+	restartOnConfigChange, _ := flags.GetBool("restart-on-config-change")
 	go StartMetricServer("localhost:6060")
 	for {
 		err := RunService(s)
@@ -105,7 +100,7 @@ func Main(s Service, flags *pflag.FlagSet) {
 }
 
 func RunService(svc Service) error {
-	if err := initService(svc, configPath); err != nil {
+	if err := initService(svc); err != nil {
 		return fmt.Errorf("Failed to initialize service: %v", err)
 	}
 	metrics := svc.ExportedMetrics()
