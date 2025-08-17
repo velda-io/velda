@@ -59,6 +59,7 @@ func init() {
 }
 
 func startMiniApiserver(sandboxDir string) error {
+	go apiserver.StartMetricServer("localhost:6060")
 	root := path.Join(sandboxDir, "root", "0", "1")
 	s := &apiserver.OssService{}
 	s.Config = &configpb.Config{
@@ -76,6 +77,22 @@ func startMiniApiserver(sandboxDir string) error {
 		AgentPools: []*configpb.AgentPool{
 			{
 				Name: "shell",
+			},
+		},
+		Provisioners: []*configpb.Provisioner{
+			{
+				Provisioner: &configpb.Provisioner_AwsAuto{
+					AwsAuto: &configpb.AWSAutoProvisioner{
+						PoolPrefix: "aws:",
+						Template: &configpb.AutoscalerBackendAWSLaunchTemplate{
+							UseInstanceIdAsName: true,
+							// TODO: Remove these hard-coded values
+							Region:         "us-east-1",
+							SecurityGroups: []string{"DevInstance"},
+						},
+						InstanceTypePrefixes: []string{"t2", "g4", "g6", "m6g"},
+					},
+				},
 			},
 		},
 	}

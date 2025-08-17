@@ -79,13 +79,15 @@ func AddFlags(flags *pflag.FlagSet) {
 	flags.Bool("restart-on-config-change", true, "Restart service on configuration change")
 }
 
+func StartMetricServer(endpoint string) error {
+	http.Handle("/metrics", promhttp.HandlerFor(allMetrics, promhttp.HandlerOpts{}))
+	return http.ListenAndServe(endpoint, nil)
+}
+
 func Main(s Service, flags *pflag.FlagSet) {
 	configPath, _ = flags.GetString("config")
 	restartOnConfigChange, _ = flags.GetBool("restart-on-config-change")
-	go func() {
-		http.Handle("/metrics", promhttp.HandlerFor(allMetrics, promhttp.HandlerOpts{}))
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
+	go StartMetricServer("localhost:6060")
 	for {
 		err := RunService(s)
 		if errors.Is(err, ConfigChanged) && restartOnConfigChange {

@@ -117,6 +117,10 @@ message AutoscalerBackendAWSLaunchTemplate {
 
   // AMI ID
   string ami_id = 10;
+
+  // Security groups to attach to the instance.
+  // If not set, will use the default from launch template.
+  repeated string security_groups = 11;
 }
 
 message AutoscalerBackendKubernetes {

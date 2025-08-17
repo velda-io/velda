@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"time"
 
@@ -36,12 +37,16 @@ import (
 )
 
 type AwsAutoPoolProvisioner struct {
-	schedulerSet *broker.SchedulerSet
-	cfg          *configpb.AWSAutoProvisioner
+	schedulerSet   *broker.SchedulerSet
+	cfg            *configpb.AWSAutoProvisioner
+	serverEndpoint net.TCPAddr
 }
 
 func (p *AwsAutoPoolProvisioner) Run(ctx context.Context) {
-	p.run(ctx)
+	err := p.run(ctx)
+	if err != nil {
+		log.Panicf("Failed to run AWS auto provisioner: %v", err)
+	}
 }
 
 func (p *AwsAutoPoolProvisioner) run(ctx context.Context) error {
@@ -49,10 +54,27 @@ func (p *AwsAutoPoolProvisioner) run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get available instance types: %w", err)
 	}
+	p.serverEndpoint, err = getPublicEndpoint(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get public endpoint: %w", err)
+	}
+	log.Printf("Public endpoint: %s", p.serverEndpoint.String())
 	for _, instanceType := range types {
 		template := proto.Clone(p.cfg.Template).(*configpb.AutoscalerBackendAWSLaunchTemplate)
+		poolName := p.cfg.PoolPrefix + instanceType
 		template.InstanceType = instanceType
 		template.AmiId = "ami-056f848b337c14f24"
+		if template.Tags == nil {
+			template.Tags = make(map[string]string)
+		}
+		template.Tags["velda/pool"] = p.cfg.PoolPrefix + instanceType
+		template.AgentConfigContent = fmt.Sprintf(
+			`broker:
+  address: "%s"
+sandbox_config:
+daemon_config:
+pool: "%s"
+`, p.serverEndpoint.String(), poolName)
 		autoScaler := proto.Clone(p.cfg.GetAutoscalerConfig()).(*configpb.AgentPool_AutoScaler)
 		if autoScaler == nil {
 			autoScaler = &configpb.AgentPool_AutoScaler{
@@ -67,11 +89,11 @@ func (p *AwsAutoPoolProvisioner) run(ctx context.Context) error {
 			},
 		}
 		newPoolConfig := &configpb.AgentPool{
-			Name:       p.cfg.PoolPrefix + instanceType,
+			Name:       poolName,
 			AutoScaler: autoScaler,
 		}
 
-		pool, err := p.schedulerSet.GetOrCreatePool(newPoolConfig.Name)
+		pool, err := p.schedulerSet.GetOrCreatePool(poolName)
 		if err != nil {
 			return err
 		}
@@ -90,7 +112,48 @@ func (p *AwsAutoPoolProvisioner) run(ctx context.Context) error {
 	return nil
 }
 
+func getPublicEndpoint(ctx context.Context) (net.TCPAddr, error) {
+	// Get the interface with the default route
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return net.TCPAddr{}, fmt.Errorf("failed to get network interfaces: %w", err)
+	}
+
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+				dialer := &net.Dialer{
+					Timeout:   1 * time.Second,
+					LocalAddr: &net.UDPAddr{IP: ipNet.IP, Port: 0},
+				}
+				// Attempt to dial out to a public DNS server to check if this interface has internet access
+				// This is a simple way to check if the interface is usable for external communication
+				// Check if this interface has the default route by attempting to dial out
+				conn, err := dialer.DialContext(ctx, "udp", "8.8.8.8:53")
+				if err == nil {
+					conn.Close()
+					return net.TCPAddr{IP: ipNet.IP, Port: 50051}, nil
+				}
+			}
+		}
+	}
+
+	return net.TCPAddr{}, errors.New("no interface with default route found")
+}
+
 func getAvailableInstanceTypes(ctx context.Context, cfg *configpb.AWSAutoProvisioner) ([]string, error) {
+	if cfg.Template == nil {
+		return nil, errors.New("AWSAutoProvisioner template must be specified")
+	}
 	region := cfg.Template.Region
 	if cfg.Template.Zone != "" {
 		region = cfg.Template.Zone[:len(cfg.Template.Zone)-1]

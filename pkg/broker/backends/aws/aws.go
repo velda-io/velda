@@ -17,6 +17,7 @@ package aws
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"gopkg.in/yaml.v3"
 
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
@@ -68,7 +70,11 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	}
 	var name string
 	tags := []ec2types.Tag{}
-	if !a.cfg.GetUseInstanceIdAsName() {
+	if a.cfg.GetUseInstanceIdAsName() {
+		input.PrivateDnsNameOptions = &ec2types.PrivateDnsNameOptionsRequest{
+			HostnameType: ec2types.HostnameTypeResourceName,
+		}
+	} else {
 		nameSuffix := utils.RandString(5)
 		prefix := a.cfg.GetInstanceNamePrefix()
 		if prefix == "" {
@@ -99,6 +105,24 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	}
 	if a.cfg.InstanceType != "" {
 		input.InstanceType = ec2types.InstanceType(a.cfg.InstanceType)
+	}
+	if a.cfg.AgentConfigContent != "" {
+		cloudInitData, err := yaml.Marshal(map[string]interface{}{
+			"bootcmd": []string{
+				"mkdir -p /run/velda",
+				fmt.Sprintf("cat << EOF > /run/velda/velda.yaml\n%s\nEOF", a.cfg.AgentConfigContent),
+			},
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal cloud-init data: %w", err)
+		}
+		cloudInit := append([]byte("#cloud-config\n"), cloudInitData...)
+		base64CloudInit := base64.StdEncoding.EncodeToString(cloudInit)
+
+		input.UserData = aws.String(base64CloudInit)
+	}
+	if len(a.cfg.SecurityGroups) > 0 {
+		input.SecurityGroups = a.cfg.SecurityGroups
 	}
 	result, err := a.svc().RunInstances(ctx, input)
 	if err != nil {

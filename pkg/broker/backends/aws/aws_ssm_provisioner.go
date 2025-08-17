@@ -36,10 +36,10 @@ import (
 
 type AwsSmmPoolProvisioner struct {
 	schedulerSet    *broker.SchedulerSet
-	ssmClient       *ssm.Client
 	lastSeenVersion map[string]time.Time
 	lastSeenTime    map[string]time.Time
 	cfg             *configpb.AWSProvisioner
+	awsConfig       aws.Config
 }
 
 func (p *AwsSmmPoolProvisioner) Run(ctx context.Context) {
@@ -53,13 +53,15 @@ func (p *AwsSmmPoolProvisioner) run(ctx context.Context) {
 	if interval == 0 {
 		interval = 60 * time.Second
 	}
+	ssmClient := ssm.NewFromConfig(p.awsConfig)
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	updateLoop := func(t time.Time) {
 		var nextToken *string
 
 		for {
-			output, err := p.ssmClient.GetParametersByPath(ctx, &ssm.GetParametersByPathInput{
+			output, err := ssmClient.GetParametersByPath(ctx, &ssm.GetParametersByPathInput{
 				Path:      aws.String(p.cfg.ConfigPrefix + "/"),
 				NextToken: nextToken,
 			})
@@ -148,10 +150,9 @@ func (*AwsPoolProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, sche
 	if err != nil {
 		return nil, err
 	}
-	ssmClient := ssm.NewFromConfig(awsCfg)
 	return &AwsSmmPoolProvisioner{
 		schedulerSet: schedulers,
-		ssmClient:    ssmClient,
+		awsConfig:    awsCfg,
 		cfg:          cfgAws,
 	}, nil
 }
