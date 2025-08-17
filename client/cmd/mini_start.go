@@ -21,8 +21,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"velda.io/velda/pkg/apiserver"
-
-	configpb "velda.io/velda/pkg/proto/config"
 )
 
 var miniStartCmd = &cobra.Command{
@@ -33,6 +31,14 @@ var miniStartCmd = &cobra.Command{
 		sandboxDir := args[0]
 		if sandboxDir == "" {
 			return cmd.Help()
+		}
+		if sandboxDir[0] != '/' {
+			// If the path is not absolute, make it relative to the current directory
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get current working directory: %w", err)
+			}
+			sandboxDir = path.Join(cwd, sandboxDir)
 		}
 		if stat, err := os.Stat(sandboxDir); err != nil || !stat.IsDir() {
 			return fmt.Errorf("sandbox directory %s does not exist or is not a directory: %w", sandboxDir, err)
@@ -58,41 +64,8 @@ func startMini(cmd *cobra.Command, sandboxDir string) error {
 
 func startMiniApiserver(sandboxDir string) error {
 	go apiserver.StartMetricServer("localhost:6060")
-	root := path.Join(sandboxDir, "root", "0", "1")
-	s := &apiserver.OssService{}
-	s.Config = &configpb.Config{
-		Server: &configpb.Server{
-			GrpcAddress: ":50051",
-			HttpAddress: ":8081",
-		},
-		Storage: &configpb.Storage{
-			Storage: &configpb.Storage_Mini{
-				Mini: &configpb.Storage_MiniVelda{
-					Root: root,
-				},
-			},
-		},
-		AgentPools: []*configpb.AgentPool{
-			{
-				Name: "shell",
-			},
-		},
-		Provisioners: []*configpb.Provisioner{
-			{
-				Provisioner: &configpb.Provisioner_AwsAuto{
-					AwsAuto: &configpb.AWSAutoProvisioner{
-						PoolPrefix: "aws:",
-						Template: &configpb.AutoscalerBackendAWSLaunchTemplate{
-							UseInstanceIdAsName: true,
-							// TODO: Remove these hard-coded values
-							Region:         "us-east-1",
-							SecurityGroups: []string{"DevInstance"},
-						},
-						InstanceTypePrefixes: []string{"t2", "g4", "g6", "m6g"},
-					},
-				},
-			},
-		},
+	s := &apiserver.OssService{
+		ConfigPath: path.Join(sandboxDir, "service.yaml"),
 	}
 	return apiserver.RunService(s)
 }

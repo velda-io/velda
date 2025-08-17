@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/spf13/cobra"
 	"velda.io/velda/pkg/broker"
 	proto "velda.io/velda/pkg/proto/config"
 )
@@ -85,4 +86,26 @@ func AutoScaledConfigFromBackend(ctx context.Context, backend broker.ResourcePoo
 		KillUnknownAfter:     autoScalerCfg.KillUnknownAfter.AsDuration(),
 		DefaultSlotsPerAgent: int(autoScalerCfg.DefaultSlotsPerAgent),
 	}
+}
+
+type MiniAutoConfigure interface {
+	Configure(cmd *cobra.Command, config *proto.Config) error
+	BackendName() string
+}
+
+var miniAutoConfigurers []MiniAutoConfigure
+
+func RegisterMiniAutoConfigurer(c MiniAutoConfigure) {
+	miniAutoConfigurers = append(miniAutoConfigurers, c)
+}
+
+func AutoConfigureMini(cmd *cobra.Command, config *proto.Config, allowedBackends map[string]bool) error {
+	for _, c := range miniAutoConfigurers {
+		if allowedBackends["all"] || allowedBackends[c.BackendName()] {
+			if err := c.Configure(cmd, config); err != nil {
+				return fmt.Errorf("failed to configure %s backend: %w", c.BackendName(), err)
+			}
+		}
+	}
+	return nil
 }

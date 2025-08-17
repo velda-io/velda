@@ -57,6 +57,7 @@ type database interface {
 
 // Open-source service implementation.
 type OssService struct {
+	ConfigPath  string
 	GrpcServer  *grpc.Server
 	HttpHandler *http.ServeMux
 	Config      *configpb.Config
@@ -80,13 +81,16 @@ type OssService struct {
 }
 
 // NewService creates a new Service instance with the provided configuration
-func (s *OssService) InitConfig(configPath string) error {
+func (s *OssService) InitConfig() error {
 	s.ExecError = make(chan error, 1)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	if s.Config == nil && s.ConfigPath == "" {
+		return fmt.Errorf("Configuration is not provided")
+	}
 
 	if s.Config == nil {
 		var err error
-		s.Config, err = utils.LoadConfig(configPath)
+		s.Config, err = utils.LoadConfig(s.ConfigPath)
 		if err != nil {
 			return fmt.Errorf("Failed to load configuration: %v", err)
 		}

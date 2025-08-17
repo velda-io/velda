@@ -14,19 +14,17 @@
 package cmd
 
 import (
-	"archive/tar"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
+	"velda.io/velda/pkg/broker/backends"
 	configpb "velda.io/velda/pkg/proto/config"
 )
 
@@ -38,6 +36,14 @@ var miniInitCmd = &cobra.Command{
 		sandboxDir := args[0]
 		if sandboxDir == "" {
 			return cmd.Help()
+		}
+		if sandboxDir[0] != '/' {
+			// If the path is not absolute, make it relative to the current directory
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get current working directory: %w", err)
+			}
+			sandboxDir = path.Join(cwd, sandboxDir)
 		}
 		if _, err := os.Stat(sandboxDir); !os.IsNotExist(err) {
 			return fmt.Errorf("sandbox directory %s already exists: %w", sandboxDir, err)
@@ -57,6 +63,7 @@ func init() {
 	MiniCmd.AddCommand(miniInitCmd)
 	miniInitCmd.Flags().String("agent-launcher", "docker", "The agent launcher to use (docker)")
 	miniInitCmd.Flags().String("base-image", "ubuntu:24.04", "The docker image to initialize the sandbox")
+	miniInitCmd.Flags().StringSlice("backends", []string{"all"}, "The backends to enable (comma-separated list, e.g., 'aws,gce')")
 }
 
 func initMiniConfig(cmd *cobra.Command, sandboxDir string) error {
@@ -78,6 +85,10 @@ func initMiniConfig(cmd *cobra.Command, sandboxDir string) error {
 				Name: "shell",
 			},
 		},
+	}
+	err := initBackends(cmd, config)
+	if err != nil {
+		return err
 	}
 	cfgFile := path.Join(sandboxDir, "service.yaml")
 	cfgJson, err := protojson.Marshal(config)
@@ -134,57 +145,50 @@ func initMiniSandbox(cmd *cobra.Command, sandboxDir string) error {
 		"docker", "export", containerID,
 	)
 
+	exportCmd.Stderr = os.Stderr
 	p, err := exportCmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
+	unpackCmd := exec.Command("sudo", "tar", "-xf", "-", "-C", rootDir)
+	unpackCmd.Stdin = p
+	unpackCmd.Stdout = os.Stdout
+	unpackCmd.Stderr = os.Stderr
 	if err := exportCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start export command: %w", err)
 	}
-	tr := tar.NewReader(p)
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read tar header: %v\n", err)
-		}
-
-		target := filepath.Join(rootDir, header.Name)
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
-				return fmt.Errorf("failed to create directory: %v\n", err)
-			}
-		case tar.TypeReg:
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
-			if err != nil {
-				return fmt.Errorf("failed to create file: %v\n", err)
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return fmt.Errorf("failed to write file: %v\n", err)
-			}
-			f.Close()
-			if err := os.Chown(target, header.Uid, header.Gid); err != nil {
-				return fmt.Errorf("Failed to update owner")
-			}
-		case tar.TypeSymlink:
-			if err := os.Symlink(header.Linkname, target); err != nil {
-				return fmt.Errorf("failed to create symlink: %v\n", err)
-			}
-		}
+	if err := unpackCmd.Run(); err != nil {
+		return fmt.Errorf("failed to unpack tar: %w", err)
 	}
 
 	if err := exportCmd.Wait(); err != nil {
 		return fmt.Errorf("failed to wait for export command: %w", err)
 	}
 
-	os.Symlink("/run/velda/velda", path.Join(rootDir, "bin", "velda"))
-	os.Symlink("/run/velda/velda", path.Join(rootDir, "bin", "vrun"))
-	os.Symlink("/run/velda/velda", path.Join(rootDir, "bin", "vbatch"))
-	os.Symlink("/run/velda/velda", path.Join(rootDir, "bin", "/sbin/mount.host"))
+	symlink("/run/velda/velda", path.Join(rootDir, "bin", "velda"))
+	symlink("/run/velda/velda", path.Join(rootDir, "bin", "vrun"))
+	symlink("/run/velda/velda", path.Join(rootDir, "bin", "vbatch"))
+	symlink("/run/velda/velda", path.Join(rootDir, "sbin/mount.host"))
 	return nil
+}
+
+func symlink(target, link string) {
+	if _, err := os.Lstat(link); err == nil {
+		return
+	}
+	output, err := exec.Command("sudo", "ln", "-s", target, link).CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to create symlink %s -> %s: %v\nOutput: %s", link, target, err, output)
+	}
+}
+
+func initBackends(cmd *cobra.Command, config *configpb.Config) error {
+	backend, _ := cmd.Flags().GetStringSlice("backends")
+	allowedBackends := map[string]bool{}
+	for _, backend := range backend {
+		allowedBackends[backend] = true
+	}
+
+	return backends.AutoConfigureMini(cmd, config, allowedBackends)
 }
