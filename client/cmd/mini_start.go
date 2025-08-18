@@ -49,6 +49,7 @@ var miniStartCmd = &cobra.Command{
 
 func init() {
 	MiniCmd.AddCommand(miniStartCmd)
+	miniStartCmd.Flags().String("agent-launcher", "docker", "The agent launcher to use (docker)")
 }
 
 func startMini(cmd *cobra.Command, sandboxDir string) error {
@@ -105,6 +106,7 @@ pool: shell`, server, localPath)
 		cmd := exec.Command("docker", "run", "-d",
 			"--name", "velda-mini-agent",
 			"--privileged",
+			"--platform", "linux/amd64",
 			"-h", "velda-mini-main",
 			"--add-host=host.docker.internal:host-gateway",
 			"-v", fmt.Sprintf("%s:/run/velda", sandboxDir),

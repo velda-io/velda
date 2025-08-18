@@ -35,20 +35,7 @@ import (
 
 	"velda.io/velda/pkg/broker/backends"
 	configpb "velda.io/velda/pkg/proto/config"
-)
-
-// ANSI color codes
-const (
-	ColorReset     = "\033[0m"
-	ColorRed       = "\033[31m"
-	ColorGreen     = "\033[32m"
-	ColorYellow    = "\033[33m"
-	ColorBlue      = "\033[34m"
-	ColorPurple    = "\033[35m"
-	ColorCyan      = "\033[36m"
-	ColorWhite     = "\033[37m"
-	ColorBold      = "\033[1m"
-	ColorLightGray = "\033[37;2m" // Light gray for verbose output
+	"velda.io/velda/pkg/utils"
 )
 
 type AwsConfigure struct{}
@@ -250,7 +237,7 @@ func (c *AwsConfigure) validateAndResolveSecurityGroups(ctx context.Context, ec2
 // checkAWSPermissions validates that the user has necessary AWS permissions using dry-run mode where possible
 func (c *AwsConfigure) checkAWSPermissions(cmd *cobra.Command, awsCfg aws.Config, ec2Client *ec2.Client, region string) error {
 	// Check AWS permissions
-	cmd.PrintErrf("%s🔐 Checking AWS permissions...%s\n", ColorCyan, ColorReset)
+	cmd.PrintErrf("%s🔐 Checking AWS permissions...%s\n", utils.ColorCyan, utils.ColorReset)
 
 	ctx := cmd.Context()
 	var permissionErrors []string
@@ -318,7 +305,7 @@ func (c *AwsConfigure) checkAWSPermissions(cmd *cobra.Command, awsCfg aws.Config
 	handleError("ec2:RunInstances", err)
 
 	if len(permissionErrors) > 0 {
-		return fmt.Errorf("%sPermission check failed:%s\n %s", ColorRed, ColorReset, strings.Join(permissionErrors, "\n  "))
+		return fmt.Errorf("%sPermission check failed:%s\n %s", utils.ColorRed, utils.ColorReset, strings.Join(permissionErrors, "\n  "))
 	}
 
 	return nil
@@ -326,7 +313,7 @@ func (c *AwsConfigure) checkAWSPermissions(cmd *cobra.Command, awsCfg aws.Config
 
 func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) error {
 	ctx := context.Background()
-	cmd.PrintErrf("%s🔧 Configuring AWS backend...%s\n", ColorBlue+ColorBold, ColorReset)
+	cmd.PrintErrf("%s🔧 Configuring AWS backend...%s\n", utils.ColorBlue+utils.ColorBold, utils.ColorReset)
 	reader := bufio.NewReader(cmd.InOrStdin())
 
 	// Load AWS config for validation
@@ -336,26 +323,26 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	}
 
 	// Detect AWS environment from EC2 metadata
-	cmd.PrintErrf("%s🔍 Detecting AWS environment...%s\n", ColorCyan, ColorReset)
+	cmd.PrintErrf("%s🔍 Detecting AWS environment...%s\n", utils.ColorCyan, utils.ColorReset)
 	envInfo, err := c.detectAWSEnvironment(ctx)
 	if err != nil {
-		cmd.PrintErrf("%s⚠️  Could not detect AWS environment from EC2 metadata.%s\n", ColorYellow, ColorReset)
-		cmd.PrintErrf(" %sThis is expected if running outside of AWS or without EC2 metadata access.\n", ColorLightGray)
-		cmd.PrintErrf(" Error: %v%s\n", err, ColorReset)
+		cmd.PrintErrf("%s⚠️  Could not detect AWS environment from EC2 metadata.%s\n", utils.ColorYellow, utils.ColorReset)
+		cmd.PrintErrf(" %sThis is expected if running outside of AWS or without EC2 metadata access.\n", utils.ColorLightGray)
+		cmd.PrintErrf(" Error: %v%s\n", err, utils.ColorReset)
 		cmd.PrintErrf("%sThe current host must have direct connection to AWS EC2 network (e.g. VPN), "+
-			"and remain connected when any workload is running.%s\n", ColorYellow, ColorReset)
+			"and remain connected when any workload is running.%s\n", utils.ColorYellow, utils.ColorReset)
 		envInfo = &AWSEnvironmentInfo{}
 		envInfo.Region = awsCfg.Region
 	} else {
-		cmd.PrintErrf("\n%s✅ Detected environment information:%s\n", ColorGreen, ColorReset)
-		cmd.PrintErrf("  Region: %s%s%s\n", ColorWhite+ColorBold, envInfo.Region, ColorReset)
-		cmd.PrintErrf("  Availability Zone: %s%s%s\n", ColorWhite+ColorBold, envInfo.AvailabilityZone, ColorReset)
-		cmd.PrintErrf("  VPC ID: %s%s%s\n", ColorWhite+ColorBold, envInfo.VpcID, ColorReset)
-		cmd.PrintErrf("  Subnet ID: %s%s%s\n", ColorWhite+ColorBold, envInfo.SubnetID, ColorReset)
-		cmd.PrintErrf("  Security Groups: %s%v%s\n", ColorWhite+ColorBold, envInfo.SecurityGroups, ColorReset)
+		cmd.PrintErrf("\n%s✅ Detected environment information:%s\n", utils.ColorGreen, utils.ColorReset)
+		cmd.PrintErrf("  Region: %s%s%s\n", utils.ColorWhite+utils.ColorBold, envInfo.Region, utils.ColorReset)
+		cmd.PrintErrf("  Availability Zone: %s%s%s\n", utils.ColorWhite+utils.ColorBold, envInfo.AvailabilityZone, utils.ColorReset)
+		cmd.PrintErrf("  VPC ID: %s%s%s\n", utils.ColorWhite+utils.ColorBold, envInfo.VpcID, utils.ColorReset)
+		cmd.PrintErrf("  Subnet ID: %s%s%s\n", utils.ColorWhite+utils.ColorBold, envInfo.SubnetID, utils.ColorReset)
+		cmd.PrintErrf("  Security Groups: %s%v%s\n", utils.ColorWhite+utils.ColorBold, envInfo.SecurityGroups, utils.ColorReset)
 	}
 
-	cmd.PrintErrf("\n%s📝 Please verify and/or provide the following information:%s\n\n", ColorPurple+ColorBold, ColorReset)
+	cmd.PrintErrf("\n%s📝 Please verify and/or provide the following information:%s\n\n", utils.ColorPurple+utils.ColorBold, utils.ColorReset)
 
 	// Prompt for region
 	if envInfo.Region == "" {
@@ -369,6 +356,7 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	if region == "" {
 		return fmt.Errorf("AWS region is required")
 	}
+	awsCfg.Region = region
 	ec2Client := ec2.NewFromConfig(awsCfg)
 
 	// Prompt for security groups
@@ -379,14 +367,14 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 
 	// Validate and resolve security groups
 	if len(securityGroups) > 0 {
-		cmd.PrintErrf("%s🔍 Validating security groups...%s\n", ColorCyan, ColorReset)
+		cmd.PrintErrf("%s🔍 Validating security groups...%s\n", utils.ColorCyan, utils.ColorReset)
 		resolvedSGs, err := c.validateAndResolveSecurityGroups(ctx, ec2Client, securityGroups, envInfo.VpcID)
 		if err != nil {
-			cmd.PrintErrf("%s⚠️  Warning: Failed to validate security groups: %v%s\n", ColorYellow, err, ColorReset)
+			cmd.PrintErrf("%s⚠️  Warning: Failed to validate security groups: %v%s\n", utils.ColorYellow, err, utils.ColorReset)
 			cmd.PrintErrf("Proceeding with provided security groups as-is.\n")
 		} else {
 			securityGroups = resolvedSGs
-			cmd.PrintErrf("%s✅ Validated security groups: %v%s\n", ColorGreen, securityGroups, ColorReset)
+			cmd.PrintErrf("%s✅ Validated security groups: %v%s\n", utils.ColorGreen, securityGroups, utils.ColorReset)
 		}
 	}
 
@@ -407,7 +395,7 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	}
 
 	cmd.PrintErrln("For additional customization, you can create an AWS Launch Template in the AWS console.")
-	cmd.PrintErrf("  %shttps://%s.console.aws.amazon.com/ec2/home?region=%s#CreateTemplate:%s\n", ColorBlue, region, region, ColorReset)
+	cmd.PrintErrf("  %shttps://%s.console.aws.amazon.com/ec2/home?region=%s#CreateTemplate:%s\n", utils.ColorBlue, region, region, utils.ColorReset)
 	templateId, err := c.promptUser(cmd, reader, "Launch Template name (leave empty for default)", "")
 	if err != nil {
 		return fmt.Errorf("failed to get launch template name: %w", err)
@@ -424,7 +412,7 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	}
 
 	if err := c.checkAWSPermissions(cmd, awsCfg, ec2Client, region); err != nil {
-		cmd.PrintErrf("%s❌ AWS permissions check failed: %v%s\n", ColorRed+ColorBold, err, ColorReset)
+		cmd.PrintErrf("%s❌ AWS permissions check failed: %v%s\n", utils.ColorRed+utils.ColorBold, err, utils.ColorReset)
 		// Ask user if they want to continue
 		continueChoice, err := c.promptUser(cmd, reader, "Continue with configuration anyway? (y/n)", "n")
 		if err != nil {
@@ -434,7 +422,7 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 			return fmt.Errorf("configuration cancelled by user due to permission issues")
 		}
 	} else {
-		cmd.PrintErrf("%s✅ AWS permissions check passed!%s\n", ColorGreen+ColorBold, ColorReset)
+		cmd.PrintErrf("%s✅ AWS permissions check passed!%s\n", utils.ColorGreen+utils.ColorBold, utils.ColorReset)
 	}
 
 	// Build the launch template configuration
@@ -463,13 +451,13 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 
 	config.Provisioners = append(config.Provisioners, provisioner)
 
-	cmd.PrintErrf("\n%s🎉 AWS provisioner configuration completed successfully!%s\n", ColorGreen+ColorBold, ColorReset)
-	cmd.PrintErrf("%sConfiguration summary:%s\n", ColorPurple+ColorBold, ColorReset)
-	cmd.PrintErrf("  Pool prefix: %s%s%s\n", ColorWhite+ColorBold, poolPrefix, ColorReset)
-	cmd.PrintErrf("  Region: %s%s%s\n", ColorWhite+ColorBold, region, ColorReset)
-	cmd.PrintErrf("  Security groups: %s%v%s\n", ColorWhite+ColorBold, securityGroups, ColorReset)
-	cmd.PrintErrf("  Subnet ID: %s%s%s\n", ColorWhite+ColorBold, subnetID, ColorReset)
-	cmd.PrintErrf("  Instance type prefixes: %s%v%s\n", ColorWhite+ColorBold, instanceTypePrefixes, ColorReset)
+	cmd.PrintErrf("\n%s🎉 AWS provisioner configuration completed successfully!%s\n", utils.ColorGreen+utils.ColorBold, utils.ColorReset)
+	cmd.PrintErrf("%sConfiguration summary:%s\n", utils.ColorPurple+utils.ColorBold, utils.ColorReset)
+	cmd.PrintErrf("  Pool prefix: %s%s%s\n", utils.ColorWhite+utils.ColorBold, poolPrefix, utils.ColorReset)
+	cmd.PrintErrf("  Region: %s%s%s\n", utils.ColorWhite+utils.ColorBold, region, utils.ColorReset)
+	cmd.PrintErrf("  Security groups: %s%v%s\n", utils.ColorWhite+utils.ColorBold, securityGroups, utils.ColorReset)
+	cmd.PrintErrf("  Subnet ID: %s%s%s\n", utils.ColorWhite+utils.ColorBold, subnetID, utils.ColorReset)
+	cmd.PrintErrf("  Instance type prefixes: %s%v%s\n", utils.ColorWhite+utils.ColorBold, instanceTypePrefixes, utils.ColorReset)
 
 	return nil
 }

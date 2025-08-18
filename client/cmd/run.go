@@ -94,9 +94,13 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	if sessionId != "" && serviceName != "" {
 		return fmt.Errorf("Cannot specify both session-id and service-name")
 	}
+	if !cmd.Flag("service-name").Changed && !clientlib.IsInSession() {
+		DebugLog("Defaulting service-name to ssh")
+		serviceName = "ssh"
+	}
 
 	sessionReq := &proto.SessionRequest{
-		ServiceName: cmd.Flag("service-name").Value.String(),
+		ServiceName: serviceName,
 		SessionId:   sessionId,
 		InstanceId:  instanceId,
 		Pool:        cmd.Flag("pool").Value.String(),
@@ -377,7 +381,7 @@ func init() {
 	runCmd.Flags().Bool("new-session", false, "Always create a new session")
 	runCmd.Flags().Bool("keep-alive", false, "Keep the session alive after all processes exits even if all connections are closed.")
 	runCmd.Flags().Bool("checkpoint-on-idle", false, "If all connections are closed, check-point the session. Imply keep-alive.")
-	runCmd.Flags().StringP("service-name", "s", "", "Service name, which can be used to identify session later.")
+	runCmd.Flags().StringP("service-name", "s", "", "Service name, which can be used to identify session later. Default is ssh if connected externally, or empty.")
 	runCmd.Flags().String("session-id", "", "Reconnect to specific session. If not provided, it will try to find a session with the service name or create a new session.")
 	runCmd.Flags().StringP("directory", "C", "", "Working directory. Default to current directory if running in Velda and a command is provided, otherwise home directory.")
 	runCmd.Flags().StringP("user", "u", "user", "User to run the command as. Ignored if running in a Velda session with a command provided, where it will always use the current user.")
