@@ -20,12 +20,17 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
+
 	"velda.io/velda/pkg/broker/backends"
+	"velda.io/velda/pkg/clientlib"
 	configpb "velda.io/velda/pkg/proto/config"
+	"velda.io/velda/pkg/utils"
 )
 
 var miniInitCmd = &cobra.Command{
@@ -33,6 +38,9 @@ var miniInitCmd = &cobra.Command{
 	Short: "Initialize a Velda-mini sandbox",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := checkEnv(cmd); err != nil {
+			return err
+		}
 		sandboxDir := args[0]
 		if sandboxDir == "" {
 			return cmd.Help()
@@ -55,13 +63,38 @@ var miniInitCmd = &cobra.Command{
 		if err := initMiniSandbox(cmd, sandboxDir); err != nil {
 			return fmt.Errorf("failed to initialize mini: %w", err)
 		}
-		return startMini(cmd, sandboxDir)
+		profile := "mini"
+		var profileCfg *clientlib.Configs
+		if cfg, err := clientlib.LoadConfigs("mini"); err == nil {
+			profileCfg = cfg
+		} else {
+			log.Printf("Failed to load %v", err)
+			_, cfg, err := clientlib.InitCurrentConfig("localhost:50051", true)
+			profileCfg = cfg
+			if err != nil {
+				return fmt.Errorf("Error initializing config: %w", err)
+			}
+			if err := cfg.RenameConfig(profile); err != nil {
+				return fmt.Errorf("Error renaming config: %w", err)
+			}
+			// There's only one instance.
+			cfg.SetConfig("default-instance", "1")
+		}
+		if err := profileCfg.MakeCurrent(); err != nil {
+			return fmt.Errorf("Error making config current: %w", err)
+		}
+		if err := configSsh(cmd); err != nil {
+			// This is a warning.
+			cmd.PrintErrln("Failed to configure SSH client for mini cluster")
+		}
+		cmd.PrintErrf("%s%sInitialized mini config%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
+		cmd.PrintErrf("Use %svelda mini start%s to start the mini cluster, and %svelda run%s to connect to it.\n", utils.ColorBold, utils.ColorReset, utils.ColorBold, utils.ColorReset)
+		return nil
 	},
 }
 
 func init() {
 	MiniCmd.AddCommand(miniInitCmd)
-	miniInitCmd.Flags().String("agent-launcher", "docker", "The agent launcher to use (docker)")
 	miniInitCmd.Flags().String("base-image", "ubuntu:24.04", "The docker image to initialize the sandbox")
 	miniInitCmd.Flags().StringSlice("backends", []string{"all"}, "The backends to enable (comma-separated list, e.g., 'aws,gce')")
 }
@@ -130,7 +163,7 @@ func initMiniSandbox(cmd *cobra.Command, sandboxDir string) error {
 		return fmt.Errorf("failed to create root directory: %w", err)
 	}
 	createCmd := exec.Command(
-		"docker", "create", baseImage,
+		"docker", "create", "--platform", "linux/amd64", baseImage,
 	)
 	createCmd.Stderr = os.Stderr
 	container, err := createCmd.Output()
@@ -191,4 +224,141 @@ func initBackends(cmd *cobra.Command, config *configpb.Config) error {
 	}
 
 	return backends.AutoConfigureMini(cmd, config, allowedBackends)
+}
+
+func checkEnv(cmd *cobra.Command) error {
+	if _, err := exec.LookPath("docker"); err != nil {
+		cmd.PrintErrln("Docker is not installed or not in the PATH")
+		return fmt.Errorf("docker not found")
+	}
+	if _, err := exec.LookPath("sudo"); err != nil {
+		cmd.PrintErrln("Sudo is not installed or not in the PATH")
+		return fmt.Errorf("sudo not found")
+	}
+	if _, err := exec.LookPath("tar"); err != nil {
+		cmd.PrintErrln("Tar is not installed or not in the PATH")
+		return fmt.Errorf("tar not found")
+	}
+	if _, err := exec.LookPath("exportfs"); err != nil {
+		cmd.PrintErrln("exportfs is not installed or not in the PATH. Use apt install nfs-kernel-server to install it.")
+		return fmt.Errorf("exportfs not found")
+	}
+	return nil
+}
+
+func configSsh(cmd *cobra.Command) error {
+	// Determine current executable full path
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to determine current executable: %w", err)
+	}
+	// Resolve symlinks and make absolute
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	if abs, err := filepath.Abs(exe); err == nil {
+		exe = abs
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to determine user home directory: %w", err)
+	}
+	sshDir := path.Join(home, ".ssh")
+	cfgPath := path.Join(sshDir, "config")
+
+	// Ensure ~/.ssh exists
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return fmt.Errorf("failed to create .ssh directory: %w", err)
+	}
+
+	// Read existing config if present
+	data, err := os.ReadFile(cfgPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read ssh config: %w", err)
+	}
+
+	// Desired ProxyCommand line (without leading indentation)
+	desiredProxy := fmt.Sprintf("ProxyCommand %s port-forward -W -p 2222 -s ssh --profile mini -u %%r", exe)
+
+	// Canonical block lines
+	canonical := []string{
+		"Host velda-mini",
+		"    User user",
+		"    StrictHostKeyChecking no",
+		"    UserKnownHostsFile /dev/null",
+		"    " + desiredProxy,
+	}
+
+	// If config empty, just write canonical block
+	if len(data) == 0 {
+		entry := "\n" + strings.Join(canonical, "\n") + "\n"
+		if err := os.WriteFile(cfgPath, []byte(entry), 0600); err != nil {
+			return fmt.Errorf("failed to write ssh config: %w", err)
+		}
+		cmd.Printf("Appended SSH config for host 'velda-mini' to %s\n", cfgPath)
+		return nil
+	}
+
+	lines := strings.Split(string(data), "\n")
+	changed := false
+
+	// Iterate and replace any Host velda-mini block entirely
+	for i := 0; i < len(lines); {
+		trimmed := strings.TrimSpace(lines[i])
+		fields := strings.Fields(trimmed)
+		if len(fields) >= 2 && strings.ToLower(fields[0]) == "host" {
+			// check if this host line includes velda-mini
+			matches := false
+			for _, h := range fields[1:] {
+				if h == "velda-mini" {
+					matches = true
+					break
+				}
+			}
+			if matches {
+				// find end of this Host block (next Host line or EOF)
+				j := i + 1
+				for j < len(lines) {
+					t := strings.TrimSpace(lines[j])
+					f := strings.Fields(t)
+					if len(f) >= 1 && strings.ToLower(f[0]) == "host" {
+						break
+					}
+					j++
+				}
+				// Replace lines[i:j] with canonical
+				newLines := make([]string, 0, len(lines)-(j-i)+len(canonical))
+				newLines = append(newLines, lines[:i]...)
+				newLines = append(newLines, canonical...)
+				if j < len(lines) {
+					newLines = append(newLines, lines[j:]...)
+				}
+				lines = newLines
+				changed = true
+				// advance i past the inserted canonical block
+				i += len(canonical)
+				continue
+			}
+		}
+		i++
+	}
+
+	// If there was no existing Host velda-mini, append it
+	if !changed {
+		lines = append(lines, "")
+		lines = append(lines, canonical...)
+		lines = append(lines, "")
+		changed = true
+	}
+
+	if changed {
+		out := strings.Join(lines, "\n")
+		if err := os.WriteFile(cfgPath, []byte(out), 0600); err != nil {
+			return fmt.Errorf("failed to write ssh config: %w", err)
+		}
+		cmd.Printf("Updated SSH config for host 'velda-mini' in %s\n", cfgPath)
+	}
+
+	return nil
 }
