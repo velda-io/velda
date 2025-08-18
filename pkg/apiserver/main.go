@@ -36,6 +36,7 @@ var (
 )
 
 type Service interface {
+	SetConfigPath(path string)
 	InitConfig() error
 	InitDatabase() error
 	InitServices() error
@@ -71,7 +72,7 @@ func initService(s Service) error {
 }
 
 func AddFlags(flags *pflag.FlagSet) {
-	flags.String("config", "config.yaml", "Path to the configuration file")
+	flags.String("config", "", "Path to the configuration file")
 	flags.Bool("restart-on-config-change", true, "Restart service on configuration change")
 }
 
@@ -82,8 +83,12 @@ func StartMetricServer(endpoint string) error {
 
 func Main(s Service, flags *pflag.FlagSet) {
 	restartOnConfigChange, _ := flags.GetBool("restart-on-config-change")
+	configPath, _ := flags.GetString("config")
 	go StartMetricServer("localhost:6060")
 	for {
+		if configPath != "" {
+			s.SetConfigPath(configPath)
+		}
 		err := RunService(s)
 		if errors.Is(err, ConfigChanged) && restartOnConfigChange {
 			log.Println("Configuration changed, restarting service")

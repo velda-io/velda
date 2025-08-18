@@ -15,6 +15,11 @@ variable "version" {
   type = string
 }
 
+locals {
+  isdev = startswith(var.version, "dev")
+  build_version = local.isdev ? "dev" : var.version
+}
+
 variable "aws_region" {
   type    = string
   default = "us-east-1"
@@ -82,7 +87,7 @@ source "amazon-ebs" "velda-agent" {
   ami_virtualization_type = "hvm"
   ami_description = "AMI for Velda Agent"
   ami_regions     = var.ami_regions
-  ami_groups       = ["all"]
+  ami_groups       = local.isdev ? [] : ["all"]
   run_tags = {
     Name = "Packer Builder"
   }
@@ -105,29 +110,6 @@ build {
       "sudo systemctl mask man-db.service apt-daily.service apt-daily-upgrade.service",
       "sudo systemctl mask snapd.service snapd.seeded.service",
       "sudo systemctl mask unattended-upgrades.service",
-      // Only probe for Ec2 metadata server.
-      <<-EOT
-      cat << EOF | sudo tee /etc/cloud/cloud.cfg.d/99-disable-cloud-init-networking.cfg
-      datasource:
-        Ec2:
-          metadata_urls: [ "http://169.254.169.254" ]
-          strict_id: true
-      EOF
-      EOT
-      ,
-      // Move ssh init to cloud-init-config stage
-      <<-EOF
-      sudo sed -E -i.bak '
-      # Save indentation from ssh_import_id line and insert ssh before it
-      /^([[:space:]]*)- ssh_import_id/ {
-        h                              # store ssh_import_id line
-        s//\1- ssh/                    # replace with ssh (same indent)
-        G                              # append original ssh_import_id after ssh
-      }
-      # Delete any existing - ssh line elsewhere in the file
-      /^([[:space:]]*)- ssh$/d
-      ' /etc/cloud/cloud.cfg
-      EOF
     ]
   }
 
@@ -140,7 +122,7 @@ build {
   }
 
   provisioner "file" {
-    source      = "../bin/velda-amd64"
+    source      = "../bin/velda-${local.build_version}-linux-amd64"
     destination = "/tmp/velda-install/client"
   }
 
@@ -151,30 +133,12 @@ build {
   }
 
   provisioner "file" {
-    content     = <<EOF
-[Unit]
-Description=Velda agent
-
-# Wait until the config is provided.
-After=cloud-init.service google-startup-scripts.service
-
-After=dev-nvidiactl.device
-
-[Service]
-Type=simple
-ExecStart=sh -c 'echo start && exec /bin/velda-agent agent daemon'
-Restart=always
-RestartSec=5
-Environment="PATH=/usr/bin:/bin:/snap/bin"
-Environment="HOME=/root"
-StandardError=journal
-OOMPolicy=continue
-LimitNOFILE=524288:524288
-
-[Install]
-WantedBy=network-online.target
-EOF
+    source = "./scripts/velda-agent.service"
     destination = "/tmp/velda-install/velda-agent.service"
+  }
+  provisioner "file" {
+    source = "./scripts/nvidia-init.service"
+    destination = "/tmp/velda-install/nvidia-init.service"
   }
 
   provisioner "shell" {
@@ -184,16 +148,6 @@ EOF
       "sudo bash add-google-cloud-ops-agent-repo.sh --also-install",
       "rm -f add-google-cloud-ops-agent-repo.sh",
       "sudo cp /tmp/velda-install/ops_agent_config.yaml /etc/google-cloud-ops-agent/config.yaml",
-    ]
-  }
-
-  provisioner "shell" {
-    inline = [
-      "sudo cp /tmp/velda-install/client /bin/velda-agent",
-      "sudo cp /tmp/velda-install/velda-agent.service /usr/lib/systemd/system/velda-agent.service",
-      "sudo rm -rf /tmp/velda-install",
-      "sudo systemctl daemon-reload",
-      "sudo systemctl enable velda-agent",
     ]
   }
 
@@ -209,6 +163,7 @@ EOF
       "echo Instaling nvidia driver for kernel $(uname -r)",
       "sudo apt install -y linux-headers-$(uname -r) gcc make",
       "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/lib/* /var/nvidia/lib",
+      "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/bin/* /var/nvidia/bin",
       "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/sbin/* /var/nvidia/bin",
 
       "sudo mkdir -p /var/nvidia/x11/extensions",
@@ -223,17 +178,21 @@ EOF
       # Build the kernel driver.
       "cd nvidia_driver-linux-x86_64-${var.driver_version}-archive/kernel && make -j $(nproc) && sudo make -j $(nproc) modules_install && sudo depmod -a",
       "rm -rf nvidia_driver-linux-x86_64-${var.driver_version}-archive*",
-      <<-EOT
-      cat <<EOF | sudo tee /etc/modules-load.d/nvidia.conf
-      nvidia
-      nvidia_uvm
-      nvidia_modeset
-      nvidia_drm
-      EOF
-      EOT
-      ,
     ]
   }
+
+  provisioner "shell" {
+    inline = [
+      "sudo cp /tmp/velda-install/client /bin/velda-agent",
+      "sudo cp /tmp/velda-install/nvidia-init.service /usr/lib/systemd/system/nvidia-init.service",
+      "sudo cp /tmp/velda-install/velda-agent.service /usr/lib/systemd/system/velda-agent.service",
+      "sudo rm -rf /tmp/velda-install",
+      "sudo systemctl daemon-reload",
+      "sudo systemctl enable nvidia-init",
+      "sudo systemctl enable velda-agent",
+    ]
+  }
+
   post-processor "manifest" {
     only   = ["amazon-ebs.velda-agent"]
     output = "base-aws.json"

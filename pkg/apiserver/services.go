@@ -80,6 +80,10 @@ type OssService struct {
 	cancel          context.CancelFunc
 }
 
+func (s *OssService) SetConfigPath(path string) {
+	s.ConfigPath = path
+}
+
 // NewService creates a new Service instance with the provided configuration
 func (s *OssService) InitConfig() error {
 	s.ExecError = make(chan error, 1)
