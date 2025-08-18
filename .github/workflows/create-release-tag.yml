@@ -1,0 +1,106 @@
+name: Create Release Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run (e.g. v1.2). If empty uses the workflow run branch.'
+        required: false
+        default: ''
+      variant:
+        description: 'Release variant (e.g. test, alpha, beta). Empty = prod.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  create_tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push patch tag
+        id: create_tag
+        shell: bash
+        env:
+          INPUT_BRANCH: ${{ github.event.inputs.branch }}
+          VARIANT: ${{ github.event.inputs.variant }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Choose source ref: explicit input or the workflow's ref name
+          if [ -n "$INPUT_BRANCH" ]; then
+            src_ref="$INPUT_BRANCH"
+          else
+            src_ref="$GITHUB_REF_NAME"
+          fi
+          echo "source ref: $src_ref"
+
+          # Expect branches like v1.2 (major.minor)
+          if [[ ! "$src_ref" =~ ^v[0-9]+\.[0-9]+$ ]]; then
+            echo "Provided branch '$src_ref' does not match v<major>.<minor>. Aborting."
+            exit 1
+          fi
+          base="$src_ref"
+
+          # Ensure tags are available
+          git fetch --tags --prune
+
+          # Find latest prod tag (no suffix) for this base: v<major>.<minor>.<patch>
+          prod_latest_tag=$(git tag --list "${base}.*" | grep -E "^${base}\.[0-9]+$" | sort -V | tail -n1 || true)
+          if [ -z "$prod_latest_tag" ]; then
+            prod_next_patch=0
+          else
+            prod_patch=${prod_latest_tag##*.}
+            prod_next_patch=$((prod_patch + 1))
+          fi
+          echo "Next prod patch will be: $prod_next_patch"
+
+          if [ -z "$VARIANT" ]; then
+            # Prod tag
+            new_tag="${base}.${prod_next_patch}"
+            echo "Generated prod tag: $new_tag"
+            git tag -a "$new_tag" -m "Release $new_tag"
+            git push origin "refs/tags/$new_tag"
+            echo "tag=$new_tag" >> "$GITHUB_OUTPUT"
+          else
+            # Variant tag: use the prod_next_patch (a patch that prod doesn't have yet)
+            # Find existing variant tags for this patch like v1.2.3-alpha1, v1.2.3-alpha2
+            variant_prefix="${base}.${prod_next_patch}-${VARIANT}"
+            existing=$(git tag --list "${variant_prefix}*" | sort -V || true)
+            if [ -z "$existing" ]; then
+              idx=1
+            else
+              # extract trailing number after the variant name, handle tags that may not have a number
+              max=0
+              while read -r t; do
+                # extract digits after variant name
+                num=$(echo "$t" | sed -E "s/^${base}\.${prod_next_patch}-${VARIANT}([0-9]+)\$/\1/")
+                if [[ "$num" =~ ^[0-9]+$ ]]; then
+                  if [ "$num" -gt "$max" ]; then
+                    max=$num
+                  fi
+                fi
+              done <<< "$existing"
+              idx=$((max + 1))
+            fi
+            new_tag="${base}.${prod_next_patch}-${VARIANT}${idx}"
+            echo "Generated variant tag: $new_tag"
+            git tag -a "$new_tag" -m "Release $new_tag"
+            git push origin "refs/tags/$new_tag"
+            echo "tag=$new_tag" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Show pushed tag
+        run: echo "Pushed tag ${{ steps.create_tag.outputs.tag }}"
