@@ -55,7 +55,7 @@ build {
 
   provisioner "file" {
     source      = local.binary_path
-    destination = "/tmp/velda-install/apiserver"
+    destination = "/tmp/velda-install/velda"
   }
   provisioner "file" {
     source      = "./scripts/velda-apiserver.service"
@@ -77,8 +77,8 @@ build {
   }
   provisioner "shell" {
     inline = [
-      "sudo mv /tmp/velda-install/apiserver /bin/velda-apiserver",
-      "sudo mv /tmp/velda-install/velda-apiserver.service /usr/lib/systemd/system/velda-apiserver.service",
+      "sudo cp /tmp/velda-install/velda /bin/velda",
+      "sudo cp /tmp/velda-install/velda-apiserver.service /usr/lib/systemd/system/velda-apiserver.service",
       "sudo systemctl daemon-reload",
       "sudo systemctl enable velda-apiserver",
     ]
