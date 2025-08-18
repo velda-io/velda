@@ -10,7 +10,7 @@ After=cloud-final.service
 After=google-startup-scripts.service
 
 [Service]
-ExecStart=/bin/velda-apiserver --config /etc/velda.yaml
+ExecStart=/bin/velda apiserver --config /etc/velda.yaml
 Restart=always
 RestartSec=5
 Environment="PATH=/usr/bin:/bin:/snap/bin"

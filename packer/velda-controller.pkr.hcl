@@ -1,30 +1,3 @@
-packer {
-  required_plugins {
-    amazon = {
-      source  = "github.com/hashicorp/amazon"
-      version = "~> 1"
-    }
-    google = {
-      source  = "github.com/hashicorp/googlecompute"
-      version = "~> 1"
-    }
-  }
-}
-
-variable "version" {
-  type = string
-}
-
-variable "instance_type" {
-  type    = string
-  default = "t2.micro"
-}
-
-variable "ssh_username" {
-  type    = string
-  default = "ubuntu"
-}
-
 source "amazon-ebs" "velda-controller" {
   region = "us-east-1"
   source_ami_filter {
@@ -37,12 +10,12 @@ source "amazon-ebs" "velda-controller" {
     most_recent = true
   }
 
-  instance_type   = var.instance_type
-  ssh_username    = var.ssh_username
+  instance_type           = var.instance_type
+  ssh_username            = "ubuntu"
   ami_virtualization_type = "hvm"
-  ami_name        = "velda-controller-${var.version}"
-  ami_description = "AMI for Velda controller"
-  ami_groups       = ["all"]
+  ami_name                = "velda-controller-${var.version}"
+  ami_description         = "AMI for Velda controller"
+  ami_groups              = local.ami_groups
   run_tags = {
     Name = "Controller Packer Builder"
   }
@@ -50,48 +23,17 @@ source "amazon-ebs" "velda-controller" {
     Name = "velda-controller"
   }
 }
-
-variable "gcp_project_id" {
-  type    = string
-  default = "velda-oss"
-}
-
-variable "gcp_zone" {
-  type    = string
-  default = "us-central1-b"
-}
-
-variable "gcp_machine_type" {
-  type    = string
-  default = "e2-medium"
-}
-
-variable "gcp_ssh_username" {
-  type    = string
-  default = "ubuntu"
-}
-
 source "googlecompute" "velda-controller" {
-  project_id             = var.gcp_project_id
-  source_image_family    = "ubuntu-2404-lts-amd64"
-  zone                   = var.gcp_zone
-  machine_type           = var.gcp_machine_type
-  ssh_username           = var.gcp_ssh_username
-  disk_size              = 10
-  image_name             = "velda-controller-${var.version}"
-  image_family           = "velda-controller"
-  image_description      = "Image for Velda controller (GCP)"
-  image_guest_os_features = [
-    "VIRTIO_SCSI_MULTIQUEUE",
-    "SEV_CAPABLE",
-    "SEV_SNP_CAPABLE",
-    "SEV_LIVE_MIGRATABLE",
-    "SEV_LIVE_MIGRATABLE_V2",
-    "IDPF",
-    "TDX_CAPABLE",
-    "UEFI_COMPATIBLE",
-    "GVNIC"
-  ]
+  project_id          = var.gce_project_id
+  source_image_family = "ubuntu-2404-lts-amd64"
+  zone                = var.gce_zone
+  machine_type        = var.gce_machine_type
+  ssh_username        = "ubuntu"
+  disk_size           = 10
+  image_name          = "velda-controller-${var.version}"
+  image_family        = "velda-controller"
+  image_description   = "Image for Velda controller (GCP)"
+  image_guest_os_features = local.gce_image_guest_os_features
   labels = {
     name = "velda-controller"
   }
@@ -112,8 +54,8 @@ build {
   }
 
   provisioner "file" {
-    source      = "../bin/apiserver-amd64"
-    destination = "/tmp/velda-install/apiserver"
+    source      = local.binary_path
+    destination = "/tmp/velda-install/velda"
   }
   provisioner "file" {
     source      = "./scripts/velda-apiserver.service"
@@ -123,10 +65,6 @@ build {
     only        = ["googlecompute.velda-controller"]
     source      = "ops_agent_config.yaml"
     destination = "/tmp/velda-install/ops_agent_config.yaml"
-  }
-  provisioner "file" {
-    source      = "./scripts/install.sh"
-    destination = "/tmp/velda-install/install.sh"
   }
   provisioner "shell" {
     only = ["googlecompute.velda-controller"]
@@ -139,9 +77,10 @@ build {
   }
   provisioner "shell" {
     inline = [
-      "chmod +x /tmp/velda-install/install.sh",
-      "sudo /tmp/velda-install/install.sh",
-      "rm /tmp/velda-install -rf",
+      "sudo cp /tmp/velda-install/velda /bin/velda",
+      "sudo cp /tmp/velda-install/velda-apiserver.service /usr/lib/systemd/system/velda-apiserver.service",
+      "sudo systemctl daemon-reload",
+      "sudo systemctl enable velda-apiserver",
     ]
   }
   post-processor "manifest" {

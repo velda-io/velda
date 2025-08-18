@@ -125,7 +125,7 @@ agent_pools:
 	r.suiteName = suiteName
 	r.configDir = configDir
 
-	r.apiServer = exec.Command(fmt.Sprintf("%s/apiserver", bindir), "--config", configFile)
+	r.apiServer = exec.Command(veldaBin, "apiserver", "--config", configFile)
 	r.apiServer.Stdout = os.Stdout
 	r.apiServer.Stderr = os.Stderr
 
