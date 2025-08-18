@@ -58,7 +58,9 @@ var daemonCmd = &cobra.Command{
 		if workDir == "" {
 			workDir = "/tmp/agent"
 		}
-		os.MkdirAll(workDir, 0755)
+		if err := os.MkdirAll(workDir, 0755); err != nil {
+			return err
+		}
 		networkDaemon, err := agentd.GetNetworkDaemon(int(daemonConfig.MaxSessions), daemonConfig.Network)
 		if err != nil {
 			return err

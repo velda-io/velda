@@ -15,9 +15,15 @@ variable "version" {
   type = string
 }
 
+variable "binary_path" {
+  type = string
+  default = null
+}
+
 locals {
   isdev = startswith(var.version, "dev")
   build_version = local.isdev ? "dev" : var.version
+  binary_path = var.binary_path != null ? var.binary_path : "../bin/velda-${local.build_version}-linux-amd64"
 }
 
 variable "aws_region" {
@@ -122,7 +128,7 @@ build {
   }
 
   provisioner "file" {
-    source      = "../bin/velda-${local.build_version}-linux-amd64"
+    source      = local.binary_path
     destination = "/tmp/velda-install/client"
   }
 
