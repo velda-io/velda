@@ -15,7 +15,6 @@ package cmd
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -59,7 +58,7 @@ func startMini(cmd *cobra.Command, sandboxDir string) error {
 	if err := startMiniAgent(cmd, sandboxDir); err != nil {
 		return err
 	}
-	if err := startMiniApiserver(sandboxDir); err != nil {
+	if err := startMiniApiserver(cmd, sandboxDir); err != nil {
 		return err
 	}
 	cmd.PrintErrf("%s%sMini cluster started successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
@@ -68,7 +67,7 @@ func startMini(cmd *cobra.Command, sandboxDir string) error {
 	return nil
 }
 
-func startMiniApiserver(sandboxDir string) error {
+func startMiniApiserver(cmd *cobra.Command, sandboxDir string) error {
 	go apiserver.StartMetricServer("localhost:6060")
 	configPath := path.Join(sandboxDir, "service.yaml")
 	err := apiserver.RunAsDaemon([]string{"apiserver", "--config", configPath},
@@ -76,7 +75,7 @@ func startMiniApiserver(sandboxDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to start API server: %w", err)
 	}
-	log.Printf("API server logs at %s", path.Join(sandboxDir, "apiserver.log"))
+	cmd.PrintErrf("%sAPI server started successfully%s\n", utils.ColorLightGray, utils.ColorReset)
 	return nil
 }
 
