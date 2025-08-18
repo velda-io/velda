@@ -21,8 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,15 +39,16 @@ import (
 
 // ANSI color codes
 const (
-	ColorReset  = "\033[0m"
-	ColorRed    = "\033[31m"
-	ColorGreen  = "\033[32m"
-	ColorYellow = "\033[33m"
-	ColorBlue   = "\033[34m"
-	ColorPurple = "\033[35m"
-	ColorCyan   = "\033[36m"
-	ColorWhite  = "\033[37m"
-	ColorBold   = "\033[1m"
+	ColorReset     = "\033[0m"
+	ColorRed       = "\033[31m"
+	ColorGreen     = "\033[32m"
+	ColorYellow    = "\033[33m"
+	ColorBlue      = "\033[34m"
+	ColorPurple    = "\033[35m"
+	ColorCyan      = "\033[36m"
+	ColorWhite     = "\033[37m"
+	ColorBold      = "\033[1m"
+	ColorLightGray = "\033[37;2m" // Light gray for verbose output
 )
 
 type AwsConfigure struct{}
@@ -140,44 +139,6 @@ func (c *AwsConfigure) detectAWSEnvironment(ctx context.Context) (*AWSEnvironmen
 	}
 
 	return info, nil
-}
-
-// getAWSRegionFromConfig tries to get region from AWS CLI config files
-func (c *AwsConfigure) getAWSRegionFromConfig() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-
-	configPath := filepath.Join(homeDir, ".aws", "config")
-	content, err := os.ReadFile(configPath)
-	if err != nil {
-		return ""
-	}
-
-	// Simple parsing for AWS config file
-	lines := strings.Split(string(content), "\n")
-	inDefaultSection := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "[default]" {
-			inDefaultSection = true
-			continue
-		}
-		if strings.HasPrefix(line, "[") && line != "[default]" {
-			inDefaultSection = false
-			continue
-		}
-		if inDefaultSection && strings.HasPrefix(line, "region") {
-			parts := strings.Split(line, "=")
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
-			}
-		}
-	}
-
-	return ""
 }
 
 // promptUser prompts the user for input with a default value
@@ -368,15 +329,23 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	cmd.PrintErrf("%s🔧 Configuring AWS backend...%s\n", ColorBlue+ColorBold, ColorReset)
 	reader := bufio.NewReader(cmd.InOrStdin())
 
+	// Load AWS config for validation
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
 	// Detect AWS environment from EC2 metadata
 	cmd.PrintErrf("%s🔍 Detecting AWS environment...%s\n", ColorCyan, ColorReset)
 	envInfo, err := c.detectAWSEnvironment(ctx)
 	if err != nil {
 		cmd.PrintErrf("%s⚠️  Could not detect AWS environment from EC2 metadata.%s\n", ColorYellow, ColorReset)
-		cmd.PrintErrf(" This is expected if running outside of AWS or without EC2 metadata access.\n")
-		cmd.PrintErrf(" Error: %v\n", err)
+		cmd.PrintErrf(" %sThis is expected if running outside of AWS or without EC2 metadata access.\n", ColorLightGray)
+		cmd.PrintErrf(" Error: %v%s\n", err, ColorReset)
+		cmd.PrintErrf("%sThe current host must have direct connection to AWS EC2 network (e.g. VPN), "+
+			"and remain connected when any workload is running.%s\n", ColorYellow, ColorReset)
 		envInfo = &AWSEnvironmentInfo{}
-		envInfo.Region = c.getAWSRegionFromConfig()
+		envInfo.Region = awsCfg.Region
 	} else {
 		cmd.PrintErrf("\n%s✅ Detected environment information:%s\n", ColorGreen, ColorReset)
 		cmd.PrintErrf("  Region: %s%s%s\n", ColorWhite+ColorBold, envInfo.Region, ColorReset)
@@ -389,18 +358,16 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	cmd.PrintErrf("\n%s📝 Please verify and/or provide the following information:%s\n\n", ColorPurple+ColorBold, ColorReset)
 
 	// Prompt for region
+	if envInfo.Region == "" {
+		// Default region
+		envInfo.Region = "us-east-1"
+	}
 	region, err := c.promptUser(cmd, reader, "AWS Region", envInfo.Region)
 	if err != nil {
 		return fmt.Errorf("failed to get region: %w", err)
 	}
 	if region == "" {
 		return fmt.Errorf("AWS region is required")
-	}
-
-	// Load AWS config for validation
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
-	if err != nil {
-		return fmt.Errorf("failed to load AWS config: %w", err)
 	}
 	ec2Client := ec2.NewFromConfig(awsCfg)
 
