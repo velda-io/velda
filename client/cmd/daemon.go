@@ -40,7 +40,7 @@ var daemonCmd = &cobra.Command{
 	Short:  "The daemon process for the agent.",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		initAgentDir()
+		cmd.PrintErrln("Starting Velda agent daemon")
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 		brokerClient, err := clientlib.GetBrokerClient()
@@ -57,6 +57,9 @@ var daemonCmd = &cobra.Command{
 		workDir := daemonConfig.GetWorkDirPath()
 		if workDir == "" {
 			workDir = "/tmp/agent"
+		}
+		if err := os.MkdirAll(workDir, 0755); err != nil {
+			return err
 		}
 		networkDaemon, err := agentd.GetNetworkDaemon(int(daemonConfig.MaxSessions), daemonConfig.Network)
 		if err != nil {
@@ -94,28 +97,4 @@ var daemonCmd = &cobra.Command{
 func init() {
 	AgentCmd.AddCommand(daemonCmd)
 	daemonCmd.Flags().StringVarP(&agentPool, "pool", "p", "", "Agent pool")
-}
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, data, mode); err != nil {
-		return err
-	}
-	return nil
-}
-
-func initAgentDir() {
-	if err := os.MkdirAll("/tmp/agent", 0755); err != nil {
-		panic(err)
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		panic(err)
-	}
-	if err := copyFile(executable, "/tmp/agent/client", 0755); err != nil {
-		panic(err)
-	}
 }

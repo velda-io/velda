@@ -15,6 +15,17 @@ variable "version" {
   type = string
 }
 
+variable "binary_path" {
+  type = string
+  default = null
+}
+
+locals {
+  isdev = startswith(var.version, "dev")
+  build_version = local.isdev ? "dev" : var.version
+  binary_path = var.binary_path != null ? var.binary_path : "../bin/velda-${local.build_version}-linux-amd64"
+}
+
 variable "aws_region" {
   type    = string
   default = "us-east-1"
@@ -28,11 +39,6 @@ variable "instance_type" {
 variable "driver_version" {
   type    = string
   default = "570.172.08"
-}
-
-variable "ssh_username" {
-  type    = string
-  default = "ubuntu"
 }
 
 variable "ami_regions" {
@@ -60,7 +66,7 @@ source "googlecompute" "velda-agent" {
   zone                   = var.gce_zone
   source_image_family    = "ubuntu-2404-lts-amd64"
   machine_type           = var.machine_type
-  ssh_username           = var.ssh_username
+  ssh_username           = "ubuntu"
   disk_size              = 10
   image_name             = "velda-agent-${var.version}"
   image_family           = "velda-agent"
@@ -74,7 +80,7 @@ source "amazon-ebs" "velda-agent" {
   region = var.aws_region
   source_ami_filter {
     filters = {
-      name                = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
+      name                = "ubuntu-minimal/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-minimal-*"
       virtualization-type = "hvm"
       root-device-type    = "ebs"
     }
@@ -82,12 +88,12 @@ source "amazon-ebs" "velda-agent" {
     most_recent = true
   }
   instance_type   = var.instance_type
-  ssh_username    = var.ssh_username
+  ssh_username    = "ubuntu"
   ami_name        = "velda-agent-${var.version}"
   ami_virtualization_type = "hvm"
   ami_description = "AMI for Velda Agent"
   ami_regions     = var.ami_regions
-  ami_groups       = ["all"]
+  ami_groups       = local.isdev ? [] : ["all"]
   run_tags = {
     Name = "Packer Builder"
   }
@@ -102,12 +108,14 @@ build {
     "source.googlecompute.velda-agent"
   ]
 
-  // Remove snapd for faster boot time.
+  // Make boot faster
   provisioner "shell" {
-    only = ["googlecompute.velda-agent"]
     inline = [
-      "sudo apt purge snapd -y",
-      "sudo systemctl disable getty@tty1.service",
+      // Mask unnecessary services.
+      "sudo systemctl mask getty@tty1.service",
+      "sudo systemctl mask man-db.service apt-daily.service apt-daily-upgrade.service",
+      "sudo systemctl mask snapd.service snapd.seeded.service",
+      "sudo systemctl mask unattended-upgrades.service",
     ]
   }
 
@@ -115,13 +123,12 @@ build {
     inline = [
       "sudo apt-get update",
       "sudo apt-get install -y nfs-common --no-install-recommends",
-      "sudo mkdir -p /tmp/agentdisk",
       "mkdir /tmp/velda-install"
     ]
   }
 
   provisioner "file" {
-    source      = "../bin/velda-amd64"
+    source      = local.binary_path
     destination = "/tmp/velda-install/client"
   }
 
@@ -132,30 +139,12 @@ build {
   }
 
   provisioner "file" {
-    content     = <<EOF
-[Unit]
-Description=Velda agent
-
-# Wait until the config is provided.
-After=cloud-init.service google-startup-scripts.service
-
-After=nvidia-init.service
-
-[Service]
-Type=simple
-ExecStart=/bin/velda-agent agent daemon
-Restart=always
-RestartSec=5
-Environment="PATH=/usr/bin:/bin:/snap/bin"
-Environment="HOME=/root"
-StandardError=journal
-OOMPolicy=continue
-LimitNOFILE=524288:524288
-
-[Install]
-WantedBy=network-online.target
-EOF
+    source = "./scripts/velda-agent.service"
     destination = "/tmp/velda-install/velda-agent.service"
+  }
+  provisioner "file" {
+    source = "./scripts/nvidia-init.service"
+    destination = "/tmp/velda-install/nvidia-init.service"
   }
 
   provisioner "shell" {
@@ -170,35 +159,7 @@ EOF
 
   provisioner "shell" {
     inline = [
-      "sudo cp /tmp/velda-install/client /bin/velda-agent",
-      "sudo cp /tmp/velda-install/velda-agent.service /usr/lib/systemd/system/velda-agent.service",
-      "sudo rm -rf /tmp/velda-install",
-      "sudo systemctl daemon-reload",
-      "sudo systemctl enable velda-agent",
-    ]
-  }
-
-  provisioner "file" {
-    content     = <<EOF
-[Unit]
-Description=Initialize NVIDIA devices at boot
-
-[Service]
-Type=oneshot
-ExecStart=sh -c "lspci | grep -q NVIDIA && /var/nvidia/bin/nvidia-smi"
-Environment="LD_LIBRARY_PATH=/var/nvidia/lib"
-
-[Install]
-WantedBy=sysinit.target
-EOF
-    destination = "/tmp/nvidia-init.service"
-  }
-
-  provisioner "shell" {
-    inline = [
       // Unattended upgrader may upgrade the kernel and break the nvidia driver.
-      "sudo cp /tmp/nvidia-init.service /usr/lib/systemd/system/nvidia-init.service",
-      "sudo systemctl enable nvidia-init.service",
       "echo Downloading nvidia driver",
       "wget -q https://developer.download.nvidia.com/compute/nvidia-driver/redist/nvidia_driver/linux-x86_64/nvidia_driver-linux-x86_64-${var.driver_version}-archive.tar.xz",
       "echo Unpacking nvidia driver",
@@ -208,6 +169,7 @@ EOF
       "echo Instaling nvidia driver for kernel $(uname -r)",
       "sudo apt install -y linux-headers-$(uname -r) gcc make",
       "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/lib/* /var/nvidia/lib",
+      "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/bin/* /var/nvidia/bin",
       "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/sbin/* /var/nvidia/bin",
 
       "sudo mkdir -p /var/nvidia/x11/extensions",
@@ -224,6 +186,19 @@ EOF
       "rm -rf nvidia_driver-linux-x86_64-${var.driver_version}-archive*",
     ]
   }
+
+  provisioner "shell" {
+    inline = [
+      "sudo cp /tmp/velda-install/client /bin/velda-agent",
+      "sudo cp /tmp/velda-install/nvidia-init.service /usr/lib/systemd/system/nvidia-init.service",
+      "sudo cp /tmp/velda-install/velda-agent.service /usr/lib/systemd/system/velda-agent.service",
+      "sudo rm -rf /tmp/velda-install",
+      "sudo systemctl daemon-reload",
+      "sudo systemctl enable nvidia-init",
+      "sudo systemctl enable velda-agent",
+    ]
+  }
+
   post-processor "manifest" {
     only   = ["amazon-ebs.velda-agent"]
     output = "base-aws.json"
