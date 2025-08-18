@@ -1,7 +1,8 @@
 VERSION ?= dev-$(shell date +%Y%m%d-%H%M%S)
 
-all:
+all: init
 	packer build -var="version=${VERSION}" .
+	${MAKE} update_permission
 
 check:
 	packer validate -var="version=${VERSION}" .
@@ -19,9 +20,16 @@ agent-aws:
 	packer build -var="version=${VERSION}" -only=amazon-ebs.velda-agent .
 
 update_permission:
+# Only update permission if VERSION doesn't contain dev or teset
+ifneq (,$(filter dev test,$(word 1,$(subst -, ,$(VERSION)))))
+else
 	gcloud compute images add-iam-policy-binding projects/velda-oss/global/images/velda-controller-${VERSION} \
 		--member='allAuthenticatedUsers' \
 		--role='roles/compute.imageUser'
 	gcloud compute images add-iam-policy-binding projects/velda-oss/global/images/velda-agent-${VERSION} \
 		--member='allAuthenticatedUsers' \
 		--role='roles/compute.imageUser'
+endif
+
+init:
+	packer init .

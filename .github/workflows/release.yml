@@ -24,7 +24,18 @@ jobs:
         run: go mod download
 
       - name: Build release
-        run: make release
+        run: make release-mini
+        env:
+          VERSION: ${{ github.ref_name }}
+
+      - name: Setup `packer`
+        uses: hashicorp/setup-packer@main
+        id: setup
+        with:
+          version: 1.14.1
+
+      - name: Build images
+        run: make images
         env:
           VERSION: ${{ github.ref_name }}
 
