@@ -1,14 +1,11 @@
-.PHONY: apiserver client format gen test unittest
+.PHONY: velda format gen test unittest
 
-all: client apiserver 
+all: velda
 
 TAGS ?= k8s,gce,gcs_provisioner,aws
 VERSION ?= dev
-client:
+velda:
 	CGO_ENABLED=0 go build --tags "${TAGS}" -p 3 -o bin/velda ./client
-
-apiserver:
-	go build -p 3 --tags "${TAGS}" -o bin/apiserver ./servers/apiserver
 
 release-mini:
 	GOOS=linux GOARCH=amd64 go build -p 3 -o bin/velda-${VERSION}-linux-amd64 ./client
