@@ -31,11 +31,12 @@ func testUbuntu(t *testing.T, r Runner) {
 		_ = runVelda("instance", "delete", instanceName)
 	}()
 
+	// TODO: remove -s "" for testing. There's a race where returning a svc while being terminated.
 	runCommandGetOutput := func(args ...string) (string, error) {
-		return runVeldaWithOutput(append([]string{"run", "--instance", instanceName}, args...)...)
+		return runVeldaWithOutput(append([]string{"run", "--instance", instanceName, "-s", ""}, args...)...)
 	}
 	runCommand := func(args ...string) error {
-		return runVelda(append([]string{"run", "--instance", instanceName}, args...)...)
+		return runVelda(append([]string{"run", "--instance", instanceName, "-s", ""}, args...)...)
 	}
 
 	t.Run("CreateEchoCreateFile", func(t *testing.T) {

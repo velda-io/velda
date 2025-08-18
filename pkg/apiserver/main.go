@@ -16,9 +16,12 @@ package apiserver
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
+	"os/exec"
 	"reflect"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -36,7 +39,7 @@ var (
 )
 
 type Service interface {
-	SetConfigPath(path string)
+	InitFromFlags(flags *pflag.FlagSet) error
 	InitConfig() error
 	InitDatabase() error
 	InitServices() error
@@ -74,6 +77,11 @@ func initService(s Service) error {
 func AddFlags(flags *pflag.FlagSet) {
 	flags.String("config", "", "Path to the configuration file")
 	flags.Bool("restart-on-config-change", true, "Restart service on configuration change")
+	flags.BoolP("foreground", "f", false, "Run service in foreground")
+	flags.String("pidfile", "", "Path to the store the actual PID if not running in foreground.")
+	flags.String("logfile", "", "Path to the log file, only if running in the background.")
+	flags.Int("ready-fd", 0, "File descriptor for readiness signal")
+	flags.MarkHidden("ready-fd")
 }
 
 func StartMetricServer(endpoint string) error {
@@ -82,13 +90,19 @@ func StartMetricServer(endpoint string) error {
 }
 
 func Main(s Service, flags *pflag.FlagSet) {
+	foreground, _ := flags.GetBool("foreground")
+	if !foreground {
+		logfile, _ := flags.GetString("logfile")
+		pidfile, _ := flags.GetString("pidfile")
+		if err := RunAsDaemon(os.Args[1:], logfile, pidfile); err != nil {
+			log.Fatalf("Failed to start service as daemon: %v", err)
+		}
+		return
+	}
 	restartOnConfigChange, _ := flags.GetBool("restart-on-config-change")
-	configPath, _ := flags.GetString("config")
 	go StartMetricServer("localhost:6060")
 	for {
-		if configPath != "" {
-			s.SetConfigPath(configPath)
-		}
+		s.InitFromFlags(flags)
 		err := RunService(s)
 		if errors.Is(err, ConfigChanged) && restartOnConfigChange {
 			log.Println("Configuration changed, restarting service")
@@ -112,4 +126,46 @@ func RunService(svc Service) error {
 	allMetrics.MustRegister(metrics)
 	defer allMetrics.Unregister(metrics)
 	return svc.Run()
+}
+
+func RunAsDaemon(args []string, logfile, pidfile string) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("Failed to get executable path: %v", err)
+	}
+	args = append(args, "--foreground", "--ready-fd", "3")
+	subprocess := exec.Command(executable, args...)
+	subprocess.Stdout = os.Stdout
+	if logfile != "" {
+		f, err := os.OpenFile(logfile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return fmt.Errorf("Failed to open log file: %v", err)
+		}
+		defer f.Close()
+		subprocess.Stderr = f
+	} else {
+		subprocess.Stderr = os.Stderr
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("Failed to create pipe: %v", err)
+	}
+	defer r.Close()
+	subprocess.ExtraFiles = []*os.File{w}
+	if err := subprocess.Start(); err != nil {
+		return fmt.Errorf("Failed to start subprocess: %v", err)
+	}
+	w.Close()
+
+	if pidfile != "" {
+		if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", subprocess.Process.Pid)), 0644); err != nil {
+			return fmt.Errorf("Failed to write PID file: %v", err)
+		}
+	}
+	// wait until r EOF
+	if _, err := r.Read(make([]byte, 1)); err != nil && err != io.EOF {
+		return fmt.Errorf("Failed to read from pipe: %v", err)
+	}
+	log.Printf("Service started with PID %d", subprocess.Process.Pid)
+	return nil
 }

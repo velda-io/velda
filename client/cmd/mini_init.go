@@ -34,10 +34,12 @@ import (
 )
 
 var miniInitCmd = &cobra.Command{
-	Use:   "init",
+	Use:   "init sandbox-dir",
 	Short: "Initialize a Velda-mini sandbox",
-	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return cmd.Help()
+		}
 		if err := checkEnv(cmd); err != nil {
 			return err
 		}
@@ -88,7 +90,9 @@ var miniInitCmd = &cobra.Command{
 			cmd.PrintErrln("Failed to configure SSH client for mini cluster")
 		}
 		cmd.PrintErrf("%s%sInitialized mini config%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
-		cmd.PrintErrf("Use %svelda mini up%s to start the mini cluster, and %svelda run%s to connect to it.\n", utils.ColorBold, utils.ColorReset, utils.ColorBold, utils.ColorReset)
+		if err := startMini(cmd, sandboxDir); err != nil {
+			return fmt.Errorf("failed to start mini cluster: %w", err)
+		}
 		return nil
 	},
 }
