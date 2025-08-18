@@ -25,4 +25,5 @@ var MiniCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(MiniCmd)
+	MiniCmd.PersistentFlags().String("agent-launcher", "docker", "The agent launcher to use (docker)")
 }

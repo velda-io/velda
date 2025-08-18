@@ -23,9 +23,9 @@ import (
 	"velda.io/velda/pkg/apiserver"
 )
 
-var miniStartCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start a Velda-mini cluster",
+var miniUpCmd = &cobra.Command{
+	Use:   "up",
+	Short: "Bring up a Velda-mini cluster",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sandboxDir := args[0]
@@ -48,8 +48,7 @@ var miniStartCmd = &cobra.Command{
 }
 
 func init() {
-	MiniCmd.AddCommand(miniStartCmd)
-	miniStartCmd.Flags().String("agent-launcher", "docker", "The agent launcher to use (docker)")
+	MiniCmd.AddCommand(miniUpCmd)
 }
 
 func startMini(cmd *cobra.Command, sandboxDir string) error {

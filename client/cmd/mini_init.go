@@ -88,7 +88,7 @@ var miniInitCmd = &cobra.Command{
 			cmd.PrintErrln("Failed to configure SSH client for mini cluster")
 		}
 		cmd.PrintErrf("%s%sInitialized mini config%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
-		cmd.PrintErrf("Use %svelda mini start%s to start the mini cluster, and %svelda run%s to connect to it.\n", utils.ColorBold, utils.ColorReset, utils.ColorBold, utils.ColorReset)
+		cmd.PrintErrf("Use %svelda mini up%s to start the mini cluster, and %svelda run%s to connect to it.\n", utils.ColorBold, utils.ColorReset, utils.ColorBold, utils.ColorReset)
 		return nil
 	},
 }
