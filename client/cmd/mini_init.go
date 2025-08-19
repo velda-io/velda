@@ -403,10 +403,13 @@ func initSshKey(cmd *cobra.Command, sandboxDir string) error {
 	}
 	// Move key to rootfs/.velda/authorized_keys
 	rootfs := path.Join(sandboxDir, "root", "0", "1", ".velda")
-	c := exec.Command("sudo", "bash", "-c",
-		fmt.Sprintf("mkdir -p %s && mv %s/ssh_key.pub %s/authorized_keys", rootfs, sandboxDir, rootfs))
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("failed to move SSH public key: %w", err)
+	c := exec.Command("sudo", "mkdir", "-p", rootfs)
+	if output, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w\nOutput: %s", rootfs, err, output)
+	}
+	c = exec.Command("sudo", "cp", path.Join(sandboxDir, "ssh_key.pub"), path.Join(rootfs, "authorized_keys"))
+	if output, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to move SSH public key: %w\nOutput: %s", err, output)
 	}
 	return nil
 }
