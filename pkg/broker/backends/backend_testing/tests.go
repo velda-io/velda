@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -79,4 +79,53 @@ func TestSimpleScaleUpDown(t *testing.T, backend broker.ResourcePoolBackend) {
 		}
 		assert.False(t, found)
 	})
+}
+
+func TestScaleUpDownWithBuffer(t *testing.T, backend broker.ResourcePoolBackend,
+	waitBufferReady func()) {
+	var instanceName string
+	waiter, ok := backend.(hasWait)
+	if !ok {
+		t.Logf("Backend does not support waiting for last operation")
+		waiter = &dummyWait{}
+	}
+	name, err := backend.RequestScaleUp(context.Background())
+	assert.NoError(t, err)
+	t.Logf("Scale up %s", name)
+	instanceName = name
+
+	waiter.WaitForLastOperation(context.Background())
+
+	workers, err := backend.ListWorkers(context.Background())
+	assert.NoError(t, err)
+	var found bool
+	for _, w := range workers {
+		t.Logf("Worker: %v", w)
+		if w.Name == instanceName {
+			found = true
+		}
+	}
+	assert.True(t, found)
+	err = backend.RequestDelete(context.Background(), instanceName)
+	assert.NoError(t, err)
+	t.Logf("Scale down %s", instanceName)
+	waitBufferReady()
+
+	name, err = backend.RequestScaleUp(context.Background())
+	assert.NoError(t, err)
+	t.Logf("Scale up %s", name)
+	assert.Equal(t, instanceName, name)
+	waiter.WaitForLastOperation(context.Background())
+
+	workers, err = backend.ListWorkers(context.Background())
+	assert.NoError(t, err)
+	found = false
+	for _, w := range workers {
+		if w.Name == instanceName {
+			found = true
+		}
+	}
+	assert.True(t, found)
+	err = backend.RequestDelete(context.Background(), instanceName)
+	assert.NoError(t, err)
 }
