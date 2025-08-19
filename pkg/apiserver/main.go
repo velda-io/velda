@@ -165,6 +165,5 @@ func RunAsDaemon(args []string, logfile, pidfile string) error {
 	if _, err := r.Read(make([]byte, 1)); err != nil && err != io.EOF {
 		return fmt.Errorf("Failed to read from pipe: %v", err)
 	}
-	log.Printf("Service started with PID %d", subprocess.Process.Pid)
 	return nil
 }

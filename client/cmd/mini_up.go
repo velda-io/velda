@@ -69,20 +69,20 @@ func startMini(cmd *cobra.Command, sandboxDir string) error {
 }
 
 func printClusterInstruction(cmd *cobra.Command) {
-	cmd.PrintErrf("%s%sMini cluster started successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
-	cmd.PrintErrf("%sTo terminate the cluster, use %svelda mini down%s\n", utils.ColorLightGray, utils.ColorReset, utils.ColorReset)
-	cmd.PrintErrf("Use %svelda run%s or %sssh velda-mini%s to connect to it.\n", utils.ColorBold, utils.ColorReset, utils.ColorBold, utils.ColorReset)
+	cmd.PrintErrf("%s%sMini-velda cluster started successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
+	cmd.PrintErrf("To stop the cluster, run %svelda mini down%s\n", utils.ColorYellow, utils.ColorReset)
+	cmd.PrintErrf("To connect to the sandbox, run %svelda run%s or %sssh mini-velda%s\n", utils.ColorBold+utils.ColorCyan, utils.ColorReset, utils.ColorBold+utils.ColorCyan, utils.ColorReset)
 }
 
 func startMiniApiserver(cmd *cobra.Command, sandboxDir string) error {
-	go apiserver.StartMetricServer("localhost:6060")
 	configPath := path.Join(sandboxDir, "service.yaml")
 	err := apiserver.RunAsDaemon([]string{"apiserver", "--config", configPath},
 		path.Join(sandboxDir, "apiserver.log"), path.Join(sandboxDir, "apiserver.pid")) // Use the daemon mode to run the service
 	if err != nil {
 		return fmt.Errorf("failed to start API server: %w", err)
 	}
-	cmd.PrintErrf("%sAPI server started successfully%s\n", utils.ColorLightGray, utils.ColorReset)
+	cmd.PrintErrf("%sAPI server started successfully%s\n", utils.ColorGreen, utils.ColorReset)
+	cmd.PrintErrf("%sLogs of API server: %s%s\n", utils.ColorLightGray, path.Join(sandboxDir, "apiserver.log"), utils.ColorReset)
 	return nil
 }
 
@@ -116,6 +116,7 @@ pool: shell`, server, localPath)
 	if err := os.WriteFile(agentConfigPath, []byte(agentConfig), 0644); err != nil {
 		return fmt.Errorf("failed to write agent config file: %w", err)
 	}
+	var logs string
 	switch launcher {
 	case "docker":
 		cmd := exec.Command("docker", "run", "-d",
@@ -131,9 +132,12 @@ pool: shell`, server, localPath)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("failed to start docker container: %w", err)
 		}
+		logs = "docker logs mini-velda-agent"
 	default:
 		return fmt.Errorf("unknown agent launcher: %s", launcher)
 	}
+	cmd.PrintErrf("%sMini-velda agent started successfully%s\n", utils.ColorGreen, utils.ColorReset)
+	cmd.PrintErrf("%sLogs of Mini-velda agent: %s%s\n", utils.ColorLightGray, logs, utils.ColorReset)
 	return nil
 }
 

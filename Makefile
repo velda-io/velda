@@ -25,10 +25,12 @@ gen:
 	(cd pkg/agent_runner/; go generate .)
 
 unittest:
-	go test ./pkg/broker/ ./pkg/agent
+	go test ./pkg/... ./client/...
 
-test: unittest
+e2etest:
 	go test ./tests --tags local
+
+test: unittest e2etest
 
 tidy:
 	go mod tidy

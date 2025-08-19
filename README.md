@@ -27,6 +27,16 @@ Save instantly with Velda:
 * Optionally, skip Kubernetes cluster management and scale directly with VMs from your cloud provider.
 
 # Getting started
+## Using mini-velda
+Mini-velda starts a Velda sandbox directly from your workstation, and automatically configure your cluster to scale to the cloud. Also see [limits and restrictions](/docs/mini-velda.md#Limitations).
+
+To start a mini-velda cluster:
+```
+velda mini init ~/velda
+```
+
+## Set-up a shared cluster
+For organizations who want sharing the cluster resource or centralized management, or needs more than mini-velda, you may deploy a standalone Velda cluster that is shared with team-members.
 We support various deployment methods.
 * Set up a new cluster:
   * [Directly on machines](docs/cluster_setup.md)
