@@ -36,9 +36,9 @@ agent_pools:
 - name: shell
 ```
 
-4. Initialize a default image. [This script](/core/oss/misc/init_agent_image.sh) will initialize an instance image from a Docker image.
+4. Initialize a default image. [This script](/misc/init_instance_from_docker.sh) will initialize an instance image from a Docker image.
 ```bash
-./misc/init_agent_image.sh veldaio/ubuntu:24.04 ubuntu_24
+./misc/init_instance_from_docker.sh veldaio/ubuntu:24.04 ubuntu_24
 ```
 New images can be created from any existing instance.
 

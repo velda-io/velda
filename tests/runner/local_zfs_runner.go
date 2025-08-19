@@ -195,9 +195,6 @@ func initializeImages(t *testing.T, zfsRoot, target string) {
 	}
 }
 
-func (r *LocalZfsRunner) TearDown(t *testing.T) {
-}
-
 func (r *LocalZfsRunner) Supports(feature cases.Feature) bool {
 	return true
 }

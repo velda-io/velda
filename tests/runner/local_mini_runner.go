@@ -166,9 +166,6 @@ agent_pools:
 	}
 }
 
-func (r *LocalMiniRunner) TearDown(t *testing.T) {
-}
-
 func (r *LocalMiniRunner) Supports(feature cases.Feature) bool {
 	switch feature {
 	case cases.FeatureImage:

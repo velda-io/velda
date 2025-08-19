@@ -135,7 +135,6 @@ func RunAsDaemon(args []string, logfile, pidfile string) error {
 	}
 	args = append(args, "--foreground", "--ready-fd", "3")
 	subprocess := exec.Command(executable, args...)
-	subprocess.Stdout = os.Stdout
 	if logfile != "" {
 		f, err := os.OpenFile(logfile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {

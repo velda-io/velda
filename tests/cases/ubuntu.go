@@ -48,6 +48,9 @@ func testUbuntu(t *testing.T, r Runner) {
 	})
 
 	t.Run("VrunCreateFile", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
 		// Verify the image exists in the list
 		require.NoError(t, runCommand("vrun", "sh", "-c", "echo foo > testfile2"))
 		output, err := runCommandGetOutput("vrun", "cat", "testfile2")
@@ -56,6 +59,9 @@ func testUbuntu(t *testing.T, r Runner) {
 	})
 
 	t.Run("KillSession", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
 		complete := make(chan struct{})
 		go func() {
 			start := time.Now()
@@ -83,6 +89,9 @@ func testUbuntu(t *testing.T, r Runner) {
 	})
 
 	t.Run("KillSessionForce", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
 		complete := make(chan struct{})
 		go func() {
 			start := time.Now()
