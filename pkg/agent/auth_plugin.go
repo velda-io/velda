@@ -20,6 +20,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"log"
+	"net"
 	"os"
 
 	"golang.org/x/crypto/ssh"
@@ -65,6 +66,12 @@ func (a *keyBasedSshAuth) noClientAuthCallback(conn ssh.ConnMetadata) (*ssh.Perm
 	if _, err := os.Stat(authorizedKeysPath); os.IsNotExist(err) {
 		log.Printf("/.velda/authorized_keys file does not exist, will allow all access")
 		return nil, nil
+	}
+	if tcp, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		if tcp.IP.IsLoopback() {
+			log.Printf("Allowing loopback access")
+			return nil, nil
+		}
 	}
 	return nil, fmt.Errorf("no client auth allowed")
 }

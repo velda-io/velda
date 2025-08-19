@@ -26,8 +26,8 @@ func TestConfigSshAppends(t *testing.T) {
 		t.Fatalf("failed to read ssh config: %v", err)
 	}
 	s := string(data)
-	if !strings.Contains(s, "Host velda-mini") {
-		t.Fatalf("expected Host velda-mini in config, got:\n%s", s)
+	if !strings.Contains(s, "Host mini-velda") {
+		t.Fatalf("expected Host mini-velda in config, got:\n%s", s)
 	}
 	if !strings.Contains(s, "ProxyCommand") || !strings.Contains(s, "port-forward") {
 		t.Fatalf("expected ProxyCommand port-forward in config, got:\n%s", s)
@@ -45,12 +45,12 @@ func TestConfigSshReplaces(t *testing.T) {
 		t.Fatalf("failed to create ssh dir: %v", err)
 	}
 
-	// create an existing config with a velda-mini block and other hosts
+	// create an existing config with a mini-velda block and other hosts
 	initial := `# global
 Host other
     HostName other.example.com
 
-Host velda-mini
+Host mini-velda
     User old
     ProxyCommand old-proxy
 
@@ -72,8 +72,8 @@ Host later
 		t.Fatalf("failed to read ssh config: %v", err)
 	}
 	s := string(data)
-	if !strings.Contains(s, "Host velda-mini") {
-		t.Fatalf("expected Host velda-mini in config, got:\n%s", s)
+	if !strings.Contains(s, "Host mini-velda") {
+		t.Fatalf("expected Host mini-velda in config, got:\n%s", s)
 	}
 	if strings.Contains(s, "User old") {
 		t.Fatalf("expected old User to be replaced, but it's still present\n%s", s)
