@@ -16,7 +16,7 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"strconv"
 	"syscall"
 
@@ -41,7 +41,7 @@ var miniDownCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to get current working directory: %w", err)
 			}
-			sandboxDir = path.Join(cwd, sandboxDir)
+			sandboxDir = filepath.Join(cwd, sandboxDir)
 		}
 		if stat, err := os.Stat(sandboxDir); err != nil || !stat.IsDir() {
 			return fmt.Errorf("sandbox directory %s does not exist or is not a directory: %w", sandboxDir, err)
@@ -64,7 +64,7 @@ func stopMini(cmd *cobra.Command, sandboxDir string) error {
 }
 
 func stopMiniApiserver(sandboxDir string) error {
-	pidfile := path.Join(sandboxDir, "apiserver.pid")
+	pidfile := filepath.Join(sandboxDir, "apiserver.pid")
 	pidBytes, err := os.ReadFile(pidfile)
 	if os.IsNotExist(err) {
 		return fmt.Errorf("API server PID file does not exist. Is service actually running?")
