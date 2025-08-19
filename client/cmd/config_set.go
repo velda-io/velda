@@ -59,4 +59,5 @@ func init() {
 	configCmd.AddCommand(configSetCmd)
 	configSetCmd.Flags().String("default-instance", "", "Configure default instance")
 	configSetCmd.Flags().String("broker", "", "The address of broker")
+	configSetCmd.Flags().String("identity-file", "", "The identity file to use for authentication")
 }

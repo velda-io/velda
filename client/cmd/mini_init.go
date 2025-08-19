@@ -14,7 +14,9 @@
 package cmd
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"os"
@@ -24,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 
@@ -65,10 +68,14 @@ var miniInitCmd = &cobra.Command{
 		if err := initMiniSandbox(cmd, sandboxDir); err != nil {
 			return fmt.Errorf("failed to initialize mini: %w", err)
 		}
+		if err := initSshKey(cmd, sandboxDir); err != nil {
+			return fmt.Errorf("failed to initialize SSH key: %w", err)
+		}
 		profile := "mini"
 		var profileCfg *clientlib.Configs
 		if cfg, err := clientlib.LoadConfigs("mini"); err == nil {
 			profileCfg = cfg
+			cfg.SetConfig("identity-file", path.Join(sandboxDir, "ssh_key"))
 		} else {
 			log.Printf("Failed to load %v", err)
 			_, cfg, err := clientlib.InitCurrentConfig("localhost:50051", true)
@@ -81,6 +88,7 @@ var miniInitCmd = &cobra.Command{
 			}
 			// There's only one instance.
 			cfg.SetConfig("default-instance", "1")
+			cfg.SetConfig("identity-file", path.Join(sandboxDir, "ssh_key"))
 		}
 		if err := profileCfg.MakeCurrent(); err != nil {
 			return fmt.Errorf("Error making config current: %w", err)
@@ -364,5 +372,44 @@ func configSsh(cmd *cobra.Command) error {
 		cmd.Printf("Updated SSH config for host 'velda-mini' in %s\n", cfgPath)
 	}
 
+	return nil
+}
+
+func initSshKey(cmd *cobra.Command, sandboxDir string) error {
+	// Generate an ED25519 key pair
+
+	// Generate a new Ed25519 key pair
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		return fmt.Errorf("failed to generate new Ed25519 key: %w", err)
+	}
+	sshPublicKey, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		return fmt.Errorf("failed to create SSH public key: %w", err)
+	}
+	sshPublicKeyBytes := ssh.MarshalAuthorizedKey(sshPublicKey)
+
+	// Save the private key to the file
+	privateKeyPem, err := ssh.MarshalPrivateKey(privateKey, "ED25519 PRIVATE KEY")
+	if err != nil {
+		return fmt.Errorf("failed to marshal private key: %w", err)
+	}
+	privateKeyBytes := pem.EncodeToMemory(privateKeyPem)
+	if err := os.WriteFile(path.Join(sandboxDir, "ssh_key"), privateKeyBytes, 0600); err != nil {
+		return fmt.Errorf("failed to write private key: %w", err)
+	}
+	if err := os.WriteFile(path.Join(sandboxDir, "ssh_key.pub"), sshPublicKeyBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write public key: %w", err)
+	}
+	// Move key to rootfs/.velda/authorized_keys
+	rootfs := path.Join(sandboxDir, "root", "0", "1", ".velda")
+	c := exec.Command("sudo", "mkdir", "-p", rootfs)
+	if output, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w\nOutput: %s", rootfs, err, output)
+	}
+	c = exec.Command("sudo", "cp", path.Join(sandboxDir, "ssh_key.pub"), path.Join(rootfs, "authorized_keys"))
+	if output, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to move SSH public key: %w\nOutput: %s", err, output)
+	}
 	return nil
 }
