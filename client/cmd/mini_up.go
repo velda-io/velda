@@ -46,7 +46,11 @@ var miniUpCmd = &cobra.Command{
 		if stat, err := os.Stat(sandboxDir); err != nil || !stat.IsDir() {
 			return fmt.Errorf("sandbox directory %s does not exist or is not a directory: %w", sandboxDir, err)
 		}
-		return startMini(cmd, sandboxDir)
+		if err := startMini(cmd, sandboxDir); err != nil {
+			return err
+		}
+		printClusterInstruction(cmd)
+		return nil
 	},
 }
 
@@ -61,10 +65,13 @@ func startMini(cmd *cobra.Command, sandboxDir string) error {
 	if err := startMiniApiserver(cmd, sandboxDir); err != nil {
 		return err
 	}
+	return nil
+}
+
+func printClusterInstruction(cmd *cobra.Command) {
 	cmd.PrintErrf("%s%sMini cluster started successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
 	cmd.PrintErrf("%sTo terminate the cluster, use %svelda mini down%s\n", utils.ColorLightGray, utils.ColorReset, utils.ColorReset)
 	cmd.PrintErrf("Use %svelda run%s or %sssh velda-mini%s to connect to it.\n", utils.ColorBold, utils.ColorReset, utils.ColorBold, utils.ColorReset)
-	return nil
 }
 
 func startMiniApiserver(cmd *cobra.Command, sandboxDir string) error {
@@ -112,10 +119,10 @@ pool: shell`, server, localPath)
 	switch launcher {
 	case "docker":
 		cmd := exec.Command("docker", "run", "-d",
-			"--name", "velda-mini-agent",
+			"--name", "mini-velda-agent",
 			"--privileged",
 			"--platform", "linux/amd64",
-			"-h", "velda-mini-main",
+			"-h", "mini-velda-main",
 			"--add-host=host.docker.internal:host-gateway",
 			"-v", fmt.Sprintf("%s:/run/velda", sandboxDir),
 			"-v", fmt.Sprintf("%s:/bin/velda", executable), "ubuntu:24.04",
@@ -134,7 +141,7 @@ func stopMiniAgent(cmd *cobra.Command) {
 	launcher, _ := cmd.Flags().GetString("agent-launcher")
 	switch launcher {
 	case "docker":
-		cmd := exec.Command("docker", "rm", "-f", "velda-mini-agent")
+		cmd := exec.Command("docker", "rm", "-f", "mini-velda-agent")
 		if err := cmd.Run(); err != nil {
 			fmt.Printf("failed to stop docker container: %v\n", err)
 		}

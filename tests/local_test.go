@@ -34,3 +34,8 @@ func TestMini(t *testing.T) {
 	runner := runner.NewLocalMiniRunner(*zfsRoot)
 	cases.RunAllTests(t, runner)
 }
+
+func TestMiniE2E(t *testing.T) {
+	runner := runner.NewMiniE2ERunner()
+	cases.RunAllTests(t, runner)
+}

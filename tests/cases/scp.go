@@ -31,7 +31,7 @@ func testScpCommand(t *testing.T, r Runner) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	t.Cleanup(func() { assert.NoError(t, os.Remove(tmpFile.Name())) })
 
 	if _, err := tmpFile.WriteString(testContent); err != nil {
 		t.Fatalf("Failed to write to temp file: %v", err)

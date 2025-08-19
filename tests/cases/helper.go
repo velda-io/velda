@@ -64,12 +64,12 @@ func runVeldaWithOutput(args ...string) (string, error) {
 type Feature string
 
 const (
-	FeatureImage Feature = "image"
+	FeatureImage      Feature = "image"
+	FeatureMultiAgent Feature = "multi-agent"
 )
 
 type Runner interface {
 	Setup(t *testing.T)
-	TearDown(t *testing.T)
 	CreateTestInstance(t *testing.T, namePrefix string, image string) string
 	Supports(feature Feature) bool
 }

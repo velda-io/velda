@@ -5,6 +5,7 @@ set -e
 usage() {
   echo "Usage: $0 [docker-image] [velda-instance]"
 }
+SCRIPTDIR=$(dirname "$0")
 DOCKER_NAME=$1
 INST_NAME=$2
 [ -z "$DOCKER_NAME" ] && {
@@ -26,18 +27,7 @@ if [ -n "$INST_NAME" ]; then
 fi
 
 echo "Installing Velda in the instance..."
-cat << EOF | ${VELDA} run${instance_param} -u root sh
-# Initialize user
-useradd user -m -s /bin/bash
-passwd -d user
-mkdir -p /etc/sudoers.d
-echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/user
-usermod -aG sudo user
+cat ${SCRIPTDIR}/init_sandbox.sh | ${VELDA} run${instance_param} -u root sh
 
-ln -s /run/velda/velda /usr/bin/velda
-ln -s /run/velda/velda /usr/bin/vbatch
-ln -s /run/velda/velda /usr/bin/vrun
-ln -s /run/velda/velda /sbin/mount.host
-EOF
 echo -e "\e[32mVelda installed in the instance.\e[0m"
 echo "Use \`${VELDA} run${instance_param}\` to connect with the instance."

@@ -20,7 +20,11 @@ import (
 // AgentCmd represents the agent command
 var MiniCmd = &cobra.Command{
 	Use:   "mini",
-	Short: "Manage Velda-mini cluster",
+	Short: "Manage mini-velda cluster",
+	Long: `This command allows you to manage a mini-velda cluster, including starting, stopping, and configuring the mini-velda environment.
+
+Mini-velda is a Velda cluster that runs directly on individual's compute, with capability to scale to the cloud environment.
+`,
 }
 
 func init() {

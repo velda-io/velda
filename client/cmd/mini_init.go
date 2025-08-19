@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 
+	"velda.io/velda/misc"
 	"velda.io/velda/pkg/broker/backends"
 	"velda.io/velda/pkg/clientlib"
 	configpb "velda.io/velda/pkg/proto/config"
@@ -38,7 +39,13 @@ import (
 
 var miniInitCmd = &cobra.Command{
 	Use:   "init sandbox-dir",
-	Short: "Initialize a Velda-mini sandbox",
+	Short: "Initialize a mini-velda sandbox",
+	Long: `
+This command initialize a mini-velda development sandbox from a docker image, and start a single-instance cluster.
+
+The sandbox-dir will be the path to the directory where the mini-velda environment will be stored, including config and sandbox data.
+
+This command will scan & configures all available compute resource providers where you may get the resource from.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return cmd.Help()
@@ -77,7 +84,6 @@ var miniInitCmd = &cobra.Command{
 			profileCfg = cfg
 			cfg.SetConfig("identity-file", path.Join(sandboxDir, "ssh_key"))
 		} else {
-			log.Printf("Failed to load %v", err)
 			_, cfg, err := clientlib.InitCurrentConfig("localhost:50051", true)
 			profileCfg = cfg
 			if err != nil {
@@ -101,6 +107,10 @@ var miniInitCmd = &cobra.Command{
 		if err := startMini(cmd, sandboxDir); err != nil {
 			return fmt.Errorf("failed to start mini cluster: %w", err)
 		}
+		if err := initSandbox(cmd); err != nil {
+			return fmt.Errorf("failed to initialize sandbox: %w", err)
+		}
+		printClusterInstruction(cmd)
 		return nil
 	},
 }
@@ -210,22 +220,7 @@ func initMiniSandbox(cmd *cobra.Command, sandboxDir string) error {
 	if err := exportCmd.Wait(); err != nil {
 		return fmt.Errorf("failed to wait for export command: %w", err)
 	}
-
-	symlink("/run/velda/velda", path.Join(rootDir, "bin", "velda"))
-	symlink("/run/velda/velda", path.Join(rootDir, "bin", "vrun"))
-	symlink("/run/velda/velda", path.Join(rootDir, "bin", "vbatch"))
-	symlink("/run/velda/velda", path.Join(rootDir, "sbin/mount.host"))
 	return nil
-}
-
-func symlink(target, link string) {
-	if _, err := os.Lstat(link); err == nil {
-		return
-	}
-	output, err := exec.Command("sudo", "ln", "-s", target, link).CombinedOutput()
-	if err != nil {
-		log.Printf("Failed to create symlink %s -> %s: %v\nOutput: %s", link, target, err, output)
-	}
 }
 
 func initBackends(cmd *cobra.Command, config *configpb.Config) error {
@@ -295,7 +290,7 @@ func configSsh(cmd *cobra.Command) error {
 
 	// Canonical block lines
 	canonical := []string{
-		"Host velda-mini",
+		"Host mini-velda",
 		"    User user",
 		"    StrictHostKeyChecking no",
 		"    UserKnownHostsFile /dev/null",
@@ -308,22 +303,22 @@ func configSsh(cmd *cobra.Command) error {
 		if err := os.WriteFile(cfgPath, []byte(entry), 0600); err != nil {
 			return fmt.Errorf("failed to write ssh config: %w", err)
 		}
-		cmd.Printf("Appended SSH config for host 'velda-mini' to %s\n", cfgPath)
+		cmd.Printf("Appended SSH config for host 'mini-velda' to %s\n", cfgPath)
 		return nil
 	}
 
 	lines := strings.Split(string(data), "\n")
 	changed := false
 
-	// Iterate and replace any Host velda-mini block entirely
+	// Iterate and replace any Host mini-velda block entirely
 	for i := 0; i < len(lines); {
 		trimmed := strings.TrimSpace(lines[i])
 		fields := strings.Fields(trimmed)
 		if len(fields) >= 2 && strings.ToLower(fields[0]) == "host" {
-			// check if this host line includes velda-mini
+			// check if this host line includes mini-velda
 			matches := false
 			for _, h := range fields[1:] {
-				if h == "velda-mini" {
+				if h == "mini-velda" {
 					matches = true
 					break
 				}
@@ -356,7 +351,7 @@ func configSsh(cmd *cobra.Command) error {
 		i++
 	}
 
-	// If there was no existing Host velda-mini, append it
+	// If there was no existing Host mini-velda, append it
 	if !changed {
 		lines = append(lines, "")
 		lines = append(lines, canonical...)
@@ -369,7 +364,7 @@ func configSsh(cmd *cobra.Command) error {
 		if err := os.WriteFile(cfgPath, []byte(out), 0600); err != nil {
 			return fmt.Errorf("failed to write ssh config: %w", err)
 		}
-		cmd.Printf("Updated SSH config for host 'velda-mini' in %s\n", cfgPath)
+		cmd.Printf("Updated SSH config for host 'mini-velda' in %s\n", cfgPath)
 	}
 
 	return nil
@@ -410,6 +405,23 @@ func initSshKey(cmd *cobra.Command, sandboxDir string) error {
 	c = exec.Command("sudo", "cp", path.Join(sandboxDir, "ssh_key.pub"), path.Join(rootfs, "authorized_keys"))
 	if output, err := c.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to move SSH public key: %w\nOutput: %s", err, output)
+	}
+	return nil
+}
+
+func initSandbox(cmd *cobra.Command) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+	c := exec.Command(executable, "run", "-u", "root", "bash")
+	c.Stdin = strings.NewReader(misc.InitSandbox)
+	cmd.PrintErrf("%sInitializing sandbox...%s\n%s", utils.ColorBold, utils.ColorReset, utils.ColorLightGray)
+	defer cmd.Print(utils.ColorReset)
+	c.Stdout = os.Stderr
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("failed to run sandbox initialization script: %w", err)
 	}
 	return nil
 }

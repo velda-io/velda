@@ -17,7 +17,6 @@ import "testing"
 
 func RunAllTests(t *testing.T, runner Runner) {
 	runner.Setup(t)
-	defer runner.TearDown(t)
 	t.Run("Basic", func(t *testing.T) {
 		t.Run("SCPCommand", func(t *testing.T) {
 			testScpCommand(t, runner)
