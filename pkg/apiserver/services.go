@@ -30,6 +30,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 
 	"velda.io/velda/pkg/broker"
@@ -57,10 +58,11 @@ type database interface {
 
 // Open-source service implementation.
 type OssService struct {
-	ConfigPath  string
-	GrpcServer  *grpc.Server
-	HttpHandler *http.ServeMux
-	Config      *configpb.Config
+	ConfigPath   string
+	GrpcServer   *grpc.Server
+	HttpHandler  *http.ServeMux
+	Config       *configpb.Config
+	InitSignalFd *os.File // File descriptor for init signal, if any
 
 	Db              database
 	Permissions     rbac.Permissions
@@ -80,8 +82,17 @@ type OssService struct {
 	cancel          context.CancelFunc
 }
 
-func (s *OssService) SetConfigPath(path string) {
-	s.ConfigPath = path
+func (s *OssService) InitFromFlags(flags *pflag.FlagSet) error {
+	configPath, _ := flags.GetString("config")
+	if configPath != "" {
+		s.ConfigPath = configPath
+	}
+
+	readyFd, _ := flags.GetInt("ready-fd")
+	if readyFd > 0 {
+		s.InitSignalFd = os.NewFile(uintptr(readyFd), "ready-fd")
+	}
+	return nil
 }
 
 // NewService creates a new Service instance with the provided configuration
@@ -216,24 +227,29 @@ func (s *OssService) Run() error {
 		Handler: s.HttpHandler,
 	}
 	go func() {
-		log.Printf("Serving HTTP on %s", s.httpServer.Addr)
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.ExecError <- fmt.Errorf("Failed to serve: %v", err)
+		if s.httpServer.Addr != "" {
+			log.Printf("Serving HTTP on %s", s.httpServer.Addr)
+			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				s.ExecError <- fmt.Errorf("Failed to serve: %v", err)
+			}
 		}
 	}()
 
 	// Start gRPC server
+	// Initialize gRPC server
+	lis, err := net.Listen("tcp", s.Config.GetServer().GrpcAddress)
+	if err != nil {
+		return fmt.Errorf("Failed to listen: %v", err)
+	}
 	go func() {
-		// Initialize gRPC server
-		lis, err := net.Listen("tcp", s.Config.GetServer().GrpcAddress)
-		if err != nil {
-			s.ExecError <- fmt.Errorf("Failed to listen: %v", err)
-		}
 		log.Printf("Serving GRPC on %s", lis.Addr().String())
 		if err := s.GrpcServer.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			s.ExecError <- fmt.Errorf("Failed to serve: %v", err)
 		}
 	}()
+	if s.InitSignalFd != nil {
+		s.InitSignalFd.Close()
+	}
 
 	// Wait for SIGINT (Ctrl+C) or SIGTERM.
 	ch := make(chan os.Signal, 1)

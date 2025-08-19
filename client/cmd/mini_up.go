@@ -21,13 +21,16 @@ import (
 
 	"github.com/spf13/cobra"
 	"velda.io/velda/pkg/apiserver"
+	"velda.io/velda/pkg/utils"
 )
 
-var miniStartCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start a Velda-mini cluster",
-	Args:  cobra.ExactArgs(1),
+var miniUpCmd = &cobra.Command{
+	Use:   "up",
+	Short: "Bring up a mini-Velda cluster",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return cmd.Help()
+		}
 		sandboxDir := args[0]
 		if sandboxDir == "" {
 			return cmd.Help()
@@ -48,27 +51,32 @@ var miniStartCmd = &cobra.Command{
 }
 
 func init() {
-	MiniCmd.AddCommand(miniStartCmd)
-	miniStartCmd.Flags().String("agent-launcher", "docker", "The agent launcher to use (docker)")
+	MiniCmd.AddCommand(miniUpCmd)
 }
 
 func startMini(cmd *cobra.Command, sandboxDir string) error {
 	if err := startMiniAgent(cmd, sandboxDir); err != nil {
 		return err
 	}
-	defer stopMiniAgent(cmd)
-	if err := startMiniApiserver(sandboxDir); err != nil {
+	if err := startMiniApiserver(cmd, sandboxDir); err != nil {
 		return err
 	}
+	cmd.PrintErrf("%s%sMini cluster started successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
+	cmd.PrintErrf("%sTo terminate the cluster, use %svelda mini down%s\n", utils.ColorLightGray, utils.ColorReset, utils.ColorReset)
+	cmd.PrintErrf("Use %svelda run%s or %sssh velda-mini%s to connect to it.\n", utils.ColorBold, utils.ColorReset, utils.ColorBold, utils.ColorReset)
 	return nil
 }
 
-func startMiniApiserver(sandboxDir string) error {
+func startMiniApiserver(cmd *cobra.Command, sandboxDir string) error {
 	go apiserver.StartMetricServer("localhost:6060")
-	s := &apiserver.OssService{
-		ConfigPath: path.Join(sandboxDir, "service.yaml"),
+	configPath := path.Join(sandboxDir, "service.yaml")
+	err := apiserver.RunAsDaemon([]string{"apiserver", "--config", configPath},
+		path.Join(sandboxDir, "apiserver.log"), path.Join(sandboxDir, "apiserver.pid")) // Use the daemon mode to run the service
+	if err != nil {
+		return fmt.Errorf("failed to start API server: %w", err)
 	}
-	return apiserver.RunService(s)
+	cmd.PrintErrf("%sAPI server started successfully%s\n", utils.ColorLightGray, utils.ColorReset)
+	return nil
 }
 
 func startMiniAgent(cmd *cobra.Command, sandboxDir string) error {
