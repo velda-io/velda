@@ -13,4 +13,5 @@
 // limitations under the License.
 package velda
 
-//go:generate ./generate_proto.sh
+// Version holds the release version, populated via ldflags during build
+var Version string
