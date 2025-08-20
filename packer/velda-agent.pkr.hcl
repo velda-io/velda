@@ -34,7 +34,7 @@ build {
     inline = [
       "sudo apt-get update",
       "sudo apt-get install -y nfs-common --no-install-recommends",
-      "mkdir /tmp/velda-install"
+      "mkdir -p /tmp/velda-install/extra_files"
     ]
   }
 
@@ -56,6 +56,11 @@ build {
   provisioner "file" {
     source      = "${path.root}/scripts/nvidia-init.service"
     destination = "/tmp/velda-install/nvidia-init.service"
+  }
+
+  provisioner "file" {
+    sources      = var.agent_extra_files
+    destination = "/tmp/velda-install/extra_files/"
   }
 
   provisioner "shell" {
@@ -103,6 +108,7 @@ build {
       "sudo cp /tmp/velda-install/client /bin/velda-agent",
       "sudo cp /tmp/velda-install/nvidia-init.service /usr/lib/systemd/system/nvidia-init.service",
       "sudo cp /tmp/velda-install/velda-agent.service /usr/lib/systemd/system/velda-agent.service",
+      "sudo cp -rv --preserve=mode /tmp/velda-install/extra_files/. /",
       "sudo rm -rf /tmp/velda-install",
       "sudo systemctl daemon-reload",
       "sudo systemctl enable nvidia-init",
