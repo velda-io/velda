@@ -2,10 +2,15 @@
 
 all: velda
 
-TAGS ?= k8s,gce,gcs_provisioner,aws
+# By default, disabled grpctrace & k8s backend to reduce binary size
+# See https://github.com/golang/go/issues/62024
+TAGS ?= gce,gcs_provisioner,aws,grpcnotrace
 VERSION ?= dev
 velda:
 	CGO_ENABLED=0 go build --tags "${TAGS}" -p 3 -o bin/velda ./client
+
+debug-deps:
+	CGO_ENABLED=0 go build -ldflags='-dumpdep' --tags "${TAGS}" -p 3 -o bin/velda ./client >bin/velda-deps 2>&1
 
 release-mini:
 	GOOS=linux GOARCH=amd64 go build -p 3 -o bin/velda-${VERSION}-linux-amd64 ./client

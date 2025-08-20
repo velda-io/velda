@@ -36,11 +36,10 @@ import (
 )
 
 type awsPoolBackend struct {
-	cfg *proto.AutoscalerBackendAWSLaunchTemplate
-	// Do not store ec2.Client here, as it will export all methods of ec2.Client and expode the binary size.
-	// Seems awsPoolBackend[UsedInIface] will export all fields of awsPoolBackend.
+	cfg                   *proto.AutoscalerBackendAWSLaunchTemplate
 	awsCfg                aws.Config
 	launchTemplateId      string
+	svc                   *ec2.Client
 	instanceIdMap         map[string]string
 	lastStartedInstanceId string
 
@@ -59,18 +58,15 @@ type stoppedInstanceInfo struct {
 func NewAWSPoolBackend(cfg *proto.AutoscalerBackendAWSLaunchTemplate, awsCfg aws.Config) broker.ResourcePoolBackend {
 	// Fetch template ID from name
 	return &awsPoolBackend{
-		cfg:                         cfg,
+		cfg: cfg,
+		svc: ec2.NewFromConfig(awsCfg, func(o *ec2.Options) {
+			o.Region = cfg.Region
+		}),
 		awsCfg:                      awsCfg,
 		instanceIdMap:               make(map[string]string),
 		stoppedInstances:            make(map[string]stoppedInstanceInfo),
 		lastScannedStoppedInstances: make(map[string]stoppedInstanceInfo),
 	}
-}
-
-func (a *awsPoolBackend) svc() *ec2.Client {
-	return ec2.NewFromConfig(a.awsCfg, func(o *ec2.Options) {
-		o.Region = a.cfg.Region
-	})
 }
 
 // getStoppedInstance retrieves and removes a stopped instance from the cache
@@ -106,7 +102,7 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 		input := &ec2.StartInstancesInput{
 			InstanceIds: []string{stoppedInstance.instanceId},
 		}
-		_, err := a.svc().StartInstances(ctx, input)
+		_, err := a.svc.StartInstances(ctx, input)
 		if err != nil {
 			log.Printf("Failed to start stopped instance %s: %v", stoppedInstance.instanceId, err)
 			// If starting failed, fall back to creating a new instance
@@ -186,7 +182,7 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	if len(a.cfg.SecurityGroups) > 0 {
 		input.SecurityGroups = a.cfg.SecurityGroups
 	}
-	result, err := a.svc().RunInstances(ctx, input)
+	result, err := a.svc.RunInstances(ctx, input)
 	if err != nil {
 		return "", err
 	}
@@ -218,7 +214,7 @@ func (a *awsPoolBackend) RequestDelete(ctx context.Context, workerName string) e
 					},
 				},
 			}
-			result, err := a.svc().DescribeInstances(ctx, input)
+			result, err := a.svc.DescribeInstances(ctx, input)
 			if err != nil {
 				return fmt.Errorf("Failed to find instance %s: %v", workerName, err)
 			}
@@ -235,7 +231,7 @@ func (a *awsPoolBackend) RequestDelete(ctx context.Context, workerName string) e
 		input := &ec2.StopInstancesInput{
 			InstanceIds: []string{instanceId},
 		}
-		_, err := a.svc().StopInstances(ctx, input)
+		_, err := a.svc.StopInstances(ctx, input)
 		// Do not put it in cache here, but wait until it's stopped.
 		// It's not allowed to start a stopping instance.
 		// The List-worker will maintain the size.
@@ -251,7 +247,7 @@ func (a *awsPoolBackend) RequestDelete(ctx context.Context, workerName string) e
 	input := &ec2.TerminateInstancesInput{
 		InstanceIds: []string{instanceId},
 	}
-	_, err := a.svc().TerminateInstances(ctx, input)
+	_, err := a.svc.TerminateInstances(ctx, input)
 	if err != nil {
 		return err
 	}
@@ -273,7 +269,7 @@ func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 	if a.cfg.GetLaunchTemplateName() != "" {
 		if a.launchTemplateId == "" {
 			// Fetch template ID from name
-			out, err := a.svc().DescribeLaunchTemplates(ctx, &ec2.DescribeLaunchTemplatesInput{
+			out, err := a.svc.DescribeLaunchTemplates(ctx, &ec2.DescribeLaunchTemplatesInput{
 				LaunchTemplateNames: []string{a.cfg.GetLaunchTemplateName()},
 			})
 			if err != nil {
@@ -289,7 +285,7 @@ func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 			Values: []string{a.launchTemplateId},
 		})
 	}
-	result, err := a.svc().DescribeInstances(ctx, input)
+	result, err := a.svc.DescribeInstances(ctx, input)
 	if err != nil {
 		return nil, err
 	}
@@ -366,9 +362,15 @@ func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 		wg := sync.WaitGroup{}
 		wg.Add(len(expiredInstances))
 		log.Printf("Terminating expired stopped instances: %v", expiredInstances)
+		_, err := a.svc.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+			InstanceIds: expiredInstances,
+		})
+		if err != nil {
+			log.Printf("Failed to terminate expired stopped instances: %v", err)
+		}
 		for _, instance := range expiredInstances {
 			go func() {
-				_, err := a.svc().TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+				_, err := a.svc.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
 					InstanceIds: []string{instance},
 				})
 				if err != nil {

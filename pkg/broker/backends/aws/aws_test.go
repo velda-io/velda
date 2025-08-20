@@ -64,11 +64,10 @@ type awsWaitUntilRunning struct {
 }
 
 func (r *awsWaitUntilRunning) WaitForLastOperation(ctx context.Context) error {
-	svc := r.svc()
 	instanceId := r.lastStartedInstanceId
 	log.Printf("Waiting for instance %s to be running", instanceId)
 	for {
-		desc, err := svc.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		desc, err := r.svc.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 			InstanceIds: []string{instanceId},
 		})
 		if err != nil {
