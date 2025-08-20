@@ -16,7 +16,7 @@
 package aws
 
 // To run test:
-// AWS_BACKEND=us-west-1/velda-agent-shell go test --tag aws -v ./pkg/broker/backends/aws
+// AWS_BACKEND=us-east-1/velda-oss-ue1-agent-shell go test --tags aws -v ./pkg/broker/backends/aws
 
 import (
 	"context"
@@ -66,8 +66,8 @@ type awsWaitUntilRunning struct {
 func (r *awsWaitUntilRunning) WaitForLastOperation(ctx context.Context) error {
 	svc := r.svc()
 	instanceId := r.lastStartedInstanceId
+	log.Printf("Waiting for instance %s to be running", instanceId)
 	for {
-		log.Printf("Waiting for instance %s to be running", instanceId)
 		desc, err := svc.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 			InstanceIds: []string{instanceId},
 		})
@@ -109,11 +109,12 @@ func TestAWSBackendWithDeletionBuffer(t *testing.T) {
 	}
 	backendAws := backend.(*awsPoolBackend)
 	deletionReady := func() {
-		configpb.Backend.(*cfgpb.AutoscalerBackend_AwsLaunchTemplate).AwsLaunchTemplate.MaxStoppedInstances = 0
+		t.Log("Waiting for instance to be stopped")
 		for {
-			t.Log("Waiting for instance to be stopped")
 			backendAws.ListWorkers(context.Background())
 			if len(backendAws.stoppedInstances) > 0 {
+				// Next deletion will terminate the instance instead.
+				configpb.Backend.(*cfgpb.AutoscalerBackend_AwsLaunchTemplate).AwsLaunchTemplate.MaxStoppedInstances = 0
 				return
 			}
 			time.Sleep(1000 * time.Millisecond)

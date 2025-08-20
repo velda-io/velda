@@ -338,6 +338,14 @@ func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 	// This helps recover the cache after restarts
 	a.stoppedInstancesMu.Lock()
 	// Add new found stopped instances to the buffer
+	if a.cfg.MaxInstanceLifetime.IsValid() {
+		for id, instance := range a.stoppedInstances {
+			if a.cfg.MaxInstanceLifetime.IsValid() && instance.firstLaunchTime.Add(a.cfg.MaxInstanceLifetime.AsDuration()).Before(time.Now()) {
+				expiredInstances = append(expiredInstances, id)
+				delete(a.stoppedInstances, id)
+			}
+		}
+	}
 	for id, instance := range stoppedInstancesFound {
 		isExpired := len(a.stoppedInstances) >= int(a.cfg.MaxStoppedInstances) ||
 			(a.cfg.MaxInstanceLifetime.IsValid() && instance.firstLaunchTime.Add(a.cfg.MaxInstanceLifetime.AsDuration()).Before(time.Now()))
@@ -354,13 +362,22 @@ func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 	a.stoppedInstancesMu.Unlock()
 	if len(expiredInstances) > 0 {
 		// Terminate expired instances now
+		// Terminate in a batch of requests to avoid failures.
+		wg := sync.WaitGroup{}
+		wg.Add(len(expiredInstances))
 		log.Printf("Terminating expired stopped instances: %v", expiredInstances)
-		_, err := a.svc().TerminateInstances(ctx, &ec2.TerminateInstancesInput{
-			InstanceIds: expiredInstances,
-		})
-		if err != nil {
-			log.Printf("Failed to terminate expired stopped instances: %v", err)
+		for _, instance := range expiredInstances {
+			go func() {
+				_, err := a.svc().TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+					InstanceIds: []string{instance},
+				})
+				if err != nil {
+					log.Printf("Failed to terminate expired stopped instances: %v", err)
+				}
+				wg.Done()
+			}()
 		}
+		wg.Wait()
 	}
 
 	return res, nil
