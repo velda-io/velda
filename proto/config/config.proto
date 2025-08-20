@@ -182,6 +182,17 @@ message AWSAutoProvisioner {
   // these prefixes.
   // If not set, will create pools for all available instance types.
   repeated string instance_type_prefixes = 4;
+
+  // AMI Name to lookup.
+  // If not set, will use the standard pattern by build version.
+  string ami_name = 5;
+
+  // The AWS account ID of the owner of the AMI.
+  // If not set, will default to Velda's cloud account.
+  string ami_owner = 6;
+
+  // If set, will skip the lookup and directly use the provided AMI.
+  string ami_id = 7;
 }
 
 message GCSProvisioner {
