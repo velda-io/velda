@@ -50,6 +50,12 @@ variable "gce_zone" {
   type    = string
   default = "us-central1-b"
 }
+
+variable "agent_extra_files" {
+  type    = list(string)
+  default = []
+}
+
 locals {
   isdev = startswith(var.version, "dev")
   istest = strcontains(var.version, "test") || local.isdev
