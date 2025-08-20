@@ -67,7 +67,6 @@ func (r *awsWaitUntilRunning) WaitForLastOperation(ctx context.Context) error {
 	instanceId := r.lastStartedInstanceId
 	log.Printf("Waiting for instance %s to be running", instanceId)
 	for {
-		log.Printf("Waiting for instance %s to be running", instanceId)
 		desc, err := r.svc.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 			InstanceIds: []string{instanceId},
 		})
