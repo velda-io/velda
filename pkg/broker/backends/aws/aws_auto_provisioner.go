@@ -237,11 +237,11 @@ func getAmi(ctx context.Context, cfg *configpb.AWSAutoProvisioner) (string, erro
 	if amiName == "" {
 		version := velda.Version
 		if version == "" || version == "dev" {
-			return "", errors.New("failed to determine AMI name.")
+			return "", fmt.Errorf("failed to determine AMI name: version is empty or set to %q", version)
 		}
 		amiName = fmt.Sprintf("velda-agent-%s", version)
 	}
-	// List all instance types in the region
+	// List all AMI images in the region matching the specified name and owner
 	ec2Client := ec2.NewFromConfig(awsCfg)
 
 	result, err := ec2Client.DescribeImages(ctx, &ec2.DescribeImagesInput{
@@ -257,7 +257,7 @@ func getAmi(ctx context.Context, cfg *configpb.AWSAutoProvisioner) (string, erro
 		return "", fmt.Errorf("failed to describe AMI: %w", err)
 	}
 	if len(result.Images) == 0 {
-		return "", fmt.Errorf("AMI not found in account %s with name %s", owner, amiName)
+		return "", fmt.Errorf("AMI not found in account %s with name %s in region %s", owner, amiName, region)
 	}
 	return *result.Images[0].ImageId, nil
 }
