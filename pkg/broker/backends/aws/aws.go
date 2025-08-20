@@ -336,22 +336,36 @@ func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 	// Add new found stopped instances to the buffer
 	if a.cfg.MaxInstanceLifetime.IsValid() {
 		for id, instance := range a.stoppedInstances {
-			if a.cfg.MaxInstanceLifetime.IsValid() && instance.firstLaunchTime.Add(a.cfg.MaxInstanceLifetime.AsDuration()).Before(time.Now()) {
+			if a.cfg.MaxInstanceLifetime.IsValid() && time.Since(instance.firstLaunchTime) > a.cfg.MaxInstanceLifetime.AsDuration() {
+				log.Printf("Terminating stopped instance %s due to max life time, %v", id, time.Since(instance.firstLaunchTime))
 				expiredInstances = append(expiredInstances, id)
 				delete(a.stoppedInstances, id)
 			}
 		}
 	}
 	for id, instance := range stoppedInstancesFound {
-		isExpired := len(a.stoppedInstances) >= int(a.cfg.MaxStoppedInstances) ||
-			(a.cfg.MaxInstanceLifetime.IsValid() && instance.firstLaunchTime.Add(a.cfg.MaxInstanceLifetime.AsDuration()).Before(time.Now()))
-		if isExpired {
+		_, inset := a.stoppedInstances[id]
+		if inset {
+			continue
+		}
+		_, existInLastScan := a.lastScannedStoppedInstances[id]
+		if existInLastScan {
+			// Was previously added. It may be already used for recent scale-ups.
+			continue
+		}
+		if len(a.stoppedInstances) >= int(a.cfg.MaxStoppedInstances) {
+			log.Printf("Max stopped instances reached (%d), terminating %s", a.cfg.MaxStoppedInstances, id)
 			expiredInstances = append(expiredInstances, id)
+			continue
+		}
+		log.Printf("Adding stopped instance %s to cache", id)
+		a.stoppedInstances[id] = instance
+	}
+	for id := range a.stoppedInstances {
+		_, in := stoppedInstancesFound[id]
+		if !in {
+			log.Printf("Removing previously stopped instance %s from cache", id)
 			delete(a.stoppedInstances, id)
-		} else if _, exists := a.lastScannedStoppedInstances[id]; !exists {
-			// Only insert if it's new from last scan. An instance may remain in the scanned list
-			// if recently allocated for a workload.
-			a.stoppedInstances[id] = instance
 		}
 	}
 	a.lastScannedStoppedInstances = stoppedInstancesFound
@@ -361,7 +375,6 @@ func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 		// Terminate in a batch of requests to avoid failures.
 		wg := sync.WaitGroup{}
 		wg.Add(len(expiredInstances))
-		log.Printf("Terminating expired stopped instances: %v", expiredInstances)
 		_, err := a.svc.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
 			InstanceIds: expiredInstances,
 		})

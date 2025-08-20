@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"velda.io/velda/pkg/broker"
 )
@@ -46,7 +47,7 @@ func TestSimpleScaleUpDown(t *testing.T, backend broker.ResourcePoolBackend) {
 		instanceName = name
 	})
 
-	waiter.WaitForLastOperation(context.Background())
+	require.NoError(t, waiter.WaitForLastOperation(context.Background()))
 
 	t.Run("ListWorkers", func(t *testing.T) {
 		workers, err := backend.ListWorkers(context.Background())
@@ -66,7 +67,7 @@ func TestSimpleScaleUpDown(t *testing.T, backend broker.ResourcePoolBackend) {
 		assert.NoError(t, err)
 		t.Logf("Scale down %s", instanceName)
 	})
-	waiter.WaitForLastOperation(context.Background())
+	require.NoError(t, waiter.WaitForLastOperation(context.Background()))
 
 	t.Run("ListWorkersAfterDelete", func(t *testing.T) {
 		workers, err := backend.ListWorkers(context.Background())
@@ -94,7 +95,7 @@ func TestScaleUpDownWithBuffer(t *testing.T, backend broker.ResourcePoolBackend,
 	t.Logf("Scale up %s", name)
 	instanceName = name
 
-	waiter.WaitForLastOperation(context.Background())
+	require.NoError(t, waiter.WaitForLastOperation(context.Background()))
 
 	workers, err := backend.ListWorkers(context.Background())
 	assert.NoError(t, err)
@@ -115,7 +116,7 @@ func TestScaleUpDownWithBuffer(t *testing.T, backend broker.ResourcePoolBackend,
 	assert.NoError(t, err)
 	t.Logf("Scale up %s", name)
 	assert.Equal(t, instanceName, name)
-	waiter.WaitForLastOperation(context.Background())
+	require.NoError(t, waiter.WaitForLastOperation(context.Background()))
 
 	workers, err = backend.ListWorkers(context.Background())
 	assert.NoError(t, err)

@@ -29,6 +29,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/stretchr/testify/assert"
 
 	"velda.io/velda/pkg/broker/backends/backend_testing"
 	cfgpb "velda.io/velda/pkg/proto/config"
@@ -66,6 +67,7 @@ type awsWaitUntilRunning struct {
 func (r *awsWaitUntilRunning) WaitForLastOperation(ctx context.Context) error {
 	instanceId := r.lastStartedInstanceId
 	log.Printf("Waiting for instance %s to be running", instanceId)
+	time.Sleep(1000 * time.Millisecond)
 	for {
 		desc, err := r.svc.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 			InstanceIds: []string{instanceId},
@@ -113,6 +115,10 @@ func TestAWSBackendWithDeletionBuffer(t *testing.T) {
 			backendAws.ListWorkers(context.Background())
 			if len(backendAws.stoppedInstances) > 0 {
 				// Next deletion will terminate the instance instead.
+				instance := backendAws.stoppedInstances[backendAws.lastStartedInstanceId]
+				log.Printf("First launch time: %v", instance.firstLaunchTime)
+				assert.Equal(t, instance.instanceId, backendAws.lastStartedInstanceId)
+				assert.Greater(t, instance.firstLaunchTime, time.Now().Add(-10*time.Minute))
 				configpb.Backend.(*cfgpb.AutoscalerBackend_AwsLaunchTemplate).AwsLaunchTemplate.MaxStoppedInstances = 0
 				return
 			}
