@@ -23,10 +23,10 @@ update_permission:
 # Only update permission if VERSION doesn't contain dev or teset
 ifneq (,$(filter dev test,$(word 1,$(subst -, ,$(VERSION)))))
 else
-	gcloud compute images add-iam-policy-binding projects/velda-oss/global/images/velda-controller-${VERSION} \
+	gcloud compute images add-iam-policy-binding projects/velda-oss/global/images/velda-controller-$(subst .,-,$(VERSION)) \
 		--member='allAuthenticatedUsers' \
 		--role='roles/compute.imageUser'
-	gcloud compute images add-iam-policy-binding projects/velda-oss/global/images/velda-agent-${VERSION} \
+	gcloud compute images add-iam-policy-binding projects/velda-oss/global/images/velda-agent-$(subst .,-,$(VERSION)) \
 		--member='allAuthenticatedUsers' \
 		--role='roles/compute.imageUser'
 endif

@@ -43,7 +43,6 @@ variable "ami_regions" {
 
 variable "gce_project_id" {
   type    = string
-  default = "velda-oss"
 }
 
 variable "gce_zone" {
@@ -75,4 +74,5 @@ locals {
     "UEFI_COMPATIBLE",
     "GVNIC"
   ]
+  version_sanitized = replace(var.version, ".", "-")
 }

@@ -1,3 +1,19 @@
+source "googlecompute" "velda-controller" {
+  project_id          = var.gce_project_id
+  source_image_family = "ubuntu-2404-lts-amd64"
+  zone                = var.gce_zone
+  machine_type        = var.gce_machine_type
+  ssh_username        = "ubuntu"
+  disk_size           = 10
+  image_name          = "velda-controller-${local.version_sanitized}"
+  image_family        = "velda-controller"
+  image_description   = "Image for Velda controller (GCP)"
+  image_guest_os_features = local.gce_image_guest_os_features
+  labels = {
+    name = "velda-controller"
+  }
+}
+
 source "amazon-ebs" "velda-controller" {
   region = "us-east-1"
   source_ami_filter {
@@ -21,21 +37,6 @@ source "amazon-ebs" "velda-controller" {
   }
   tags = {
     Name = "velda-controller"
-  }
-}
-source "googlecompute" "velda-controller" {
-  project_id          = var.gce_project_id
-  source_image_family = "ubuntu-2404-lts-amd64"
-  zone                = var.gce_zone
-  machine_type        = var.gce_machine_type
-  ssh_username        = "ubuntu"
-  disk_size           = 10
-  image_name          = "velda-controller-${var.version}"
-  image_family        = "velda-controller"
-  image_description   = "Image for Velda controller (GCP)"
-  image_guest_os_features = local.gce_image_guest_os_features
-  labels = {
-    name = "velda-controller"
   }
 }
 

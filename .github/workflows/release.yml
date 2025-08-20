@@ -6,10 +6,11 @@ on:
       - 'v*.*.*'
 
 jobs:
-  build:
+  build-package:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # This is required to create a release
+      id-token: write
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,16 +29,79 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
 
-      - name: Setup `packer`
-        uses: hashicorp/setup-packer@main
-        id: setup
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bin
+          path: bin/*
+
+  packer-images:
+    needs: build-package
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - id: gcp_auth
+        name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: release-bin
+          path: ./bin
+
+      - name: Install packer
+        uses: hashicorp/setup-packer@v3
         with:
           version: 1.14.1
 
+      - name: Initialize Packer
+        working-directory: ./packer
+        run: packer init .
+
       - name: Build images
-        run: make images
+        working-directory: ./packer
+        run: exec packer build -var="version=${{ github.ref_name }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" .
+
+      - name: Update permissions
+        working-directory: ./packer
+        run: make update_permission
         env:
           VERSION: ${{ github.ref_name }}
+
+  create-release:
+    needs: [build-package, packer-images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: release-bin
+          path: ./bin
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -45,7 +109,7 @@ jobs:
           files: |
             bin/*
           tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           body: |
             **Tag:** ${{ github.ref_name }}
             **Commit:** ${{ github.sha }}
