@@ -1,51 +1,23 @@
-source "googlecompute" "velda-controller" {
-  project_id          = var.gce_project_id
-  source_image_family = "ubuntu-2404-lts-amd64"
-  zone                = var.gce_zone
-  machine_type        = var.gce_machine_type
-  ssh_username        = "ubuntu"
-  disk_size           = 10
-  image_name          = "velda-controller-${local.version_sanitized}"
-  image_family        = "velda-controller"
-  image_description   = "Image for Velda controller (GCP)"
-  image_guest_os_features = local.gce_image_guest_os_features
-  labels = {
-    name = "velda-controller"
-  }
-}
-
-source "amazon-ebs" "velda-controller" {
-  region = "us-east-1"
-  source_ami_filter {
-    filters = {
-      name                = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
-      virtualization-type = "hvm"
-      root-device-type    = "ebs"
-    }
-    owners      = ["099720109477"] # Canonical
-    most_recent = true
-  }
-
-  instance_type           = var.instance_type
-  ssh_username            = "ubuntu"
-  ami_virtualization_type = "hvm"
-  ami_name                = "velda-controller-${var.version}"
-  ami_description         = "AMI for Velda controller"
-  ami_groups              = local.ami_groups
-  ami_users               = var.ami_users
-  run_tags = {
-    Name = "Controller Packer Builder"
-  }
-  tags = {
-    Name = "velda-controller"
-  }
-}
-
 build {
-  sources = [
-    "source.amazon-ebs.velda-controller",
-    "source.googlecompute.velda-controller"
-  ]
+  name = "controller"
+
+  source "amazon-ebs.velda" {
+    ami_description = "AMI for Velda controller ${var.version}"
+    ami_name        = "velda-controller-${var.version}"
+    tags = {
+      Name = "velda-controller"
+    }
+    instance_type = "t2.small"
+  }
+  source "googlecompute.velda" {
+    image_name        = "velda-controller-${local.version_sanitized}"
+    image_description = "Image for Velda controller"
+    machine_type      = "e2-micro"
+    image_family      = "velda-controller"
+    labels = {
+      name = "velda-controller"
+    }
+  }
 
   provisioner "shell" {
     inline = [

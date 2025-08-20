@@ -26,11 +26,6 @@ variable "aws_region" {
   default = "us-east-1"
 }
 
-variable "instance_type" {
-  type    = string
-  default = "m4.2xlarge"
-}
-
 variable "driver_version" {
   type    = string
   default = "570.172.08"
@@ -55,12 +50,6 @@ variable "gce_zone" {
   type    = string
   default = "us-central1-b"
 }
-
-variable "gce_machine_type" {
-  type    = string
-  default = "e2-standard-4"
-}
-
 locals {
   isdev = startswith(var.version, "dev")
   istest = strcontains(var.version, "test") || local.isdev
@@ -69,16 +58,5 @@ locals {
 
   ami_groups = local.istest || length(var.ami_users) > 0 ? [] : ["all"]
 
-  gce_image_guest_os_features = [
-    "VIRTIO_SCSI_MULTIQUEUE",
-    "SEV_CAPABLE",
-    "SEV_SNP_CAPABLE",
-    "SEV_LIVE_MIGRATABLE",
-    "SEV_LIVE_MIGRATABLE_V2",
-    "IDPF",
-    "TDX_CAPABLE",
-    "UEFI_COMPATIBLE",
-    "GVNIC"
-  ]
   version_sanitized = replace(var.version, ".", "-")
 }
