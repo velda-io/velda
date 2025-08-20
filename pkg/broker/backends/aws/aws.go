@@ -20,6 +20,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -37,17 +39,31 @@ type awsPoolBackend struct {
 	cfg *proto.AutoscalerBackendAWSLaunchTemplate
 	// Do not store ec2.Client here, as it will export all methods of ec2.Client and expode the binary size.
 	// Seems awsPoolBackend[UsedInIface] will export all fields of awsPoolBackend.
-	awsCfg           aws.Config
-	launchTemplateId string
-	instanceIdMap    map[string]string
+	awsCfg                aws.Config
+	launchTemplateId      string
+	instanceIdMap         map[string]string
+	lastStartedInstanceId string
+
+	// Cache for stopped instances
+	stoppedInstancesMu          sync.RWMutex
+	stoppedInstances            map[string]stoppedInstanceInfo
+	lastScannedStoppedInstances map[string]stoppedInstanceInfo
+}
+
+type stoppedInstanceInfo struct {
+	instanceId      string
+	name            string
+	firstLaunchTime time.Time
 }
 
 func NewAWSPoolBackend(cfg *proto.AutoscalerBackendAWSLaunchTemplate, awsCfg aws.Config) broker.ResourcePoolBackend {
 	// Fetch template ID from name
 	return &awsPoolBackend{
-		cfg:           cfg,
-		awsCfg:        awsCfg,
-		instanceIdMap: make(map[string]string),
+		cfg:                         cfg,
+		awsCfg:                      awsCfg,
+		instanceIdMap:               make(map[string]string),
+		stoppedInstances:            make(map[string]stoppedInstanceInfo),
+		lastScannedStoppedInstances: make(map[string]stoppedInstanceInfo),
 	}
 }
 
@@ -57,7 +73,53 @@ func (a *awsPoolBackend) svc() *ec2.Client {
 	})
 }
 
+// getStoppedInstance retrieves and removes a stopped instance from the cache
+func (a *awsPoolBackend) getStoppedInstance() *stoppedInstanceInfo {
+	a.stoppedInstancesMu.Lock()
+	defer a.stoppedInstancesMu.Unlock()
+
+	if len(a.stoppedInstances) == 0 {
+		return nil
+	}
+
+	// Get the first stopped instance
+	for _, instance := range a.stoppedInstances {
+		delete(a.stoppedInstances, instance.instanceId)
+		return &instance
+	}
+	return nil
+}
+
+// getStoppedInstancesCount returns the current count of stopped instances in cache
+func (a *awsPoolBackend) getStoppedInstancesCount() int {
+	a.stoppedInstancesMu.RLock()
+	defer a.stoppedInstancesMu.RUnlock()
+	return len(a.stoppedInstances)
+}
+
 func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
+	// Check if we have a stopped instance available
+	if stoppedInstance := a.getStoppedInstance(); stoppedInstance != nil {
+		log.Printf("Starting stopped instance %s AS %s", stoppedInstance.instanceId, stoppedInstance.name)
+
+		// Start the stopped instance
+		input := &ec2.StartInstancesInput{
+			InstanceIds: []string{stoppedInstance.instanceId},
+		}
+		_, err := a.svc().StartInstances(ctx, input)
+		if err != nil {
+			log.Printf("Failed to start stopped instance %s: %v", stoppedInstance.instanceId, err)
+			// If starting failed, fall back to creating a new instance
+		} else {
+			// Update the instance name mapping if needed
+			if !a.cfg.GetUseInstanceIdAsName() {
+				a.instanceIdMap[stoppedInstance.name] = stoppedInstance.instanceId
+			}
+			return stoppedInstance.name, nil
+		}
+	}
+
+	// No stopped instance available or starting failed, create a new instance
 	input := &ec2.RunInstancesInput{
 		MinCount: aws.Int32(1),
 		MaxCount: aws.Int32(1),
@@ -129,6 +191,7 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 		return "", err
 	}
 	instanceName := *result.Instances[0].InstanceId
+	a.lastStartedInstanceId = instanceName
 	if a.cfg.GetUseInstanceIdAsName() {
 		name = instanceName
 	} else {
@@ -165,6 +228,26 @@ func (a *awsPoolBackend) RequestDelete(ctx context.Context, workerName string) e
 			instanceId = *result.Reservations[0].Instances[0].InstanceId
 		}
 	}
+
+	// Try to stop the instance instead of terminating if we have room in the cache
+	if a.cfg.MaxStoppedInstances > int32(a.getStoppedInstancesCount()) {
+		log.Printf("Stopping instance %s (%s) for reuse", instanceId, workerName)
+		input := &ec2.StopInstancesInput{
+			InstanceIds: []string{instanceId},
+		}
+		_, err := a.svc().StopInstances(ctx, input)
+		// Do not put it in cache here, but wait until it's stopped.
+		// It's not allowed to start a stopping instance.
+		// The List-worker will maintain the size.
+		if err == nil {
+			return nil
+		} else {
+			log.Printf("Failed to stop instance %s: %v", instanceId, err)
+		}
+	}
+
+	// Either cache is full or stopping failed, terminate the instance
+	log.Printf("Terminating instance %s (%s)", instanceId, workerName)
 	input := &ec2.TerminateInstancesInput{
 		InstanceIds: []string{instanceId},
 	}
@@ -211,6 +294,9 @@ func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 		return nil, err
 	}
 	var res []broker.WorkerStatus
+	stoppedInstancesFound := make(map[string]stoppedInstanceInfo)
+	expiredInstances := make([]string, 0)
+
 	for _, reservation := range result.Reservations {
 		for _, instance := range reservation.Instances {
 			if instance.State.Name == "terminated" || instance.State.Name == "shutting-down" {
@@ -231,16 +317,86 @@ func (a *awsPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 			} else {
 				name = *instance.InstanceId
 			}
+
+			// If instance is stopped, add it to our stopped instances cache but don't include in active workers
+			if instance.State.Name == "stopped" {
+				stoppedInstancesFound[*instance.InstanceId] = stoppedInstanceInfo{
+					instanceId:      *instance.InstanceId,
+					name:            name,
+					firstLaunchTime: getInstanceFirstLaunchTime(&instance),
+				}
+				continue
+			}
+
 			res = append(res, broker.WorkerStatus{
 				Name: name,
 			})
 		}
 	}
+
+	// Update stopped instances cache with what we found from AWS
+	// This helps recover the cache after restarts
+	a.stoppedInstancesMu.Lock()
+	// Add new found stopped instances to the buffer
+	if a.cfg.MaxInstanceLifetime.IsValid() {
+		for id, instance := range a.stoppedInstances {
+			if a.cfg.MaxInstanceLifetime.IsValid() && instance.firstLaunchTime.Add(a.cfg.MaxInstanceLifetime.AsDuration()).Before(time.Now()) {
+				expiredInstances = append(expiredInstances, id)
+				delete(a.stoppedInstances, id)
+			}
+		}
+	}
+	for id, instance := range stoppedInstancesFound {
+		isExpired := len(a.stoppedInstances) >= int(a.cfg.MaxStoppedInstances) ||
+			(a.cfg.MaxInstanceLifetime.IsValid() && instance.firstLaunchTime.Add(a.cfg.MaxInstanceLifetime.AsDuration()).Before(time.Now()))
+		if isExpired {
+			expiredInstances = append(expiredInstances, id)
+			delete(a.stoppedInstances, id)
+		} else if _, exists := a.lastScannedStoppedInstances[id]; !exists {
+			// Only insert if it's new from last scan. An instance may remain in the scanned list
+			// if recently allocated for a workload.
+			a.stoppedInstances[id] = instance
+		}
+	}
+	a.lastScannedStoppedInstances = stoppedInstancesFound
+	a.stoppedInstancesMu.Unlock()
+	if len(expiredInstances) > 0 {
+		// Terminate expired instances now
+		// Terminate in a batch of requests to avoid failures.
+		wg := sync.WaitGroup{}
+		wg.Add(len(expiredInstances))
+		log.Printf("Terminating expired stopped instances: %v", expiredInstances)
+		for _, instance := range expiredInstances {
+			go func() {
+				_, err := a.svc().TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+					InstanceIds: []string{instance},
+				})
+				if err != nil {
+					log.Printf("Failed to terminate expired stopped instances: %v", err)
+				}
+				wg.Done()
+			}()
+		}
+		wg.Wait()
+	}
+
 	return res, nil
 }
 
 func (a *awsPoolBackend) WaitForLastOperation(ctx context.Context) error {
 	return nil
+}
+
+func getInstanceFirstLaunchTime(instance *ec2types.Instance) time.Time {
+	var t time.Time
+	if len(instance.NetworkInterfaces) > 0 && instance.NetworkInterfaces[0].Attachment.AttachTime != nil {
+		t = *instance.NetworkInterfaces[0].Attachment.AttachTime
+	} else if instance.LaunchTime != nil {
+		t = *instance.LaunchTime
+	} else {
+		t = time.Now() // Fallback to current time if no launch time is available
+	}
+	return t
 }
 
 type awsLaunchTemplatePoolFactory struct{}

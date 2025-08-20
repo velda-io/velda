@@ -121,6 +121,12 @@ message AutoscalerBackendAWSLaunchTemplate {
   // Security groups to attach to the instance.
   // If not set, will use the default from launch template.
   repeated string security_groups = 11;
+
+  // How many instances to keep in stopped state for faster starting.
+  int32 max_stopped_instances = 13;
+
+  // The max duration to keep an instance stopped for reuse.
+  google.protobuf.Duration max_instance_lifetime = 14;
 }
 
 message AutoscalerBackendKubernetes {
