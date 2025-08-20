@@ -65,7 +65,7 @@ func testUbuntu(t *testing.T, r Runner) {
 		complete := make(chan struct{})
 		go func() {
 			start := time.Now()
-			runCommand("vrun", "-s", "victim", "sleep", "10")
+			runCommand("vrun", "-s", "victim1", "sleep", "10")
 			assert.Less(t, time.Since(start), 5*time.Second, "Session should be killed before 5 seconds")
 			close(complete)
 		}()
@@ -73,10 +73,10 @@ func testUbuntu(t *testing.T, r Runner) {
 		for {
 			output, err := runVeldaWithOutput("ls", "--instance", instanceName)
 			require.NoError(t, err, "Failed to list sessions")
-			if strings.Contains(output, "RUNNING  victim") {
+			if strings.Contains(output, "RUNNING  victim1") {
 				break
 			}
-			if strings.Contains(output, "victim") {
+			if strings.Contains(output, "victim1") {
 				started = true
 				time.Sleep(10 * time.Millisecond)
 			} else if started {
@@ -84,7 +84,7 @@ func testUbuntu(t *testing.T, r Runner) {
 			}
 		}
 
-		require.NoError(t, runVelda("kill-session", "--instance", instanceName, "-s", "victim"))
+		require.NoError(t, runVelda("kill-session", "--instance", instanceName, "-s", "victim1"))
 		<-complete
 	})
 
@@ -95,8 +95,8 @@ func testUbuntu(t *testing.T, r Runner) {
 		complete := make(chan struct{})
 		go func() {
 			start := time.Now()
-			log.Printf("Starting session %s", "victim")
-			runCommand("-s", "victim", "bash", "-c", "trap \"\" SIGTERM; sleep 100; ls")
+			log.Printf("Starting session %s", "victim2")
+			runCommand("-s", "victim2", "bash", "-c", "trap \"\" SIGTERM; sleep 100; ls")
 			assert.Less(t, time.Since(start), 5*time.Second, "Session should be killed before 5 seconds")
 			close(complete)
 		}()
@@ -104,10 +104,10 @@ func testUbuntu(t *testing.T, r Runner) {
 		for {
 			output, err := runVeldaWithOutput("ls", "--instance", instanceName)
 			require.NoError(t, err, "Failed to list sessions")
-			if strings.Contains(output, "RUNNING  victim") {
+			if strings.Contains(output, "RUNNING  victim2") {
 				break
 			}
-			if strings.Contains(output, "victim") {
+			if strings.Contains(output, "victim2") {
 				started = true
 				time.Sleep(10 * time.Millisecond)
 			} else if started {
@@ -115,7 +115,7 @@ func testUbuntu(t *testing.T, r Runner) {
 			}
 		}
 
-		require.NoError(t, runVelda("kill-session", "--instance", instanceName, "-s", "victim", "--force"))
+		require.NoError(t, runVelda("kill-session", "--instance", instanceName, "-s", "victim2", "--force"))
 		<-complete
 	})
 }

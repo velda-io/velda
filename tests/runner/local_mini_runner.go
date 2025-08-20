@@ -170,6 +170,8 @@ func (r *LocalMiniRunner) Supports(feature cases.Feature) bool {
 	switch feature {
 	case cases.FeatureImage:
 		return false
+	case cases.FeatureMultiAgent:
+		return false
 	}
 	return true
 }
