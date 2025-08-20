@@ -39,6 +39,3 @@ test: unittest e2etest
 
 tidy:
 	go mod tidy
-
-images:
-	$(MAKE) -C packer

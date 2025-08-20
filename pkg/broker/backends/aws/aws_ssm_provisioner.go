@@ -53,6 +53,7 @@ func (p *AwsSmmPoolProvisioner) run(ctx context.Context) {
 	if interval == 0 {
 		interval = 60 * time.Second
 	}
+	p.awsConfig.Region = p.cfg.Region
 	ssmClient := ssm.NewFromConfig(p.awsConfig)
 
 	ticker := time.NewTicker(interval)
