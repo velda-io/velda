@@ -20,7 +20,7 @@ agent-aws:
 	packer build -var="version=${VERSION}" -only=amazon-ebs.velda-agent .
 
 update_permission:
-# Only update permission if VERSION doesn't contain dev or teset
+# Only update permission if VERSION doesn't contain dev or test
 ifneq (,$(filter dev test,$(word 1,$(subst -, ,$(VERSION)))))
 else
 	gcloud compute images add-iam-policy-binding projects/velda-oss/global/images/velda-controller-$(subst .,-,$(VERSION)) \
