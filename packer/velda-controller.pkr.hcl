@@ -32,6 +32,7 @@ source "amazon-ebs" "velda-controller" {
   ami_name                = "velda-controller-${var.version}"
   ami_description         = "AMI for Velda controller"
   ami_groups              = local.ami_groups
+  ami_users               = var.ami_users
   run_tags = {
     Name = "Controller Packer Builder"
   }
@@ -59,12 +60,12 @@ build {
     destination = "/tmp/velda-install/velda"
   }
   provisioner "file" {
-    source      = "./scripts/velda-apiserver.service"
+    source      = "${path.root}/scripts/velda-apiserver.service"
     destination = "/tmp/velda-install/velda-apiserver.service"
   }
   provisioner "file" {
     only        = ["googlecompute.velda-controller"]
-    source      = "ops_agent_config.yaml"
+    source      = "${path.root}/ops_agent_config.yaml"
     destination = "/tmp/velda-install/ops_agent_config.yaml"
   }
   provisioner "shell" {

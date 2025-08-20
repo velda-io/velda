@@ -1,13 +1,13 @@
 source "googlecompute" "velda-agent" {
-  project_id             = var.gce_project_id
-  zone                   = var.gce_zone
-  source_image_family    = "ubuntu-2404-lts-amd64"
-  machine_type           = var.gce_machine_type
-  ssh_username           = "ubuntu"
-  disk_size              = 10
-  image_name             = "velda-agent-${local.version_sanitized}"
-  image_family           = "velda-agent"
-  image_description      = "Image for Velda Agent"
+  project_id          = var.gce_project_id
+  zone                = var.gce_zone
+  source_image_family = "ubuntu-2404-lts-amd64"
+  machine_type        = var.gce_machine_type
+  ssh_username        = "ubuntu"
+  disk_size           = 10
+  image_name          = "velda-agent-${local.version_sanitized}"
+  image_family        = "velda-agent"
+  image_description   = "Image for Velda Agent"
 
   image_guest_os_features = local.gce_image_guest_os_features
   labels = {
@@ -26,13 +26,14 @@ source "amazon-ebs" "velda-agent" {
     owners      = ["099720109477"] # Canonical
     most_recent = true
   }
-  instance_type   = var.instance_type
-  ssh_username    = "ubuntu"
-  ami_name        = "velda-agent-${var.version}"
+  instance_type           = var.instance_type
+  ssh_username            = "ubuntu"
+  ami_name                = "velda-agent-${var.version}"
   ami_virtualization_type = "hvm"
-  ami_description = "AMI for Velda Agent"
-  ami_regions     = var.ami_regions
-  ami_groups       = local.ami_groups
+  ami_description         = "AMI for Velda Agent"
+  ami_regions             = var.ami_regions
+  ami_groups              = local.ami_groups
+  ami_users               = var.ami_users
   run_tags = {
     Name = "Packer Builder"
   }
@@ -73,16 +74,16 @@ build {
 
   provisioner "file" {
     only        = ["googlecompute.velda-agent"]
-    source      = "ops_agent_config.yaml"
+    source      = "${path.root}/ops_agent_config.yaml"
     destination = "/tmp/velda-install/ops_agent_config.yaml"
   }
 
   provisioner "file" {
-    source = "./scripts/velda-agent.service"
+    source      = "${path.root}/scripts/velda-agent.service"
     destination = "/tmp/velda-install/velda-agent.service"
   }
   provisioner "file" {
-    source = "./scripts/nvidia-init.service"
+    source      = "${path.root}/scripts/nvidia-init.service"
     destination = "/tmp/velda-install/nvidia-init.service"
   }
 

@@ -41,8 +41,14 @@ variable "ami_regions" {
   default = []
 }
 
+variable "ami_users" {
+  type = list(string)
+  default = []
+}
+
 variable "gce_project_id" {
   type    = string
+  default = null
 }
 
 variable "gce_zone" {
@@ -59,9 +65,9 @@ locals {
   isdev = startswith(var.version, "dev")
   istest = strcontains(var.version, "test") || local.isdev
   build_version = local.isdev ? "dev" : var.version
-  binary_path = var.binary_path != null ? var.binary_path : "../bin/velda-${local.build_version}-linux-amd64"
+  binary_path = var.binary_path != null ? var.binary_path : "bin/velda-${local.build_version}-linux-amd64"
 
-  ami_groups = local.istest ? [] : ["all"]
+  ami_groups = local.istest || length(var.ami_users) > 0 ? [] : ["all"]
 
   gce_image_guest_os_features = [
     "VIRTIO_SCSI_MULTIQUEUE",

@@ -75,16 +75,13 @@ jobs:
           version: 1.14.1
 
       - name: Initialize Packer
-        working-directory: ./packer
-        run: packer init .
+        run: packer init packer
 
       - name: Build images
-        working-directory: ./packer
-        run: exec packer build -var="version=${{ github.ref_name }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" .
+        run: exec packer build -var="version=${{ github.ref_name }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" packer
 
       - name: Update permissions
-        working-directory: ./packer
-        run: make update_permission
+        run: make -C packer update_permission
         env:
           VERSION: ${{ github.ref_name }}
 
