@@ -5,7 +5,7 @@ source "googlecompute" "velda-agent" {
   machine_type           = var.gce_machine_type
   ssh_username           = "ubuntu"
   disk_size              = 10
-  image_name             = "velda-agent-${var.version}"
+  image_name             = "velda-agent-${local.version_sanitized}"
   image_family           = "velda-agent"
   image_description      = "Image for Velda Agent"
 

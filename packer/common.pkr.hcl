@@ -43,7 +43,6 @@ variable "ami_regions" {
 
 variable "gce_project_id" {
   type    = string
-  default = "velda-oss"
 }
 
 variable "gce_zone" {
@@ -58,10 +57,11 @@ variable "gce_machine_type" {
 
 locals {
   isdev = startswith(var.version, "dev")
+  istest = strcontains(var.version, "test") || local.isdev
   build_version = local.isdev ? "dev" : var.version
   binary_path = var.binary_path != null ? var.binary_path : "../bin/velda-${local.build_version}-linux-amd64"
 
-  ami_groups = local.isdev ? [] : ["all"]
+  ami_groups = local.istest ? [] : ["all"]
 
   gce_image_guest_os_features = [
     "VIRTIO_SCSI_MULTIQUEUE",
@@ -74,4 +74,5 @@ locals {
     "UEFI_COMPATIBLE",
     "GVNIC"
   ]
+  version_sanitized = replace(var.version, ".", "-")
 }
