@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"velda.io/velda"
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
 	configpb "velda.io/velda/pkg/proto/config"
@@ -63,7 +64,11 @@ func (p *AwsAutoPoolProvisioner) run(ctx context.Context) error {
 		template := proto.Clone(p.cfg.Template).(*configpb.AutoscalerBackendAWSLaunchTemplate)
 		poolName := p.cfg.PoolPrefix + instanceType
 		template.InstanceType = instanceType
-		template.AmiId = "ami-056f848b337c14f24"
+		template.AmiId, err = getAmi(ctx, p.cfg)
+		if err != nil {
+			return fmt.Errorf("failed to get AMI ID: %w", err)
+		}
+
 		if template.Tags == nil {
 			template.Tags = make(map[string]string)
 		}
@@ -212,6 +217,49 @@ func getAvailableInstanceTypes(ctx context.Context, cfg *configpb.AWSAutoProvisi
 		}
 	}
 	return result, nil
+}
+
+func getAmi(ctx context.Context, cfg *configpb.AWSAutoProvisioner) (string, error) {
+	if cfg.AmiId != "" {
+		return cfg.AmiId, nil
+	}
+	region := cfg.Template.Region
+	awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return "", fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	owner := cfg.AmiOwner
+	if owner == "" {
+		owner = "686255976885"
+	}
+
+	amiName := cfg.AmiName
+	if amiName == "" {
+		version := velda.Version
+		if version == "" || version == "dev" {
+			return "", errors.New("failed to determine AMI name.")
+		}
+		amiName = fmt.Sprintf("velda-agent-%s", version)
+	}
+	// List all instance types in the region
+	ec2Client := ec2.NewFromConfig(awsCfg)
+
+	result, err := ec2Client.DescribeImages(ctx, &ec2.DescribeImagesInput{
+		Owners: []string{owner},
+		Filters: []ec2types.Filter{
+			{
+				Name:   aws.String("name"),
+				Values: []string{amiName},
+			},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to describe AMI: %w", err)
+	}
+	if len(result.Images) == 0 {
+		return "", fmt.Errorf("AMI not found in account %s with name %s", owner, amiName)
+	}
+	return *result.Images[0].ImageId, nil
 }
 
 type AwsAutoProvisionerFactory struct{}

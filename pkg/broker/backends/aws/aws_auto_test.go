@@ -32,7 +32,7 @@ import (
 	cfgpb "velda.io/velda/pkg/proto/config"
 )
 
-func TestAWSListInstances(t *testing.T) {
+func TestAWSListInstanceTypes(t *testing.T) {
 	cfg := &cfgpb.AWSAutoProvisioner{
 		Template: &cfgpb.AutoscalerBackendAWSLaunchTemplate{
 			Region: "us-west-1",
@@ -42,6 +42,18 @@ func TestAWSListInstances(t *testing.T) {
 	types, err := getAvailableInstanceTypes(context.Background(), cfg)
 	assert.NoError(t, err, "Failed to get available instance types")
 	t.Logf("Available instance types: %v", types)
+}
+
+func TestAWSGetAmi(t *testing.T) {
+	cfg := &cfgpb.AWSAutoProvisioner{
+		Template: &cfgpb.AutoscalerBackendAWSLaunchTemplate{
+			Region: "us-east-1",
+		},
+		AmiName: "velda-agent-v1.0.0-alpha1",
+	}
+	ami, err := getAmi(context.Background(), cfg)
+	assert.NoError(t, err, "Failed to get AMI")
+	t.Logf("AMI: %v", ami)
 }
 
 func TestAWSAutoBackend(t *testing.T) {
