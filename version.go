@@ -13,4 +13,4 @@
 // limitations under the License.
 package velda
 
-//go:generate ./generate_proto.sh
+var Version string
