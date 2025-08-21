@@ -24,12 +24,18 @@ import (
 	"velda.io/velda/pkg/utils"
 )
 
+const currentSandboxLinkLocation = "/tmp/current-mini-velda"
+
 var miniUpCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Bring up a mini-Velda cluster",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return cmd.Help()
+			cmd.PrintErrln("Usage: velda mini up <sandbox-dir>")
+			return fmt.Errorf("sandbox directory must be specified")
+		}
+		if p, err := os.Readlink(currentSandboxLinkLocation); err == nil {
+			return fmt.Errorf("A sandbox at %s may be already running. Use velda mini down to stop it. If this is in error, remove %s", p, currentSandboxLinkLocation)
 		}
 		sandboxDir := args[0]
 		if sandboxDir == "" {
@@ -65,6 +71,7 @@ func startMini(cmd *cobra.Command, sandboxDir string) error {
 	if err := startMiniApiserver(cmd, sandboxDir); err != nil {
 		return err
 	}
+	os.Symlink(sandboxDir, currentSandboxLinkLocation)
 	return nil
 }
 
@@ -72,6 +79,8 @@ func printClusterInstruction(cmd *cobra.Command) {
 	cmd.PrintErrf("%s%sMini-velda cluster started successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
 	cmd.PrintErrf("To stop the cluster, run %svelda mini down%s\n", utils.ColorYellow, utils.ColorReset)
 	cmd.PrintErrf("To connect to the sandbox, run %svelda run%s or %sssh mini-velda%s\n", utils.ColorBold+utils.ColorCyan, utils.ColorReset, utils.ColorBold+utils.ColorCyan, utils.ColorReset)
+	cmd.PrintErrf("To run workload with extra compute, run %svelda run -P [pool] cmdline%s from the sandbox\n", utils.ColorBold+utils.ColorCyan, utils.ColorReset)
+	cmd.PrintErrf("To view available pools, use %svelda pool list%s\n", utils.ColorBold+utils.ColorCyan, utils.ColorReset)
 }
 
 func startMiniApiserver(cmd *cobra.Command, sandboxDir string) error {

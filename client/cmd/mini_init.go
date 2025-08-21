@@ -44,11 +44,14 @@ var miniInitCmd = &cobra.Command{
 This command initialize a mini-velda development sandbox from a docker image, and start a single-instance cluster.
 
 The sandbox-dir will be the path to the directory where the mini-velda environment will be stored, including config and sandbox data.
-
-This command will scan & configures all available compute resource providers where you may get the resource from.`,
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return cmd.Help()
+			cmd.PrintErrln("Usage: velda mini init <sandbox-dir>")
+			return fmt.Errorf("sandbox directory must be specified")
+		}
+		if p, err := os.Readlink(currentSandboxLinkLocation); err == nil {
+			return fmt.Errorf("A sandbox at %s may be already running. Use velda mini down to stop it. If this is in error, remove %s", p, currentSandboxLinkLocation)
 		}
 		if err := checkEnv(cmd); err != nil {
 			return err

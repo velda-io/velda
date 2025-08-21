@@ -28,12 +28,13 @@ var miniDownCmd = &cobra.Command{
 	Use:   "down sandbox-dir",
 	Short: "Bring down a mini-Velda cluster",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return cmd.Usage()
-		}
-		sandboxDir := args[0]
+		sandboxDir, _ := cmd.Flags().GetString("sandbox-dir")
 		if sandboxDir == "" {
-			return fmt.Errorf("Sandbox directory must be specified")
+			var err error
+			sandboxDir, err = os.Readlink(currentSandboxLinkLocation)
+			if err != nil {
+				return fmt.Errorf("failed to read current sandbox link: %w", err)
+			}
 		}
 		if sandboxDir[0] != '/' {
 			// If the path is not absolute, make it relative to the current directory
@@ -52,6 +53,7 @@ var miniDownCmd = &cobra.Command{
 
 func init() {
 	MiniCmd.AddCommand(miniDownCmd)
+	miniDownCmd.Flags().String("sandbox-dir", "", "Path to the sandbox directory")
 }
 
 func stopMini(cmd *cobra.Command, sandboxDir string) error {
@@ -59,7 +61,8 @@ func stopMini(cmd *cobra.Command, sandboxDir string) error {
 	if err := stopMiniApiserver(sandboxDir); err != nil {
 		return err
 	}
-	cmd.PrintErrf("%s%sMini cluster stopped successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
+	os.Remove(currentSandboxLinkLocation)
+	cmd.PrintErrf("%s%sMini-velda cluster stopped successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
 	return nil
 }
 
