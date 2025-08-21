@@ -235,7 +235,7 @@ func (c *AwsConfigure) validateAndResolveSecurityGroups(ctx context.Context, ec2
 }
 
 // checkAWSPermissions validates that the user has necessary AWS permissions using dry-run mode where possible
-func (c *AwsConfigure) checkAWSPermissions(cmd *cobra.Command, awsCfg aws.Config, ec2Client *ec2.Client, region string) error {
+func (c *AwsConfigure) checkAWSPermissions(cmd *cobra.Command, awsCfg aws.Config, ec2Client *ec2.Client, cfg *configpb.AWSAutoProvisioner) error {
 	// Check AWS permissions
 	cmd.PrintErrf("%s🔐 Checking AWS permissions...%s\n", utils.ColorCyan, utils.ColorReset)
 
@@ -292,6 +292,10 @@ func (c *AwsConfigure) checkAWSPermissions(cmd *cobra.Command, awsCfg aws.Config
 		MaxResults: aws.Int32(5),
 	})
 	handleError("ec2:DescribeSubnets", err)
+	amiId, err := getAmi(cmd.Context(), cfg)
+	if err != nil {
+		return fmt.Errorf("failed to get AMI ID: %w", err)
+	}
 
 	// Test RunInstances permission using dry-run mode
 	// This is the most critical permission for the AWS provisioner
@@ -300,7 +304,7 @@ func (c *AwsConfigure) checkAWSPermissions(cmd *cobra.Command, awsCfg aws.Config
 		MinCount:     aws.Int32(1),
 		MaxCount:     aws.Int32(1),
 		InstanceType: ec2types.InstanceTypeT2Micro,
-		ImageId:      aws.String("ami-056f848b337c14f24"),
+		ImageId:      aws.String(amiId),
 	})
 	handleError("ec2:RunInstances", err)
 
@@ -411,20 +415,6 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 		poolPrefix = defaultPoolPrefix
 	}
 
-	if err := c.checkAWSPermissions(cmd, awsCfg, ec2Client, region); err != nil {
-		cmd.PrintErrf("%s❌ AWS permissions check failed: %v%s\n", utils.ColorRed+utils.ColorBold, err, utils.ColorReset)
-		// Ask user if they want to continue
-		continueChoice, err := c.promptUser(cmd, reader, "Continue with configuration anyway? (y/n)", "n")
-		if err != nil {
-			return fmt.Errorf("failed to get user choice: %w", err)
-		}
-		if strings.ToLower(strings.TrimSpace(continueChoice)) != "y" {
-			return fmt.Errorf("configuration cancelled by user due to permission issues")
-		}
-	} else {
-		cmd.PrintErrf("%s✅ AWS permissions check passed!%s\n", utils.ColorGreen+utils.ColorBold, utils.ColorReset)
-	}
-
 	// Build the launch template configuration
 	template := &configpb.AutoscalerBackendAWSLaunchTemplate{
 		UseInstanceIdAsName: true,
@@ -437,18 +427,52 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	if subnetID != "" {
 		template.SubnetId = subnetID
 	}
+	cfg := &configpb.AWSAutoProvisioner{
+		PoolPrefix:           poolPrefix,
+		Template:             template,
+		InstanceTypePrefixes: instanceTypePrefixes,
+	}
 
 	// Generate provisioner config based on user input
 	provisioner := &configpb.Provisioner{
 		Provisioner: &configpb.Provisioner_AwsAuto{
-			AwsAuto: &configpb.AWSAutoProvisioner{
-				PoolPrefix:           poolPrefix,
-				Template:             template,
-				InstanceTypePrefixes: instanceTypePrefixes,
-			},
+			AwsAuto: cfg,
 		},
 	}
 
+	defaultAmiId, err := getAmi(cmd.Context(), cfg)
+	if err != nil {
+		cmd.PrintErrf("%s❌ Failed to determine default AMI ID automatically: %v%s\n", utils.ColorRed+utils.ColorBold, err, utils.ColorReset)
+	} else {
+		cmd.PrintErrf("Default AMI ID for current Velda version: %s\n", defaultAmiId)
+	}
+	amiId, err := c.promptUser(cmd, reader, "Override AMI ID or agent version", "default")
+	if err != nil {
+		return fmt.Errorf("failed to get AMI ID: %w", err)
+	}
+	if amiId == "default" {
+		if defaultAmiId == "" {
+			return fmt.Errorf("failed to determine default AMI ID")
+		}
+	} else if strings.HasPrefix(amiId, "ami-") {
+		cfg.AmiId = amiId
+	} else {
+		cfg.AmiName = "velda-agent-" + amiId
+	}
+
+	if err := c.checkAWSPermissions(cmd, awsCfg, ec2Client, cfg); err != nil {
+		cmd.PrintErrf("%s❌ AWS permissions check failed: %v%s\n", utils.ColorRed+utils.ColorBold, err, utils.ColorReset)
+		// Ask user if they want to continue
+		continueChoice, err := c.promptUser(cmd, reader, "Continue with configuration anyway? (y/n)", "n")
+		if err != nil {
+			return fmt.Errorf("failed to get user choice: %w", err)
+		}
+		if strings.ToLower(strings.TrimSpace(continueChoice)) != "y" {
+			return fmt.Errorf("configuration cancelled by user due to permission issues")
+		}
+	} else {
+		cmd.PrintErrf("%s✅ AWS permissions check passed!%s\n", utils.ColorGreen+utils.ColorBold, utils.ColorReset)
+	}
 	config.Provisioners = append(config.Provisioners, provisioner)
 
 	cmd.PrintErrf("\n%s🎉 AWS provisioner configuration completed successfully!%s\n", utils.ColorGreen+utils.ColorBold, utils.ColorReset)

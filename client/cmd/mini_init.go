@@ -66,9 +66,8 @@ This command will scan & configures all available compute resource providers whe
 			sandboxDir = path.Join(cwd, sandboxDir)
 		}
 		if _, err := os.Stat(sandboxDir); !os.IsNotExist(err) {
-			return fmt.Errorf("sandbox directory %s already exists: %w", sandboxDir, err)
+			return fmt.Errorf("sandbox directory %s already exists", sandboxDir)
 		}
-		os.MkdirAll(sandboxDir, 0755)
 		if err := initMiniConfig(cmd, sandboxDir); err != nil {
 			return fmt.Errorf("failed to initialize mini config: %w", err)
 		}
@@ -157,6 +156,9 @@ func initMiniConfig(cmd *cobra.Command, sandboxDir string) error {
 	cfgYaml, err := yaml.Marshal(cfgJsonParsed)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config to YAML: %w", err)
+	}
+	if err := os.MkdirAll(sandboxDir, 0755); err != nil {
+		return fmt.Errorf("failed to create sandbox directory: %w", err)
 	}
 	if err := os.WriteFile(cfgFile, cfgYaml, 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
