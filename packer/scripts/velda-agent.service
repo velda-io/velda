@@ -8,7 +8,7 @@ After=nvidia-init.service
 
 [Service]
 Type=simple
-ExecStart=sh -c 'echo start && exec /bin/velda-agent agent daemon'
+ExecStart=/bin/velda agent daemon
 Restart=always
 RestartSec=5
 Environment="PATH=/usr/bin:/bin:/snap/bin"

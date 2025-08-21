@@ -105,7 +105,8 @@ build {
 
   provisioner "shell" {
     inline = [
-      "sudo cp /tmp/velda-install/client /bin/velda-agent",
+      "sudo cp /tmp/velda-install/client /bin/velda",
+      "sudo chmod +x /bin/velda",
       "sudo cp /tmp/velda-install/nvidia-init.service /usr/lib/systemd/system/nvidia-init.service",
       "sudo cp /tmp/velda-install/velda-agent.service /usr/lib/systemd/system/velda-agent.service",
       "sudo cp -rv --preserve=mode /tmp/velda-install/extra_files/. /",
