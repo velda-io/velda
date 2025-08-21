@@ -60,14 +60,15 @@ func (p *AwsAutoPoolProvisioner) run(ctx context.Context) error {
 		return fmt.Errorf("failed to get public endpoint: %w", err)
 	}
 	log.Printf("Public endpoint: %s", p.serverEndpoint.String())
+	ami, err := getAmi(ctx, p.cfg)
+	if err != nil {
+		return fmt.Errorf("failed to get AMI ID: %w", err)
+	}
 	for _, instanceType := range types {
 		template := proto.Clone(p.cfg.Template).(*configpb.AutoscalerBackendAWSLaunchTemplate)
 		poolName := p.cfg.PoolPrefix + instanceType
 		template.InstanceType = instanceType
-		template.AmiId, err = getAmi(ctx, p.cfg)
-		if err != nil {
-			return fmt.Errorf("failed to get AMI ID: %w", err)
-		}
+		template.AmiId = ami
 
 		if template.Tags == nil {
 			template.Tags = make(map[string]string)
