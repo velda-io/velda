@@ -20,6 +20,7 @@ jobs:
       id-token: write
       contents: write
       issues: write
+      pull-requests: write
     outputs:
       version: ${{ steps.set-version.outputs.version }}
     steps:
@@ -47,23 +48,6 @@ jobs:
             echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
             echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
           fi
-
-      - name: Post run URL to triggering comment
-        if: github.event_name == 'issue_comment'
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-            const commentId = context.payload.comment.id;
-            const original = context.payload.comment.body || '';
-            const body = `${original}\n\nWorkflow run: ${runUrl}`;
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: commentId,
-              body
-            });
 
       - name: Build release
         run: make release
