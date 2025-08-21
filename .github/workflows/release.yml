@@ -4,13 +4,24 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  # Allow manual trigger by commenting on a PR with the command `/run-release`.
+  # When triggered this way, VERSION will be set to: dev-[PR-number]-<timestamp>
+  issue_comment:
+    types: [created]
 
 jobs:
   build-package:
     runs-on: ubuntu-latest
+    # Only run on tag push, or when a PR comment containing `/run-release` was created.
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/run-release') && github.event.issue.pull_request)
     permissions:
       id-token: write
       contents: write
+      issues: write
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,10 +35,40 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - id: set-version
+        name: Set VERSION
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            PR_NUMBER=${{ github.event.issue.number }}
+            TS=$(date -u +%Y%m%d%H%M%S)
+            echo "version=dev-${PR_NUMBER}-${TS}" >> $GITHUB_OUTPUT
+            echo "VERSION=dev-${PR_NUMBER}-${TS}" >> $GITHUB_ENV
+          else
+            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+          fi
+
+      - name: Post run URL to triggering comment
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const commentId = context.payload.comment.id;
+            const original = context.payload.comment.body || '';
+            const body = `${original}\n\nWorkflow run: ${runUrl}`;
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: commentId,
+              body
+            });
+
       - name: Build release
         run: make release
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ env.VERSION }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -78,14 +119,15 @@ jobs:
         run: packer init packer
 
       - name: Build images
-        run: exec packer build -var="version=${{ github.ref_name }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" packer
+        run: exec packer build -var="version=${{ needs.build-package.outputs.version }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" packer
 
       - name: Update permissions
         run: make -C packer update_permission
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ needs.build-package.outputs.version }}
 
   create-release:
+    if: github.event_name == 'push'
     needs: [build-package, packer-images]
     runs-on: ubuntu-latest
     permissions:
@@ -105,10 +147,10 @@ jobs:
         with:
           files: |
             bin/*
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
+          tag_name: ${{ needs.build-package.outputs.version }}
+          name: Release ${{ needs.build-package.outputs.version }}
           body: |
-            **Tag:** ${{ github.ref_name }}
+            **Tag:** ${{ needs.build-package.outputs.version }}
             **Commit:** ${{ github.sha }}
           draft: true
           prerelease: false
