@@ -364,7 +364,8 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	ec2Client := ec2.NewFromConfig(awsCfg)
 
 	// Prompt for security groups
-	securityGroups, err := c.promptUserList(cmd, reader, "Security Groups (comma-separated names or IDs)", envInfo.SecurityGroups)
+	cmd.PrintErrln("The current host must be connectable from the agent security group.")
+	securityGroups, err := c.promptUserList(cmd, reader, "Agent security Groups (comma-separated names or IDs)", envInfo.SecurityGroups)
 	if err != nil {
 		return fmt.Errorf("failed to get security groups: %w", err)
 	}
@@ -419,7 +420,7 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	template := &configpb.AutoscalerBackendAWSLaunchTemplate{
 		UseInstanceIdAsName: true,
 		Region:              region,
-		SecurityGroups:      securityGroups,
+		SecurityGroupIds:    securityGroups,
 		LaunchTemplateName:  templateId,
 	}
 
