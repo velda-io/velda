@@ -23,6 +23,7 @@ jobs:
       pull-requests: write
     outputs:
       version: ${{ steps.set-version.outputs.version }}
+      comment_id: ${{ steps.post-comment.outputs.comment_id }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -59,6 +60,7 @@ jobs:
         with:
           name: release-bin
           path: bin/*
+      
 
   packer-images:
     needs: build-package
@@ -140,3 +142,31 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  post-final-comment:
+    needs: [build-package, packer-images]
+    if: >
+      github.event_name == 'issue_comment' && always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Post final status to PR
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const prNumber = context.payload.issue.number;
+            const commenter = (context.payload.comment && context.payload.comment.user && context.payload.comment.user.login) ? context.payload.comment.user.login : '';
+            const bp = needs['build-package'] ? needs['build-package'].result : 'skipped';
+            const pi = needs['packer-images'] ? needs['packer-images'].result : 'skipped';
+            const cr = needs['create-release'] ? needs['create-release'].result : 'skipped';
+            const overall = (bp === 'success' && pi === 'success' && cr === 'success') ? 'success' : 'failure';
+            const body = `@${commenter} — workflow finished with status: **${overall}**\n\nJobs: build-package=${bp}, packer-images=${pi}, create-release=${cr}\n\nRun: ${runUrl}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body
+            });
