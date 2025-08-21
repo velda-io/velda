@@ -4,7 +4,7 @@ Follow this guide to deploy a new Velda cluster in various cloud providers. It s
 
 ## Prerequisites
 * Choose a VPC subnet. Your client must be able to directly connect to the subnet (e.g., VPN, bastion host). 
-* You need have necessary permissions to apply the change.
+* You need to have necessary permissions to apply the change.
 
 ## Installation
 ### Install terraform

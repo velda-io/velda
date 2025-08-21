@@ -46,7 +46,7 @@ velda mini init ~/velda-sandbox
 
 Once initialized, you can start developing and scaling immediately:
 
-**Connect to your development environment(Run from your host):**
+**Connect to your development environment (Run from your host):**
 ```bash
 ssh mini-velda                 # SSH directly to your environment
 velda run                      # Start interactive shell session
@@ -107,7 +107,7 @@ Mini-velda's power comes from seamless cloud scaling. During initialization, con
 
 **GCP/k8s/other Integration:**
 - Currently needs to manually update config.
-- Config files is at `<sandbox-dir>/service.yaml`, and definition is [here](/proto/config/config.proto)
+- Config file is at `<sandbox-dir>/service.yaml`, and definition is [here](/proto/config/config.proto)
 
 ### Development Environment
 

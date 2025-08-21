@@ -49,7 +49,7 @@ vrun -P aws:g6.xlarge train.sh
 Currently support automatic configuration from AWS environment, and manual configuration for GCP, K8s and command based backend.
 
 ## Set-up a shared cluster
-For organizations who want sharing the cluster resource or centralized management, or needs more than mini-velda provide, you may deploy a standalone Velda cluster that is shared with team-members.
+For organizations who want sharing the cluster resource or centralized management, or needs more than mini-velda provides, you may deploy a standalone Velda cluster that is shared with team-members.
 We support various deployment methods.
 * Set up a new cluster:
   * [Directly on machines](docs/cluster_setup.md)
