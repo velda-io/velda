@@ -73,6 +73,7 @@ type OssService struct {
 	TaskTracker     *broker.TaskTracker
 	BrokerService   proto.BrokerServiceServer
 	TaskService     proto.TaskServiceServer
+	PoolService     proto.PoolManagerServiceServer
 	httpServer      *http.Server
 	Metrics         *prometheus.Registry
 	Mux             *runtime.ServeMux
@@ -152,6 +153,7 @@ func (s *OssService) InitServices() error {
 
 	// Initialize other services
 	s.TaskService = tasks.NewTaskServiceServer(s.Db.(tasks.TaskDb), s.Permissions)
+	s.PoolService = NewPoolManagerServiceServer(s.Schedulers)
 	return nil
 }
 
@@ -175,12 +177,14 @@ func (s *OssService) RegisterServices() error {
 	proto.RegisterInstanceServiceServer(s.GrpcServer, s.InstanceService)
 	proto.RegisterBrokerServiceServer(s.GrpcServer, s.BrokerService)
 	proto.RegisterTaskServiceServer(s.GrpcServer, s.TaskService)
+	proto.RegisterPoolManagerServiceServer(s.GrpcServer, s.PoolService)
 
 	// Initialize HTTP server with gRPC gateway
 	s.Mux = runtime.NewServeMux()
 	proto.RegisterInstanceServiceHandlerServer(context.Background(), s.Mux, s.InstanceService)
 	proto.RegisterBrokerServiceHandlerServer(context.Background(), s.Mux, s.BrokerService)
 	proto.RegisterTaskServiceHandlerServer(context.Background(), s.Mux, s.TaskService)
+	proto.RegisterPoolManagerServiceHandlerServer(context.Background(), s.Mux, s.PoolService)
 
 	// Setup metrics
 	s.Metrics = prometheus.NewRegistry()

@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package velda;
+
+import "google/api/annotations.proto";
+
+option go_package = "velda.io/velda/pkg/proto";
+
+message ListPoolsRequest {
+}
+
+message Pool {
+  string name = 1;
+}
+
+message ListPoolsResponse {
+  repeated Pool pools = 1;
+}
+
+service PoolManagerService {
+  rpc ListPools(ListPoolsRequest) returns (ListPoolsResponse) {
+    option (google.api.http) = {
+            get: "/velda/pool"
+        };
+  };
+}
