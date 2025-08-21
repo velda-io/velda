@@ -4,7 +4,7 @@ After=systemd-remount-fs.service
 
 [Service]
 Type=oneshot
-ExecStart=/var/nvidia/bin/nvidia-smi -L
+ExecStart=sh -c "lspci | grep -i nvidia && /var/nvidia/bin/nvidia-smi -L"
 Environment="LD_LIBRARY_PATH=/var/nvidia/lib"
 
 [Install]
