@@ -61,6 +61,7 @@ func stopMini(cmd *cobra.Command, sandboxDir string) error {
 	if err := stopMiniApiserver(sandboxDir); err != nil {
 		return err
 	}
+	os.Remove(currentSandboxLinkLocation)
 	cmd.PrintErrf("%s%sMini-velda cluster stopped successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
 	return nil
 }

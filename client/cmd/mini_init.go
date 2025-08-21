@@ -50,6 +50,9 @@ The sandbox-dir will be the path to the directory where the mini-velda environme
 			cmd.PrintErrln("Usage: velda mini init <sandbox-dir>")
 			return fmt.Errorf("sandbox directory must be specified")
 		}
+		if p, err := os.Readlink(currentSandboxLinkLocation); err == nil {
+			return fmt.Errorf("A sandbox at %s may be already running. Use velda mini down to stop it. If this is in error, remove %s", p, currentSandboxLinkLocation)
+		}
 		if err := checkEnv(cmd); err != nil {
 			return err
 		}

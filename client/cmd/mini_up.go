@@ -31,7 +31,11 @@ var miniUpCmd = &cobra.Command{
 	Short: "Bring up a mini-Velda cluster",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return cmd.Help()
+			cmd.PrintErrln("Usage: velda mini up <sandbox-dir>")
+			return fmt.Errorf("sandbox directory must be specified")
+		}
+		if p, err := os.Readlink(currentSandboxLinkLocation); err == nil {
+			return fmt.Errorf("A sandbox at %s may be already running. Use velda mini down to stop it. If this is in error, remove %s", p, currentSandboxLinkLocation)
 		}
 		sandboxDir := args[0]
 		if sandboxDir == "" {
