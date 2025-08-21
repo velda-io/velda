@@ -64,9 +64,20 @@ func copyNod(src, dst string) error {
 }
 
 func (p *NvidiaPlugin) Run(ctx context.Context) error {
+	_, err := os.Stat("/dev/nvidiactl")
+	if err != nil {
+		// No nvidia device found or driver installation failure.
+		return p.RunNext(ctx)
+	}
 	nvidia_libs := os.Getenv("VELDA_NVIDIA_DIR")
 	if nvidia_libs == "" {
 		nvidia_libs = p.config.GetNvidiaDriverInstallDir()
+	}
+	if nvidia_libs == "" {
+		// Default installation of images.
+		if _, err := os.Stat("/var/nvidia"); err == nil {
+			nvidia_libs = "/var/nvidia"
+		}
 	}
 	if nvidia_libs == "" {
 		return p.RunNext(ctx)
@@ -107,5 +118,7 @@ func (p *NvidiaPlugin) Run(ctx context.Context) error {
 }
 
 func (p *NvidiaPlugin) HasGpu() bool {
-	return os.Getenv("VELDA_NVIDIA_DIR") != "" || p.config.GetNvidiaDriverInstallDir() != ""
+	_, ctlErr := os.Stat("/dev/nvidiactl")
+	_, devErr := os.Stat("/var/nvidia")
+	return ctlErr == nil && devErr == nil
 }

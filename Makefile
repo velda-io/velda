@@ -5,7 +5,7 @@ all: velda
 # By default, disabled grpctrace & k8s backend to reduce binary size
 # See https://github.com/golang/go/issues/62024
 TAGS ?= gce,gcs_provisioner,aws,grpcnotrace
-VERSION ?= dev
+VERSION ?= dev-$(shell date +%Y%m%d-%H%M%S)
 velda:
 	CGO_ENABLED=0 go build --tags "${TAGS}" -p 3 -o bin/velda ./client
 
@@ -40,3 +40,8 @@ test: unittest e2etest
 
 tidy:
 	go mod tidy
+
+PACKER_FILTER ?= *
+
+image: release-mini
+	packer build -var="version=${VERSION}" -only="${PACKER_FILTER}" packer
