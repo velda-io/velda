@@ -179,8 +179,8 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 
 		input.UserData = aws.String(base64CloudInit)
 	}
-	if len(a.cfg.SecurityGroups) > 0 {
-		input.SecurityGroups = a.cfg.SecurityGroups
+	if len(a.cfg.SecurityGroupIds) > 0 {
+		input.SecurityGroupIds = a.cfg.SecurityGroupIds
 	}
 	result, err := a.svc.RunInstances(ctx, input)
 	if err != nil {
