@@ -390,7 +390,7 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	}
 
 	// Prompt for instance type prefixes
-	defaultInstanceTypes := []string{"t2", "g4", "g6", "m6g"}
+	defaultInstanceTypes := []string{"t2.", "g4dn.", "g6.", "m6g."}
 	instanceTypePrefixes, err := c.promptUserList(cmd, reader, "Instance type prefixes (comma-separated)", defaultInstanceTypes)
 	if err != nil {
 		return fmt.Errorf("failed to get instance type prefixes: %w", err)
