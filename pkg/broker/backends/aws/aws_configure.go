@@ -444,7 +444,7 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 	if err != nil {
 		cmd.PrintErrf("%s❌ Failed to determine default AMI ID automatically: %v%s\n", utils.ColorRed+utils.ColorBold, err, utils.ColorReset)
 	} else {
-		cmd.PrintErrf("Default AMI ID for current Velda version: %s", defaultAmiId)
+		cmd.PrintErrf("Default AMI ID for current Velda version: %s\n", defaultAmiId)
 	}
 	amiId, err := c.promptUser(cmd, reader, "Override AMI ID or agent version", "default")
 	if err != nil {
