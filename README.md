@@ -28,15 +28,28 @@ Save instantly with Velda:
 
 # Getting started
 ## Using mini-velda
-Mini-velda starts a Velda sandbox directly from your workstation, and automatically configure your cluster to scale to the cloud. Also see [limits and restrictions](/docs/mini-velda.md#Limitations).
+[Mini-velda](/docs/mini-velda.md) runs a Velda sandbox directly from your workstation, and automatically configure your cluster to scale to the cloud. Also see [limits and restrictions](/docs/mini-velda.md#Limitations).
 
 To start a mini-velda cluster:
 ```
-velda mini init ~/velda
+# Init the sandbox
+velda mini init sandbox
+
+# Connect to the sandbox
+ssh mini-velda
+
+# In mini-velda sandbox, setup environment as usual
+sudo apt install python3
+pip install torch
+
+# Run workload with L4 GPUs
+vrun -P aws:g6.xlarge train.sh
 ```
 
+Currently support automatic configuration from AWS environment, and manual configuration for GCP, K8s and command based backend.
+
 ## Set-up a shared cluster
-For organizations who want sharing the cluster resource or centralized management, or needs more than mini-velda, you may deploy a standalone Velda cluster that is shared with team-members.
+For organizations who want sharing the cluster resource or centralized management, or needs more than mini-velda provides, you may deploy a standalone Velda cluster that is shared with team-members.
 We support various deployment methods.
 * Set up a new cluster:
   * [Directly on machines](docs/cluster_setup.md)

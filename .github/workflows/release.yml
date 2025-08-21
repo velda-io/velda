@@ -102,7 +102,7 @@ jobs:
         run: packer init packer
 
       - name: Build images
-        run: exec packer build -var="version=${{ needs.build-package.outputs.version }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" packer
+        run: exec packer build -var="version=${{ needs.build-package.outputs.version }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" -var-file=packer/prod.pkrvars.hcl packer
 
       - name: Update permissions
         run: make -C packer update_permission
