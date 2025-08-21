@@ -20,6 +20,7 @@ jobs:
       id-token: write
       contents: write
       issues: write
+      pull-requests: write
     outputs:
       version: ${{ steps.set-version.outputs.version }}
     steps:
