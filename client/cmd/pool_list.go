@@ -24,7 +24,7 @@ import (
 
 var listPoolCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all instances of the current account",
+	Short: "List all available pools",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		conn, err := clientlib.GetApiConnection()
@@ -35,7 +35,7 @@ var listPoolCmd = &cobra.Command{
 
 		pools, err := client.ListPools(cmd.Context(), &proto.ListPoolsRequest{})
 		if err != nil {
-			return fmt.Errorf("Error listing instances: %w", err)
+			return fmt.Errorf("Error listing pools: %w", err)
 		}
 		for _, pool := range pools.Pools {
 			fmt.Printf("%s\n", pool.Name)

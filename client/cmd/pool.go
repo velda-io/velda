@@ -17,14 +17,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// instanceCmd represents the instance command
 var poolCmd = &cobra.Command{
 	Use:     "pool",
 	Aliases: []string{"pools"},
 	Short:   "Manage pools for the current account",
 	Long: `Manage pools for the current account.
 
-Pool is a pre-configured group of agents to run your workload.
+Pool is a pre-configured autoscaling group of agents to run your workload.
 `,
 }
 
