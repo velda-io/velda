@@ -20,10 +20,11 @@ import (
 )
 
 func TestCmdBackend(t *testing.T) {
+	tmpdir := t.TempDir()
 	backend := NewCmdPoolBackend(
-		"mktemp /tmp/worker-XXXXX | grep -o worker-.*",
-		"rm /tmp/$1",
-		"ls /tmp/ | grep ^worker-",
+		"basename $(mktemp "+tmpdir+"/worker-XXXXX)",
+		"rm "+tmpdir+"/$1",
+		"ls "+tmpdir,
 	)
 	backend_testing.TestSimpleScaleUpDown(t, backend)
 }
