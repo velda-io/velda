@@ -158,12 +158,19 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 			})
 		}
 	}
+	quiet, _ := cmd.Flags().GetBool("quiet")
 
-	DebugLog("Sending session request")
+	if !quiet {
+		cmd.PrintErrf("Requesting compute node from pool %s\n", sessionReq.Pool)
+	}
+	DebugLog("Sending session request: %v", sessionReq)
 
 	resp, err := brokerClient.RequestSession(cmd.Context(), sessionReq)
 	if err != nil {
 		return err
+	}
+	if !quiet {
+		cmd.PrintErrln("Node allocated, connecting...")
 	}
 	DebugLog("Got response: %s. Connecting ", resp.String())
 	if batch {
@@ -188,14 +195,15 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	DebugLog("Opened channel")
 
 	ttymode, _ := cmd.Flags().GetString("tty")
-	tty := false
-	if ttymode == "auto" {
+	tty := defaultShell
+	switch ttymode {
+	case "auto":
 		tty = isatty.IsTerminal(os.Stdin.Fd())
-	} else if ttymode == "yes" || ttymode == "true" {
+	case "yes", "true", "y":
 		tty = true
-	} else if ttymode == "no" || ttymode == "false" {
+	case "no", "false", "n":
 		tty = false
-	} else {
+	default:
 		return fmt.Errorf("Invalid tty mode: %s", ttymode)
 	}
 	noinput, _ := cmd.Flags().GetBool("noinput")
@@ -206,12 +214,16 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	}
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
-	if tty || defaultShell {
+
+	if !quiet {
+		cmd.PrintErrln("Start the workload.")
+	}
+	if tty {
 		if err := session.RequestPty(true); err != nil {
 			return fmt.Errorf("Error requesting pty: %v", err)
 		}
+		defer session.RestoreTty()
 	}
-
 	if defaultShell {
 		if err := session.Shell(); err != nil {
 			return fmt.Errorf("Error starting shell: %v", err)
@@ -247,6 +259,9 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		}
 		switch req.Type {
 		case "exit-status":
+			if tty {
+				session.RestoreTty()
+			}
 			var status struct {
 				Status uint32
 			}
@@ -255,8 +270,27 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 				return fmt.Errorf("Error unmarshalling exit-status: %v", err)
 			}
 			*returnCode = int(status.Status)
+			if !quiet {
+				cmd.PrintErrf("Workload exited with status %d\n", status.Status)
+			}
 			return nil
 		case "exit-signal":
+			if tty {
+				session.RestoreTty()
+			}
+			signalInfo := struct {
+				Signal string
+				Core   bool
+				Msg    string
+				Lang   string
+			}{}
+			if err := ssh.Unmarshal(req.Payload, &signalInfo); err != nil {
+				*returnCode = -1
+				return fmt.Errorf("Error unmarshalling exit-signal: %v", err)
+			}
+			if !quiet {
+				cmd.PrintErrf("Workload exited with signal %s\n", signalInfo.Signal)
+			}
 			*returnCode = -1
 			return nil
 		}
@@ -380,6 +414,7 @@ func init() {
 	runCmd.Flags().Bool("batch", false, "Batch mode. Return immediately")
 	runCmd.Flags().Bool("new-session", false, "Always create a new session")
 	runCmd.Flags().Bool("keep-alive", false, "Keep the session alive after all processes exits even if all connections are closed.")
+	runCmd.Flags().BoolP("quiet", "q", false, "Suppress all non-error loggings.")
 	runCmd.Flags().Bool("checkpoint-on-idle", false, "If all connections are closed, check-point the session. Imply keep-alive.")
 	runCmd.Flags().StringP("service-name", "s", "", "Service name, which can be used to identify session later. Default is ssh if connected externally, or empty.")
 	runCmd.Flags().String("session-id", "", "Reconnect to specific session. If not provided, it will try to find a session with the service name or create a new session.")
