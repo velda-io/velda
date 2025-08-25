@@ -169,15 +169,15 @@ func init() {
 	listTaskCmd.Flags().String("page-token", "", "Page token")
 	listTaskCmd.Flags().Int32("max-results", 0, "Max results")
 	listTaskCmd.Flags().BoolP("all", "a", false, "Fetch all results")
-	listTaskCmd.Flags().StringP("output", "o", "", "Output format (json|text|[[<fields>=]<path>]*)")
+	listTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 
 	searchTaskCmd.Flags().StringSliceP("label", "l", nil, "Label filters (repeatable)")
 	searchTaskCmd.Flags().String("page-token", "", "Page token")
 	searchTaskCmd.Flags().Int32("max-results", 0, "Max results")
 	searchTaskCmd.Flags().BoolP("all", "a", false, "Fetch all results")
-	searchTaskCmd.Flags().StringP("output", "o", "", "Output format (json|text|[[<fields>=]<path>]*)")
+	searchTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 
-	getTaskCmd.Flags().StringP("output", "o", "", "Output format (json|text|[[<fields>=]<path>]*)")
+	getTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 }
 
 func taskToMessageList(tasks []*proto.Task) []goproto.Message {
