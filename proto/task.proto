@@ -75,6 +75,20 @@ message TaskPageResult {
   string next_page_token = 2;
 }
 
+message LogTaskRequest {
+  string task_id = 1;
+}
+
+message LogTaskResponse {
+  enum Stream {
+    STREAM_UNSPECIFIED = 0;
+    STREAM_STDOUT = 1;
+    STREAM_STDERR = 2;
+  }
+  Stream stream = 1;
+  bytes data = 2;
+}
+
 service TaskService {
   rpc GetTask(GetTaskRequest) returns (Task) {
     option (google.api.http) = {
@@ -92,4 +106,6 @@ service TaskService {
             get: "/github.com/velda-io/velda/tasks/search"
         };
   };
+
+  rpc Logs(LogTaskRequest) returns (stream LogTaskResponse) {};
 }

@@ -17,10 +17,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"time"
+
+	"velda.io/velda/pkg/storage"
 )
 
 type Zfs struct {
@@ -189,6 +192,32 @@ func (z *Zfs) ListImages(ctx context.Context) ([]string, error) {
 		images = append(images, entry.Name())
 	}
 	return images, nil
+}
+
+func (z *Zfs) ReadFile(ctx context.Context, instanceId int64, path string) (storage.ByteStream, error) {
+	data := make(chan []byte)
+	errorO := make(chan error)
+	file, err := os.Open(fmt.Sprintf("/%s/%d/%s", z.pool, instanceId, path))
+	if err != nil {
+		return storage.ByteStream{}, fmt.Errorf("failed to open file %s: %w", path, err)
+	}
+	go func() {
+		defer close(data)
+		defer close(errorO)
+		defer file.Close()
+		buf := new(bytes.Buffer)
+		for {
+			n, err := io.CopyN(buf, file, 1024*10) // Limit read to 10KB
+			if n > 0 {
+				data <- buf.Bytes()
+			}
+			if err != nil {
+				errorO <- fmt.Errorf("failed to read file %s: %w", path, err)
+				return
+			}
+		}
+	}()
+	return storage.ByteStream{Data: data, Err: errorO}, nil
 }
 
 func (z *Zfs) runCommandGetOutput(ctx context.Context, command ...string) (string, error) {

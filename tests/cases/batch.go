@@ -14,6 +14,7 @@
 package cases
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,32 @@ vbatch ./script.sh testfile
 			assert.Equal(t, "COMPLETED\n", output)
 			return true
 		}, 30*time.Second, 1000*time.Millisecond)
+	})
+	t.Run("Logs", func(t *testing.T) {
+		// Setup test scripts
+		require.NoError(t, runCommand("sh", "-c", `
+cat << EOF > script-log.sh
+#!/bin/sh
+echo STDOUT
+echo STDERR >&2
+EOF
+chmod +x script-log.sh
+`))
+
+		taskId, err := runCommandGetOutput("vbatch", "./script-log.sh")
+		taskId = strings.TrimSpace(taskId)
+		require.NoError(t, err)
+		// Wait until the job is finished
+		assert.Eventually(t, func() bool {
+			output, err := runVeldaWithOutput("task", "get", taskId, "-o", "status", "--header=false")
+			t.Logf("Task status: %s", output)
+			require.NoError(t, err)
+			return strings.Contains(output, "TASK_STATUS_SUCCESS")
+		}, 30*time.Second, 1000*time.Millisecond)
+		stdout, stderr, err := runVeldaWithOutErr("task", "log", taskId)
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "STDOUT")
+		assert.Contains(t, stderr, "STDERR")
 	})
 	t.Run("Recursive", func(t *testing.T) {
 		// Setup test scripts

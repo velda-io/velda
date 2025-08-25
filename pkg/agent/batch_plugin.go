@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -69,10 +69,27 @@ func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) erro
 			return fmt.Errorf("Command not found in PATH: %w", err)
 		}
 	}
+	taskId := sessionReq.TaskId
+	err := os.MkdirAll(fmt.Sprintf("/.velda_tasks/%s", filepath.Dir(taskId)), 0755)
+	if err != nil {
+		return fmt.Errorf("Failed to create task directories %s: %w", taskId, err)
+	}
+	stdin, err := os.Open("/dev/null")
+	if err != nil {
+		return fmt.Errorf("Failed to open /dev/null: %w", err)
+	}
+	stdout, err := os.Create(fmt.Sprintf("/.velda_tasks/%s.stdout", taskId))
+	if err != nil {
+		return fmt.Errorf("Failed to open stdout file %s: %w", taskId, err)
+	}
+	stderr, err := os.Create(fmt.Sprintf("/.velda_tasks/%s.stderr", taskId))
+	if err != nil {
+		return fmt.Errorf("Failed to open stderr file %s: %w", taskId, err)
+	}
 	command, err := os.StartProcess(commandPath, append([]string{workload.Command}, workload.Args...), &os.ProcAttr{
 		Env:   workload.Environs,
 		Dir:   workload.WorkingDir,
-		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
+		Files: []*os.File{stdin, stdout, stderr},
 		Sys: &syscall.SysProcAttr{
 			Credential: &syscall.Credential{
 				Uid:    workload.Uid,
@@ -81,6 +98,9 @@ func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) erro
 			},
 		},
 	})
+	stdin.Close()
+	stdout.Close()
+	stderr.Close()
 	if err != nil {
 		return fmt.Errorf("Failed to start process: %w", err)
 	}
