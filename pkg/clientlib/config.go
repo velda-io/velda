@@ -123,14 +123,18 @@ func IsInSession() bool {
 	return agentConfig != nil && agentConfig.Session != ""
 }
 
-func GenerateAgentConfig(instance int64, session string) map[string]interface{} {
-	return map[string]interface{}{
+func GenerateAgentConfig(instance int64, session, taskId string) map[string]interface{} {
+	result := map[string]interface{}{
 		"broker": map[string]interface{}{
 			"address": agentConfig.Broker.Address,
 		},
 		"session":  session,
 		"instance": instance,
 	}
+	if taskId != "" {
+		result["task_id"] = taskId
+	}
+	return result
 }
 
 type Configs struct {

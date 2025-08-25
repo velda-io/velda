@@ -166,7 +166,7 @@ func (s *OssService) InitGrpcServer() error {
 	s.GrpcServer = grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			s.GrpcMetrics.UnaryServerInterceptor(),
-			//s.authDecoder.AuthInterceptor(utils.AuthRequired),
+			sessionInterceptor,
 		),
 		grpc.StreamInterceptor(s.GrpcMetrics.StreamServerInterceptor()),
 	)

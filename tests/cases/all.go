@@ -17,18 +17,19 @@ import "testing"
 
 func RunAllTests(t *testing.T, runner Runner) {
 	runner.Setup(t)
-	t.Run("Basic", func(t *testing.T) {
-		t.Run("SCPCommand", func(t *testing.T) {
-			testScpCommand(t, runner)
-		})
-		t.Run("ImagesCommand", func(t *testing.T) {
-			testImagesCommand(t, runner)
-		})
+	t.Run("SCPCommand", func(t *testing.T) {
+		testScpCommand(t, runner)
+	})
+	t.Run("ImagesCommand", func(t *testing.T) {
+		testImagesCommand(t, runner)
 	})
 	t.Run("Ubuntu", func(t *testing.T) {
 		if !runner.Supports("ubuntu") {
 			t.Skip("Ubuntu tests are not supported by this runner")
 		}
 		testUbuntu(t, runner)
+	})
+	t.Run("Batch", func(t *testing.T) {
+		testBatch(t, runner)
 	})
 }

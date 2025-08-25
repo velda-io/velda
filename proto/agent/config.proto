@@ -110,4 +110,6 @@ message AgentConfig {
   SandboxConfig sandbox_config = 4;
   DaemonConfig daemon_config = 5;
   string pool = 6;
+
+  string task_id = 7;
 }
