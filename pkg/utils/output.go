@@ -40,9 +40,9 @@ type fieldSpec struct {
 // Parameters:
 // - full: if non-nil, used for json/yaml printing; may also be a TaskPageResult for tabular printing.
 // - list: if non-nil and is a []*pproto.Task, used for tabular printing.
-// - noHeader: suppress header row for table
+// - header: show header row for table
 // - fieldsSpec: "json"|"yaml"|comma-separated list of fields; each item can be "name=path" or just "path".
-func PrintListOutput(full proto.Message, list []proto.Message, noHeader bool, fieldsSpec string, w io.Writer) error {
+func PrintListOutput(full proto.Message, list []proto.Message, header bool, fieldsSpec string, w io.Writer) error {
 	// If requested json/yaml and a full message is provided, print full.
 	if fieldsSpec == "json" || fieldsSpec == "yaml" {
 		return printFullMessage(full, fieldsSpec, w)
@@ -70,7 +70,7 @@ func PrintListOutput(full proto.Message, list []proto.Message, noHeader bool, fi
 
 	// Print table header
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	if !noHeader {
+	if header {
 		// header: ID + column names
 		cols := append([]string{}, columnNames(specs)...)
 		fmt.Fprintln(tw, strings.Join(cols, "\t"))

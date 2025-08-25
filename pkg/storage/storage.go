@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,13 @@ package storage
 
 import (
 	"context"
+	"fmt"
 )
+
+type ByteStream struct {
+	Data chan []byte
+	Err  chan error
+}
 
 type Storage interface {
 	CreateInstance(ctx context.Context, instanceId int64) error
@@ -35,4 +41,25 @@ type Storage interface {
 	ListImages(ctx context.Context) ([]string, error)
 
 	DeleteImage(ctx context.Context, imageName string) error
+
+	ReadFile(ctx context.Context, instanceId int64, path string) (ByteStream, error)
+}
+
+type LocalStorageLogDb struct {
+	storage Storage
+}
+
+func NewLocalStorageLogDb(storage Storage) *LocalStorageLogDb {
+	return &LocalStorageLogDb{
+		storage: storage,
+	}
+}
+
+func (l *LocalStorageLogDb) GetTaskLogs(ctx context.Context, instanceId int64, taskId string) (stdout ByteStream, stderr ByteStream, err error) {
+	stdout, err = l.storage.ReadFile(ctx, instanceId, fmt.Sprintf("/.velda_tasks/%s.stdout", taskId))
+	if err != nil {
+		return
+	}
+	stderr, err = l.storage.ReadFile(ctx, instanceId, fmt.Sprintf("/.velda_tasks/%s.stderr", taskId))
+	return
 }

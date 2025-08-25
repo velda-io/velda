@@ -15,6 +15,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	goproto "google.golang.org/protobuf/proto"
@@ -57,10 +58,10 @@ var getTaskCmd = &cobra.Command{
 		if outFmt == "" {
 			outFmt = defaultTaskColumns
 		}
-		noHeader, _ := cmd.Flags().GetBool("no-header")
+		header, _ := cmd.Flags().GetBool("header")
 
 		// Use shared output util. Provide full message so json/yaml will print the full Task.
-		return utils.PrintListOutput(task, nil, noHeader, outFmt, os.Stdout)
+		return utils.PrintListOutput(task, []goproto.Message{task}, header, outFmt, os.Stdout)
 	},
 }
 
@@ -84,7 +85,7 @@ var listTaskCmd = &cobra.Command{
 		pageToken, _ := cmd.Flags().GetString("page-token")
 		maxResults, _ := cmd.Flags().GetInt32("max-results")
 		fetchAll, _ := cmd.Flags().GetBool("all")
-		noHeader, _ := cmd.Flags().GetBool("no-header")
+		header, _ := cmd.Flags().GetBool("header")
 
 		outFmt, _ := cmd.Flags().GetString("output")
 		if outFmt == "" {
@@ -99,7 +100,7 @@ var listTaskCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("Error listing tasks: %w", err)
 			}
-			if err := utils.PrintListOutput(resp, taskToMessageList(resp.GetTasks()), noHeader, outFmt, os.Stdout); err != nil {
+			if err := utils.PrintListOutput(resp, taskToMessageList(resp.GetTasks()), header, outFmt, os.Stdout); err != nil {
 				return fmt.Errorf("failed to print: %w", err)
 			}
 			if resp.GetNextPageToken() != "" && !fetchAll {
@@ -130,7 +131,7 @@ var searchTaskCmd = &cobra.Command{
 		pageToken, _ := cmd.Flags().GetString("page-token")
 		maxResults, _ := cmd.Flags().GetInt32("max-results")
 		fetchAll, _ := cmd.Flags().GetBool("all")
-		noHeader, _ := cmd.Flags().GetBool("no-header")
+		header, _ := cmd.Flags().GetBool("header")
 
 		outFmt, _ := cmd.Flags().GetString("output")
 		if outFmt == "" {
@@ -145,7 +146,7 @@ var searchTaskCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("Error searching tasks: %w", err)
 			}
-			if err := utils.PrintListOutput(resp, taskToMessageList(resp.GetTasks()), noHeader, outFmt, os.Stdout); err != nil {
+			if err := utils.PrintListOutput(resp, taskToMessageList(resp.GetTasks()), header, outFmt, os.Stdout); err != nil {
 				return fmt.Errorf("failed to print: %w", err)
 			}
 			if resp.GetNextPageToken() != "" && !fetchAll {
@@ -160,24 +161,66 @@ var searchTaskCmd = &cobra.Command{
 	},
 }
 
+var logTaskCmd = &cobra.Command{
+	Use:   "log <task-id>",
+	Short: "Stream task logs",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		conn, err := clientlib.GetApiConnection()
+		if err != nil {
+			return fmt.Errorf("Error getting API connection: %w", err)
+		}
+		defer conn.Close()
+		client := proto.NewTaskServiceClient(conn)
+
+		taskId := args[0]
+		stream, err := client.Logs(cmd.Context(), &proto.LogTaskRequest{TaskId: taskId})
+		if err != nil {
+			return fmt.Errorf("Error opening log stream: %w", err)
+		}
+
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return fmt.Errorf("Error receiving log data: %w", err)
+			}
+			data := resp.GetData()
+			outputStream := os.Stdout
+			if resp.GetStream() == proto.LogTaskResponse_STREAM_STDERR {
+				outputStream = os.Stderr
+			}
+			if _, err := outputStream.Write(data); err != nil {
+				return err
+			}
+		}
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(getTaskCmd)
+	taskCmd.AddCommand(logTaskCmd)
 	taskCmd.AddCommand(listTaskCmd)
 	taskCmd.AddCommand(searchTaskCmd)
 
 	listTaskCmd.Flags().String("page-token", "", "Page token")
 	listTaskCmd.Flags().Int32("max-results", 0, "Max results")
 	listTaskCmd.Flags().BoolP("all", "a", false, "Fetch all results")
+	listTaskCmd.Flags().Bool("header", true, "Show header")
 	listTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 
 	searchTaskCmd.Flags().StringSliceP("label", "l", nil, "Label filters (repeatable)")
 	searchTaskCmd.Flags().String("page-token", "", "Page token")
 	searchTaskCmd.Flags().Int32("max-results", 0, "Max results")
-	searchTaskCmd.Flags().BoolP("all", "a", false, "Fetch all results")
+	searchTaskCmd.Flags().Bool("header", true, "Show header")
 	searchTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 
 	getTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
+	getTaskCmd.Flags().Bool("header", true, "Show header")
 }
 
 func taskToMessageList(tasks []*proto.Task) []goproto.Message {

@@ -36,6 +36,7 @@ const (
 	TaskService_GetTask_FullMethodName     = "/velda.TaskService/GetTask"
 	TaskService_ListTasks_FullMethodName   = "/velda.TaskService/ListTasks"
 	TaskService_SearchTasks_FullMethodName = "/velda.TaskService/SearchTasks"
+	TaskService_Logs_FullMethodName        = "/velda.TaskService/Logs"
 )
 
 // TaskServiceClient is the client API for TaskService service.
@@ -45,6 +46,7 @@ type TaskServiceClient interface {
 	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*Task, error)
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskPageResult, error)
 	SearchTasks(ctx context.Context, in *SearchTasksRequest, opts ...grpc.CallOption) (*TaskPageResult, error)
+	Logs(ctx context.Context, in *LogTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogTaskResponse], error)
 }
 
 type taskServiceClient struct {
@@ -85,6 +87,25 @@ func (c *taskServiceClient) SearchTasks(ctx context.Context, in *SearchTasksRequ
 	return out, nil
 }
 
+func (c *taskServiceClient) Logs(ctx context.Context, in *LogTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogTaskResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[0], TaskService_Logs_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[LogTaskRequest, LogTaskResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_LogsClient = grpc.ServerStreamingClient[LogTaskResponse]
+
 // TaskServiceServer is the server API for TaskService service.
 // All implementations must embed UnimplementedTaskServiceServer
 // for forward compatibility.
@@ -92,6 +113,7 @@ type TaskServiceServer interface {
 	GetTask(context.Context, *GetTaskRequest) (*Task, error)
 	ListTasks(context.Context, *ListTasksRequest) (*TaskPageResult, error)
 	SearchTasks(context.Context, *SearchTasksRequest) (*TaskPageResult, error)
+	Logs(*LogTaskRequest, grpc.ServerStreamingServer[LogTaskResponse]) error
 	mustEmbedUnimplementedTaskServiceServer()
 }
 
@@ -110,6 +132,9 @@ func (UnimplementedTaskServiceServer) ListTasks(context.Context, *ListTasksReque
 }
 func (UnimplementedTaskServiceServer) SearchTasks(context.Context, *SearchTasksRequest) (*TaskPageResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SearchTasks not implemented")
+}
+func (UnimplementedTaskServiceServer) Logs(*LogTaskRequest, grpc.ServerStreamingServer[LogTaskResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method Logs not implemented")
 }
 func (UnimplementedTaskServiceServer) mustEmbedUnimplementedTaskServiceServer() {}
 func (UnimplementedTaskServiceServer) testEmbeddedByValue()                     {}
@@ -186,6 +211,17 @@ func _TaskService_SearchTasks_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskService_Logs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(LogTaskRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TaskServiceServer).Logs(m, &grpc.GenericServerStream[LogTaskRequest, LogTaskResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_LogsServer = grpc.ServerStreamingServer[LogTaskResponse]
+
 // TaskService_ServiceDesc is the grpc.ServiceDesc for TaskService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -206,6 +242,12 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _TaskService_SearchTasks_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Logs",
+			Handler:       _TaskService_Logs_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "task.proto",
 }

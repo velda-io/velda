@@ -160,7 +160,7 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	}
 	quiet, _ := cmd.Flags().GetBool("quiet")
 
-	if !quiet {
+	if !quiet && !batch {
 		cmd.PrintErrf("Requesting compute node from pool %s\n", sessionReq.Pool)
 	}
 	DebugLog("Sending session request: %v", sessionReq)
@@ -169,12 +169,12 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	if err != nil {
 		return err
 	}
-	if !quiet {
+	if !quiet && !batch {
 		cmd.PrintErrln("Node allocated, connecting...")
 	}
 	DebugLog("Got response: %s. Connecting ", resp.String())
 	if batch {
-		fmt.Printf("Task https://sandbox.velda.team/tasks/%s submitted\n", resp.GetTaskId())
+		fmt.Printf("%s\n", resp.GetTaskId())
 		return nil
 	}
 
