@@ -19,13 +19,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"velda.io/velda/pkg/db"
+	"velda.io/velda/pkg/db/sqlite"
 	"velda.io/velda/pkg/proto"
 )
 
 type ZfsInstanceDb struct {
+	*sqlite.SqliteDatabase
 	fs             *Zfs
 	mu             sync.Mutex
 	instances      map[string]int64
@@ -33,7 +34,12 @@ type ZfsInstanceDb struct {
 }
 
 func NewZfsInstanceDb(fs *Zfs) *ZfsInstanceDb {
+	sqlite, err := sqlite.NewSqliteDatabase(fmt.Sprintf("/%s/db.sqlite", fs.pool))
+	if err != nil {
+		panic(fmt.Sprintf("failed to create sqlite database: %s %v", fs.pool, err))
+	}
 	return &ZfsInstanceDb{
+		SqliteDatabase: sqlite,
 		fs:             fs,
 		instances:      make(map[string]int64),
 		nextInstanceId: 1,
@@ -234,36 +240,4 @@ func (d *ZfsInstanceDb) DeleteInstance(ctx context.Context, in *proto.DeleteInst
 }
 
 func (d *ZfsInstanceDb) RunMaintenances(ctx context.Context) {
-}
-
-// TODO: Cleanup the remaining tasks based methods.
-func (d *ZfsInstanceDb) CreateTask(ctx context.Context, session *proto.SessionRequest) (string, int, error) {
-	return "", 0, nil
-}
-
-func (d *ZfsInstanceDb) UpdateTaskFinalResult(ctx context.Context, taskId string, result *db.BatchTaskResult) error {
-	return nil
-}
-
-func (d *ZfsInstanceDb) GetTask(ctx context.Context, taskId string) (*proto.Task, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-func (d *ZfsInstanceDb) ListTasks(ctx context.Context, request *proto.ListTasksRequest) ([]*proto.Task, string, error) {
-	return nil, "", fmt.Errorf("not implemented")
-}
-func (d *ZfsInstanceDb) SearchTasks(ctx context.Context, request *proto.SearchTasksRequest) ([]*proto.Task, string, error) {
-	return nil, "", fmt.Errorf("not implemented")
-}
-func (d *ZfsInstanceDb) PollTasks(
-	ctx context.Context,
-	pool string,
-	leaserIdentity string,
-	callback func(leaserIdentity string, task *db.TaskWithUser) error) error {
-	return nil
-}
-func (d *ZfsInstanceDb) RenewLeaser(ctx context.Context, leaserIdentity string, now time.Time) error {
-	return nil
-}
-func (d *ZfsInstanceDb) ReconnectTask(ctx context.Context, taskId string, leaserIdentity string) error {
-	return nil
 }

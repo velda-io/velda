@@ -16,9 +16,9 @@ package mini
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"velda.io/velda/pkg/db"
+	"velda.io/velda/pkg/db/sqlite"
 	"velda.io/velda/pkg/proto"
 )
 
@@ -31,10 +31,17 @@ var theInstance = &proto.Instance{
 }
 
 type MiniInstanceDb struct {
+	*sqlite.SqliteDatabase
 }
 
 func NewMiniInstanceDb(fs *MiniStorage) *MiniInstanceDb {
-	return &MiniInstanceDb{}
+	sqlite, err := sqlite.NewSqliteDatabase(fmt.Sprintf("/%s/db.sqlite", fs.sandboxPath))
+	if err != nil {
+		panic(fmt.Sprintf("failed to create sqlite database: %s %v", fs.sandboxPath, err))
+	}
+	return &MiniInstanceDb{
+		SqliteDatabase: sqlite,
+	}
 }
 
 func (d *MiniInstanceDb) Init() error {
@@ -71,36 +78,4 @@ func (d *MiniInstanceDb) DeleteInstance(ctx context.Context, in *proto.DeleteIns
 }
 
 func (d *MiniInstanceDb) RunMaintenances(ctx context.Context) {
-}
-
-// TODO: Cleanup the remaining tasks based methods.
-func (d *MiniInstanceDb) CreateTask(ctx context.Context, session *proto.SessionRequest) (string, int, error) {
-	return "", 0, nil
-}
-
-func (d *MiniInstanceDb) UpdateTaskFinalResult(ctx context.Context, taskId string, result *db.BatchTaskResult) error {
-	return nil
-}
-
-func (d *MiniInstanceDb) GetTask(ctx context.Context, taskId string) (*proto.Task, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-func (d *MiniInstanceDb) ListTasks(ctx context.Context, request *proto.ListTasksRequest) ([]*proto.Task, string, error) {
-	return nil, "", fmt.Errorf("not implemented")
-}
-func (d *MiniInstanceDb) SearchTasks(ctx context.Context, request *proto.SearchTasksRequest) ([]*proto.Task, string, error) {
-	return nil, "", fmt.Errorf("not implemented")
-}
-func (d *MiniInstanceDb) PollTasks(
-	ctx context.Context,
-	pool string,
-	leaserIdentity string,
-	callback func(leaserIdentity string, task *db.TaskWithUser) error) error {
-	return nil
-}
-func (d *MiniInstanceDb) RenewLeaser(ctx context.Context, leaserIdentity string, now time.Time) error {
-	return nil
-}
-func (d *MiniInstanceDb) ReconnectTask(ctx context.Context, taskId string, leaserIdentity string) error {
-	return nil
 }

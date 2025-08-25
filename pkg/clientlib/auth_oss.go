@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"velda.io/velda/pkg/proto"
 )
 
@@ -91,5 +92,9 @@ func (o OssAuthProvider) SshDial(cmd *cobra.Command, sshConn *proto.ExecutionSta
 }
 
 func unaryAuthInterceptor(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	if IsInSession() {
+		sessionInfo := fmt.Sprintf("%d:%s:%s", agentConfig.Instance, agentConfig.Session, agentConfig.TaskId)
+		ctx = metadata.AppendToOutgoingContext(ctx, "velda-session", sessionInfo)
+	}
 	return invoker(ctx, method, req, reply, cc, opts...)
 }

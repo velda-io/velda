@@ -57,6 +57,10 @@ func (r *LocalZfsRunner) Setup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create ZFS dataset: %v", err)
 	}
+	err = exec.Command("sudo", "chmod", "a+w", fmt.Sprintf("/%s", suiteName)).Run()
+	if err != nil {
+		t.Fatalf("Failed to set permissions on ZFS dataset: %v", err)
+	}
 	t.Cleanup(func() {
 		// ZFS volume stays busy for a while, so we need to run a command to destroy it after some time.
 		// This is a workaround to avoid the dataset being busy immediately after the test.

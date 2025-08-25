@@ -172,7 +172,7 @@ func (a *Agent) run(ctx context.Context) error {
 						}
 					} else {
 						resp.Success = true
-						log.Printf("Requested session %s", session.SessionId)
+						log.Printf("Requested session %d:%s:%s", session.InstanceId, session.SessionId, session.TaskId)
 						key := SessionKey{
 							InstanceId: session.InstanceId,
 							SessionId:  session.SessionId,

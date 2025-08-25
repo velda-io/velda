@@ -22,9 +22,11 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"velda.io/velda/pkg/storage/mini"
 	"velda.io/velda/tests/cases"
 )
@@ -42,6 +44,12 @@ func NewLocalMiniRunner(zfsRoot string) *LocalMiniRunner {
 	}
 }
 
+func execOrError(cmd string, args ...string) error {
+	c := exec.Command(cmd, args...)
+	c.Stderr = os.Stderr
+	return c.Run()
+}
+
 // Run executes a command in the local runner environment.
 func (r *LocalMiniRunner) Setup(t *testing.T) {
 	suiteName := fmt.Sprintf("%s/tests-%d", r.zfsRoot, time.Now().Unix())
@@ -51,10 +59,9 @@ func (r *LocalMiniRunner) Setup(t *testing.T) {
 		bindir = "../bin"
 	}
 
-	err := exec.Command("sudo", "zfs", "clone", fmt.Sprintf("%s/seed/ubuntu@image", r.zfsRoot), suiteName).Run()
-	if err != nil {
-		t.Fatalf("Failed to create ZFS dataset: %v", err)
-	}
+	rootPath := filepath.Join(suiteName, "root/0/1")
+	require.NoError(t, execOrError("sudo", "zfs", "clone", "-p", fmt.Sprintf("%s/seed/ubuntu@image", r.zfsRoot), rootPath))
+	require.NoError(t, execOrError("sudo", "chmod", "a+w", "/"+suiteName))
 	t.Cleanup(func() {
 		// ZFS volume stays busy for a while, so we need to run a command to destroy it after some time.
 		// This is a workaround to avoid the dataset being busy immediately after the test.

@@ -124,7 +124,6 @@ func init() {
 }
 
 func initMiniConfig(cmd *cobra.Command, sandboxDir string) error {
-	root := path.Join(sandboxDir, "root", "0", "1")
 	config := &configpb.Config{
 		Server: &configpb.Server{
 			GrpcAddress: ":50051",
@@ -133,7 +132,7 @@ func initMiniConfig(cmd *cobra.Command, sandboxDir string) error {
 		Storage: &configpb.Storage{
 			Storage: &configpb.Storage_Mini{
 				Mini: &configpb.Storage_MiniVelda{
-					Root: root,
+					Root: sandboxDir,
 				},
 			},
 		},

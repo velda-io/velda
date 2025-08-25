@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,8 +18,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"velda.io/velda/pkg/rbac"
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/rbac"
 )
 
 type Committer interface {
@@ -30,7 +30,7 @@ type Committer interface {
 var ErrNotFound = status.Error(codes.NotFound, "not found")
 
 type TaskWithUser struct {
-	proto.Task
+	*proto.Task
 	User rbac.User
 }
 

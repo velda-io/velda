@@ -16,23 +16,20 @@ package mini
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 )
 
 type MiniStorage struct {
-	rootPath string
+	sandboxPath string
 }
 
 var NotSupportedError = fmt.Errorf("mini storage does not support this operation")
 
 func NewMiniStorage(path string) (*MiniStorage, error) {
 	z := &MiniStorage{
-		rootPath: path,
+		sandboxPath: path,
 	}
 	return z, nil
-}
-
-func (z *MiniStorage) Pool() string {
-	return z.rootPath
 }
 
 func (z *MiniStorage) CreateInstance(ctx context.Context, instanceId int64) error {
@@ -72,5 +69,5 @@ func (z *MiniStorage) ListImages(ctx context.Context) ([]string, error) {
 }
 
 func (z *MiniStorage) GetRoot(instanceId int64) string {
-	return z.rootPath
+	return filepath.Join(z.sandboxPath, "root/0/1")
 }

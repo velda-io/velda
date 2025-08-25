@@ -61,7 +61,7 @@ func (p *SandboxFsPlugin) Run(ctx context.Context) error {
 func (r *SandboxFsPlugin) initAgentDir(session *proto.SessionRequest, sessionDir string) error {
 	instanceId := session.InstanceId
 	sessionId := session.SessionId
-	configData := clientlib.GenerateAgentConfig(instanceId, sessionId)
+	configData := clientlib.GenerateAgentConfig(instanceId, sessionId, session.TaskId)
 	yamlData, err := yaml.Marshal(configData)
 	if err != nil {
 		return fmt.Errorf("Marshal yaml: %w", err)
