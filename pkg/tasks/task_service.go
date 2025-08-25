@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"strings"
 
-	"velda.io/velda/pkg/rbac"
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/rbac"
 )
 
 const (
@@ -66,7 +66,7 @@ func (s *TaskServiceServer) ListTasks(ctx context.Context, in *proto.ListTasksRe
 	if err != nil {
 		return nil, err
 	}
-	if len(tasks) > 0 {
+	if len(tasks) > 0 && in.GetParentId() != "" {
 		jobId := in.ParentId[:strings.Index(in.ParentId, "/")]
 		if err := s.permission.Check(ctx, ActionGetTask, fmt.Sprintf("tasks/%d/%s", tasks[0].InstanceId, jobId)); err != nil {
 			return nil, err
