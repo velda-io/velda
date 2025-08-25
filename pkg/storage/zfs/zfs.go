@@ -205,8 +205,8 @@ func (z *Zfs) ReadFile(ctx context.Context, instanceId int64, path string) (stor
 		defer close(data)
 		defer close(errorO)
 		defer file.Close()
-		buf := new(bytes.Buffer)
 		for {
+			buf := new(bytes.Buffer)
 			n, err := io.CopyN(buf, file, 1024*10) // Limit read to 10KB
 			if n > 0 {
 				data <- buf.Bytes()

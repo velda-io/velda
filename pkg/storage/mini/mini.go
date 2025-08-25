@@ -85,8 +85,8 @@ func (z *MiniStorage) ReadFile(ctx context.Context, instanceId int64, path strin
 		defer close(data)
 		defer close(errorO)
 		defer file.Close()
-		buf := new(bytes.Buffer)
 		for {
+			buf := new(bytes.Buffer)
 			n, err := io.CopyN(buf, file, 1024*10) // Limit read to 10KB
 			log.Printf("Read %d bytes from file %s %v", buf.Len(), path, err)
 			if n > 0 {
