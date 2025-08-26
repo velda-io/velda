@@ -14,9 +14,15 @@
 package mini
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"log"
+	"os"
 	"path/filepath"
+
+	"velda.io/velda/pkg/storage"
 )
 
 type MiniStorage struct {
@@ -66,6 +72,33 @@ func (z *MiniStorage) DeleteImage(ctx context.Context, imageName string) error {
 
 func (z *MiniStorage) ListImages(ctx context.Context) ([]string, error) {
 	return nil, NotSupportedError
+}
+
+func (z *MiniStorage) ReadFile(ctx context.Context, instanceId int64, path string) (storage.ByteStream, error) {
+	data := make(chan []byte)
+	errorO := make(chan error)
+	file, err := os.Open(filepath.Join(z.GetRoot(instanceId), path))
+	if err != nil {
+		return storage.ByteStream{}, fmt.Errorf("failed to open file %s: %w", path, err)
+	}
+	go func() {
+		defer close(data)
+		defer close(errorO)
+		defer file.Close()
+		for {
+			buf := new(bytes.Buffer)
+			n, err := io.CopyN(buf, file, 1024*10) // Limit read to 10KB
+			log.Printf("Read %d bytes from file %s %v", buf.Len(), path, err)
+			if n > 0 {
+				data <- buf.Bytes()
+			}
+			if err != nil {
+				errorO <- fmt.Errorf("failed to read file %s: %w", path, err)
+				return
+			}
+		}
+	}()
+	return storage.ByteStream{Data: data, Err: errorO}, nil
 }
 
 func (z *MiniStorage) GetRoot(instanceId int64) string {

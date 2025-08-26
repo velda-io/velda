@@ -15,11 +15,16 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"strings"
+	"sync"
 
 	"velda.io/velda/pkg/proto"
 	"velda.io/velda/pkg/rbac"
+	"velda.io/velda/pkg/storage"
 )
 
 const (
@@ -32,15 +37,21 @@ type TaskDb interface {
 	SearchTasks(ctx context.Context, request *proto.SearchTasksRequest) ([]*proto.Task, string, error)
 }
 
+type TaskLogDb interface {
+	GetTaskLogs(ctx context.Context, instanceId int64, taskId string) (stdout storage.ByteStream, stderr storage.ByteStream, err error)
+}
+
 type TaskServiceServer struct {
 	proto.UnimplementedTaskServiceServer
 	db         TaskDb
+	logDb      TaskLogDb
 	permission rbac.Permissions
 }
 
-func NewTaskServiceServer(db TaskDb, permissions rbac.Permissions) *TaskServiceServer {
+func NewTaskServiceServer(db TaskDb, logDb TaskLogDb, permissions rbac.Permissions) *TaskServiceServer {
 	return &TaskServiceServer{
 		db:         db,
+		logDb:      logDb,
 		permission: permissions,
 	}
 }
@@ -88,4 +99,33 @@ func (s *TaskServiceServer) SearchTasks(ctx context.Context, in *proto.SearchTas
 		Tasks:         tasks,
 		NextPageToken: nextCursor,
 	}, nil
+}
+
+func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskService_LogsServer) error {
+	task, err := s.db.GetTask(stream.Context(), in.TaskId)
+	stdout, stderr, err := s.logDb.GetTaskLogs(stream.Context(), task.InstanceId, in.TaskId)
+	if err != nil {
+		return err
+	}
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	handleStream := func(streamType proto.LogTaskResponse_Stream, s storage.ByteStream) {
+		defer wg.Done()
+		for {
+			select {
+			case line := <-s.Data:
+				stream.Send(&proto.LogTaskResponse{Stream: streamType, Data: line})
+			case err := <-s.Err:
+				if errors.Is(err, io.EOF) {
+					return
+				}
+				log.Printf("Error reading stderr for task %s: %v", in.TaskId, err)
+				return
+			}
+		}
+	}
+	go handleStream(proto.LogTaskResponse_STREAM_STDOUT, stdout)
+	go handleStream(proto.LogTaskResponse_STREAM_STDERR, stderr)
+	wg.Wait()
+	return nil
 }

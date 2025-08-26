@@ -30,7 +30,7 @@ func TestLocal(t *testing.T) {
 	cases.RunAllTests(t, runner)
 }
 
-func TestMini(t *testing.T) {
+func TestMiniClone(t *testing.T) {
 	runner := runner.NewLocalMiniRunner(*zfsRoot)
 	cases.RunAllTests(t, runner)
 }

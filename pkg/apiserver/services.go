@@ -152,7 +152,7 @@ func (s *OssService) InitServices() error {
 	s.BrokerService = broker.NewBrokerServer(s.Schedulers, s.Sessions, s.Permissions, s.TaskTracker, nfsAuth, s.Db.(broker.TaskDb))
 
 	// Initialize other services
-	s.TaskService = tasks.NewTaskServiceServer(s.Db.(tasks.TaskDb), s.Permissions)
+	s.TaskService = tasks.NewTaskServiceServer(s.Db.(tasks.TaskDb), storage.NewLocalStorageLogDb(s.Storage), s.Permissions)
 	s.PoolService = NewPoolManagerServiceServer(s.Schedulers)
 	return nil
 }
