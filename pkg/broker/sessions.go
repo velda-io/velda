@@ -86,10 +86,10 @@ type Session struct {
 	lastActiveTime time.Time
 
 	OnCompletion func()
-	accounting   accountingDb
+	accounting   AccountingDb
 }
 
-func NewSession(request *proto.SessionRequest, scheduler *Scheduler, accounting accountingDb) *Session {
+func NewSession(request *proto.SessionRequest, scheduler *Scheduler, accounting AccountingDb) *Session {
 	return &Session{
 		id:        request.SessionId,
 		scheduler: scheduler,

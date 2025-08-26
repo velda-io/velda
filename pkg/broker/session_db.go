@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,7 +22,7 @@ import (
 	"velda.io/velda/pkg/proto"
 )
 
-type accountingDb interface {
+type AccountingDb interface {
 	RecordExecution(data *proto.SessionExecutionRecord) error
 }
 
@@ -31,7 +31,7 @@ var AlreadyExistsError = errors.New("session already exists")
 type SessionDatabase struct {
 	mu           sync.Mutex
 	instances    map[int64]*Instance
-	accountingDb accountingDb
+	accountingDb AccountingDb
 }
 
 type Instance struct {
@@ -42,7 +42,7 @@ type Instance struct {
 	services map[string]map[string]bool
 }
 
-func NewSessionDatabase(accountingDb accountingDb) *SessionDatabase {
+func NewSessionDatabase(accountingDb AccountingDb) *SessionDatabase {
 	return &SessionDatabase{
 		instances:    make(map[int64]*Instance),
 		accountingDb: accountingDb,

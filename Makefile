@@ -35,7 +35,7 @@ unittest:
 	go test ./pkg/... ./client/...
 
 e2etest:
-	go test ./tests --tags local
+	go test ./tests --tags local -v
 
 test: unittest e2etest
 
