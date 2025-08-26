@@ -22,7 +22,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/exec"
-	"reflect"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -35,44 +34,8 @@ import (
 )
 
 var (
-	allMetrics = prometheus.NewRegistry()
+	AllMetrics = prometheus.NewRegistry()
 )
-
-type Service interface {
-	InitFromFlags(flags *pflag.FlagSet) error
-	InitConfig() error
-	InitDatabase() error
-	InitServices() error
-	InitGrpcServer() error
-	RegisterServices() error
-
-	Run() error
-	ExportedMetrics() *prometheus.Registry
-}
-
-func initService(s Service) error {
-	if err := s.InitConfig(); err != nil {
-		return fmt.Errorf("Failed to Initialize service configuration: %v", err)
-	}
-
-	if err := s.InitDatabase(); err != nil {
-		return fmt.Errorf("Failed to Initialize database: %v", err)
-	}
-
-	if err := s.InitServices(); err != nil {
-		return fmt.Errorf("Failed to Initialize services: %v", err)
-	}
-
-	if err := s.InitGrpcServer(); err != nil {
-		return fmt.Errorf("Failed to Initialize gRPC server: %v", err)
-	}
-
-	if err := s.RegisterServices(); err != nil {
-		return fmt.Errorf("Failed to register services: %v", err)
-	}
-
-	return nil
-}
 
 func AddFlags(flags *pflag.FlagSet) {
 	flags.String("config", "", "Path to the configuration file")
@@ -85,11 +48,13 @@ func AddFlags(flags *pflag.FlagSet) {
 }
 
 func StartMetricServer(endpoint string) error {
-	http.Handle("/metrics", promhttp.HandlerFor(allMetrics, promhttp.HandlerOpts{}))
+	http.Handle("/metrics", promhttp.HandlerFor(AllMetrics, promhttp.HandlerOpts{}))
 	return http.ListenAndServe(endpoint, nil)
 }
 
-func Main(s Service, flags *pflag.FlagSet) {
+type ServiceInjector = func(flags *pflag.FlagSet) (CompletionError, error)
+
+func Main(s ServiceInjector, flags *pflag.FlagSet) {
 	foreground, _ := flags.GetBool("foreground")
 	if !foreground {
 		logfile, _ := flags.GetString("logfile")
@@ -102,13 +67,12 @@ func Main(s Service, flags *pflag.FlagSet) {
 	restartOnConfigChange, _ := flags.GetBool("restart-on-config-change")
 	go StartMetricServer("localhost:6060")
 	for {
-		s.InitFromFlags(flags)
-		err := RunService(s)
+		completionErr, err := s(flags)
+		if completionErr != nil {
+			err = completionErr
+		}
 		if errors.Is(err, ConfigChanged) && restartOnConfigChange {
 			log.Println("Configuration changed, restarting service")
-			// Reset the instance.
-			t := reflect.TypeOf(s).Elem()
-			s = reflect.New(t).Interface().(Service)
 			continue
 		}
 		if err != nil {
@@ -116,16 +80,6 @@ func Main(s Service, flags *pflag.FlagSet) {
 		}
 		break
 	}
-}
-
-func RunService(svc Service) error {
-	if err := initService(svc); err != nil {
-		return fmt.Errorf("Failed to initialize service: %v", err)
-	}
-	metrics := svc.ExportedMetrics()
-	allMetrics.MustRegister(metrics)
-	defer allMetrics.Unregister(metrics)
-	return svc.Run()
 }
 
 func RunAsDaemon(args []string, logfile, pidfile string) error {

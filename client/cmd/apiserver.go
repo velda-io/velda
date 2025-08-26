@@ -22,7 +22,7 @@ var apiServerCmd = &cobra.Command{
 	Use:   "apiserver",
 	Short: "Start API server",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		apiserver.Main(&apiserver.OssService{}, cmd.Flags())
+		apiserver.Main(apiserver.RunAllService, cmd.Flags())
 		return nil
 	},
 }
