@@ -76,12 +76,11 @@ chmod +x script-log.sh
 		// Wait until the job is finished
 		assert.Eventually(t, func() bool {
 			output, err := runVeldaWithOutput("task", "get", taskId, "-o", "status", "--header=false")
-			t.Logf("Task status: %s", output)
 			require.NoError(t, err)
 			return strings.Contains(output, "TASK_STATUS_SUCCESS")
 		}, 30*time.Second, 1000*time.Millisecond)
 		stdout, stderr, err := runVeldaWithOutErr("task", "log", taskId)
-		require.NoError(t, err)
+		require.NoError(t, err, "Failed to get logs with err", stderr)
 		assert.Contains(t, stdout, "STDOUT")
 		assert.Contains(t, stderr, "STDERR")
 	})
