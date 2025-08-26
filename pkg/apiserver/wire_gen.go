@@ -59,7 +59,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	poolManagerServiceServer := ProvidePoolService(server, runtimeServeMux, schedulerSet)
 	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storage, permissions)
 	registry := _wireRegistryValue
-	metricRegistryRunner := ProvideRegistry(registry, serverMetrics)
+	metricRegistryRunner := ProvideMetrics(registry, serverMetrics)
 	provisionRunner, err := ProvideProvisioners(context, config, schedulerSet)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 var (
 	_wireServerAuthUnaryInterceptorValue = ServerAuthUnaryInterceptor(sessionInterceptor)
 	_wireAccountingDbValue               = broker.AccountingDb(nil)
-	_wireRegistryValue                   = allMetrics
+	_wireRegistryValue                   = AllMetrics
 )
 
 // wire.go:

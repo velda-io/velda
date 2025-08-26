@@ -54,7 +54,6 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		ProvideSessionDb,
 		ProvideTaskTracker,
 		ProvideLocalDiskStorage,
-		wire.Value(allMetrics),
 		wire.InterfaceValue(new(broker.AccountingDb), broker.AccountingDb(nil)),
 		DatabaseProviders,
 		wire.Value(ServerAuthUnaryInterceptor(sessionInterceptor)),

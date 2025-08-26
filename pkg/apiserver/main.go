@@ -34,7 +34,7 @@ import (
 )
 
 var (
-	allMetrics = prometheus.NewRegistry()
+	AllMetrics = prometheus.NewRegistry()
 )
 
 func AddFlags(flags *pflag.FlagSet) {
@@ -48,7 +48,7 @@ func AddFlags(flags *pflag.FlagSet) {
 }
 
 func StartMetricServer(endpoint string) error {
-	http.Handle("/metrics", promhttp.HandlerFor(allMetrics, promhttp.HandlerOpts{}))
+	http.Handle("/metrics", promhttp.HandlerFor(AllMetrics, promhttp.HandlerOpts{}))
 	return http.ListenAndServe(endpoint, nil)
 }
 

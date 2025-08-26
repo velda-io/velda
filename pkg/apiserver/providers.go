@@ -248,7 +248,7 @@ func ProvideGrpcMux(httpHandler *http.ServeMux) *runtime.ServeMux {
 
 type MetricRegistryRunner Runner
 
-func ProvideRegistry(r *prometheus.Registry, grpcMetrics *prometheus_grpc.ServerMetrics) MetricRegistryRunner {
+func ProvideMetrics(r *prometheus.Registry, grpcMetrics *prometheus_grpc.ServerMetrics) MetricRegistryRunner {
 	r.MustRegister(grpcMetrics)
 	goCollector := collectors.NewGoCollector()
 	r.MustRegister(goCollector)
@@ -371,12 +371,13 @@ var DatabaseProviders = wire.NewSet(
 )
 
 var ServiceProviders = wire.NewSet(
+	wire.Value(AllMetrics),
 	ProvideBaseCtx,
 	ProvideCtx,
 	ProvideHttpHandler,
 	ProvideGrpcMux,
 	ProvideGrpcMetrics,
-	ProvideRegistry,
+	ProvideMetrics,
 	ProvideProvisioners,
 	ProvideGrpcServer,
 	ProvideGrpcRunner,
