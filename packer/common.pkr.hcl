@@ -8,6 +8,10 @@ packer {
       source  = "github.com/hashicorp/googlecompute"
       version = "~> 1"
     }
+    docker = {
+      source  = "github.com/hashicorp/docker"
+      version = "~> 1"
+    }
   }
 }
 
@@ -17,7 +21,7 @@ variable "version" {
 }
 
 variable "binary_path" {
-  type = string
+  type    = string
   default = null
 }
 
@@ -37,7 +41,7 @@ variable "ami_regions" {
 }
 
 variable "ami_users" {
-  type = list(string)
+  type    = list(string)
   default = []
 }
 
@@ -56,9 +60,19 @@ variable "agent_extra_files" {
   default = []
 }
 
+variable "docker_username" {
+  type    = string
+  default = null
+}
+
+variable "docker_password" {
+  type    = string
+  default = null
+}
+
 locals {
-  isdev = startswith(var.version, "dev")
-  istest = strcontains(var.version, "test") || local.isdev
+  isdev       = startswith(var.version, "dev")
+  istest      = strcontains(var.version, "test") || local.isdev
   binary_path = var.binary_path != null ? var.binary_path : "bin/velda-${var.version}-linux-amd64"
 
   ami_groups = local.istest || length(var.ami_users) > 0 ? [] : ["all"]

@@ -38,3 +38,9 @@ source "amazon-ebs" "velda" {
     Name = "Packer Builder"
   }
 }
+
+source "docker" "velda" {
+  image = "ubuntu:24.04"
+  commit = true
+  platform = "linux/amd64"
+}

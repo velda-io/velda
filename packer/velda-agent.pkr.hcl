@@ -59,7 +59,7 @@ build {
   }
 
   provisioner "file" {
-    sources      = var.agent_extra_files
+    sources     = var.agent_extra_files
     destination = "/tmp/velda-install/extra_files/"
   }
 
@@ -124,5 +124,37 @@ build {
   post-processor "manifest" {
     only   = ["googlecompute.velda-agent"]
     output = "base-gcp.json"
+  }
+}
+
+build {
+  name = "agent"
+  source "docker.velda" {
+    changes = [
+      "CMD [\"/velda\", \"agent\", \"daemon\"]",
+    ]
+  }
+
+  provisioner "shell" {
+    inline = [
+      "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nfs-common --no-install-recommends",
+    ]
+  }
+
+  provisioner "file" {
+    source      = local.binary_path
+    destination = "/velda"
+  }
+
+  post-processors {
+    post-processor "docker-tag" {
+      repository = "veldaio/agent"
+      tags       = [var.version]
+    }
+    post-processor "docker-push" {
+      login          = true
+      login_username = var.docker_username
+      login_password = var.docker_password
+    }
   }
 }
