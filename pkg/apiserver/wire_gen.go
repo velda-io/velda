@@ -14,10 +14,7 @@ import (
 
 import (
 	_ "net/http/pprof"
-	_ "velda.io/velda/pkg/broker/backends/aws"
-	_ "velda.io/velda/pkg/broker/backends/cmd"
-	_ "velda.io/velda/pkg/broker/backends/gce"
-	_ "velda.io/velda/pkg/broker/backends/k8s"
+	_ "velda.io/velda/pkg/broker/backends/registry"
 )
 
 // Injectors from wire.go:
