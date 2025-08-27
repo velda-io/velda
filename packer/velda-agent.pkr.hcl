@@ -141,11 +141,6 @@ build {
     ]
   }
 
-  provisioner "shell-local" {
-    inline = [
-      "echo ${var.docker_username} ${var.docker_password}",
-    ]
-  }
   provisioner "file" {
     source      = local.binary_path
     destination = "/velda"
