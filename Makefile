@@ -4,7 +4,7 @@ all: velda
 
 # By default, disabled grpctrace & k8s backend to reduce binary size
 # See https://github.com/golang/go/issues/62024
-TAGS ?= gce,gcs_provisioner,aws,grpcnotrace
+TAGS ?= gce,aws,grpcnotrace
 VERSION ?= dev-$(shell date +%Y%m%d-%H%M%S)
 VERSION_V := ${VERSION}
 velda:
@@ -46,3 +46,6 @@ PACKER_FILTER ?= *
 
 image: release-mini
 	packer build -var="version=${VERSION_V}" -only="${PACKER_FILTER}" packer
+
+manifest: pkg/broker/backends/k8s/k8s_provisioner.go
+	controller-gen crd:generateEmbeddedObjectMeta=true paths=./pkg/broker/backends/k8s/ output:crd:dir=./misc
