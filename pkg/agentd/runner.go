@@ -118,8 +118,6 @@ func (r *Runner) Run(agentaName string, session *proto.SessionRequest, completio
 	r.dnsServer.SetContext(dnsCtx)
 
 	nh := r.nd.Get()
-	l, _ := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", nh))
-	log.Printf("Network namespace link: %s\n", l)
 	defer func() {
 		if needCleanup {
 			r.nd.Put(nh)
@@ -175,7 +173,7 @@ func (r *Runner) Run(agentaName string, session *proto.SessionRequest, completio
 		CgroupFD:    cgroupFd,
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Start: %w", err)
 	}
 	if batch {
 		batchIn.Close()

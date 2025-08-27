@@ -333,6 +333,7 @@ type CompletionError error
 
 func ProvideCompletionSignal(runners []Runner, serviceCtx *ServiceCtx) CompletionError {
 	defer RunCleanup(runners)
+	defer serviceCtx.cancel()
 	// Wait for SIGINT (Ctrl+C) or SIGTERM.
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
