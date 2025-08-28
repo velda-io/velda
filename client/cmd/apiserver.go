@@ -18,7 +18,7 @@ import (
 	"velda.io/velda/pkg/apiserver"
 )
 
-var apiServerCmd = &cobra.Command{
+var ApiServerCmd = &cobra.Command{
 	Use:   "apiserver",
 	Short: "Start API server",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -28,6 +28,6 @@ var apiServerCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(apiServerCmd)
-	apiserver.AddFlags(apiServerCmd.Flags())
+	rootCmd.AddCommand(ApiServerCmd)
+	apiserver.AddFlags(ApiServerCmd.Flags())
 }
