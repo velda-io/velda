@@ -602,9 +602,12 @@ func (p *AutoScaledPool) removeWorkerLocked(name string) WorkerStatusCode {
 	if ok {
 		delete(p.workersByStatus[currentStatus], name)
 		p.idleSlots -= p.workerDetail[name].availableSlot
+	} else {
+		log.Printf("Pool %s: Removing worker %s that is not in pool", p.name, name)
 	}
 	delete(p.workerStatus, name)
 	delete(p.workerDetail, name)
+	delete(p.lastKnownTime, name)
 	return currentStatus
 }
 

@@ -131,7 +131,7 @@ build {
   name = "agent"
   source "docker.velda" {
     changes = [
-      "CMD [\"/velda\", \"agent\", \"daemon\"]",
+      "ENTRYPOINT [\"/velda\", \"agent\", \"daemon\"]",
     ]
   }
 

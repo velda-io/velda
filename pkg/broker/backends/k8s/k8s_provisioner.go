@@ -135,8 +135,8 @@ func (p *K8sProvisioner) update(obj interface{}, new bool) error {
 		MinIdle:              poolCrd.Spec.AutoScaler.MinIdle,
 		MaxSize:              poolCrd.Spec.AutoScaler.MaxReplicas,
 		MaxIdle:              poolCrd.Spec.AutoScaler.MaxIdle,
-		IdleDecay:            time.Duration(poolCrd.Spec.AutoScaler.IdleDecay),
-		KillUnknownAfter:     time.Duration(poolCrd.Spec.AutoScaler.KillUnknownAfter),
+		IdleDecay:            time.Duration(poolCrd.Spec.AutoScaler.IdleDecay) * time.Second,
+		KillUnknownAfter:     time.Duration(poolCrd.Spec.AutoScaler.KillUnknownAfter) * time.Second,
 		DefaultSlotsPerAgent: poolCrd.Spec.AutoScaler.DefaultSlotsPerAgent,
 	})
 	log.Printf("Updated pool from CRD update: %v", poolCrd.Name)

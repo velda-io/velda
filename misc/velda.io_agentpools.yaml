@@ -44,10 +44,13 @@ spec:
               autoscaler:
                 properties:
                   defaultSlotsPerAgent:
+                    default: 1
                     type: integer
                   idleDecaySecond:
+                    default: 60
                     type: integer
                   killUnknownAfterSecond:
+                    default: 300
                     type: integer
                   maxIdle:
                     type: integer

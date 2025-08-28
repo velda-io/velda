@@ -23,11 +23,14 @@ import (
 )
 
 type AgentPoolAutoScalerSpec struct {
-	MaxReplicas          int `json:"maxReplicas"`
-	MinIdle              int `json:"minIdle"`
-	MaxIdle              int `json:"maxIdle"`
-	IdleDecay            int `json:"idleDecaySecond"`
-	KillUnknownAfter     int `json:"killUnknownAfterSecond"`
+	MaxReplicas int `json:"maxReplicas"`
+	MinIdle     int `json:"minIdle"`
+	MaxIdle     int `json:"maxIdle"`
+	// +kubebuilder:default:=60
+	IdleDecay int `json:"idleDecaySecond"`
+	// +kubebuilder:default:=300
+	KillUnknownAfter int `json:"killUnknownAfterSecond"`
+	// +kubebuilder:default:=1
 	DefaultSlotsPerAgent int `json:"defaultSlotsPerAgent,omitempty"`
 }
 
