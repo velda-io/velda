@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/tools/clientcmd"
@@ -79,7 +80,8 @@ func TestK8sBackend(t *testing.T) {
 		t.FailNow()
 	}
 
-	backend := NewK8sPoolBackend(config, pod, agentSelector)
+	backend, err := NewK8sPoolBackend(config, pod, agentSelector)
+	require.NoError(t, err)
 
 	backend_testing.TestSimpleScaleUpDown(t, backend)
 }
