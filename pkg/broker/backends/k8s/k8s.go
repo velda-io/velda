@@ -16,7 +16,6 @@ package k8s
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
@@ -37,29 +36,27 @@ type k8sPoolBackend struct {
 	cfg         *rest.Config
 	podTemplate *corev1.Pod
 	podSelector string
+	client      *corev1c.CoreV1Client
 }
 
-func NewK8sPoolBackend(cfg *rest.Config, podTemplate *corev1.Pod, podSelector string) broker.ResourcePoolBackend {
+func NewK8sPoolBackend(cfg *rest.Config, podTemplate *corev1.Pod, podSelector string) (broker.ResourcePoolBackend, error) {
+	client, err := corev1c.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create k8s client: %w", err)
+	}
 	return &k8sPoolBackend{
 		cfg:         cfg,
 		podTemplate: podTemplate,
 		podSelector: podSelector,
-	}
-}
-
-func (k *k8sPoolBackend) client() *corev1c.CoreV1Client {
-	client, err := corev1c.NewForConfig(k.cfg)
-	if err != nil {
-		log.Fatalf("Failed to create Kubernetes client: %v", err)
-	}
-	return client
+		client:      client,
+	}, nil
 }
 
 func (k *k8sPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	pod := k.podTemplate.DeepCopy()
 	pod.Name = fmt.Sprintf("%s-%s", k.podTemplate.Name, utils.RandString(5))
 
-	_, err := k.client().Pods(k.podTemplate.Namespace).Create(ctx, pod, metav1.CreateOptions{})
+	_, err := k.client.Pods(k.podTemplate.Namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -67,7 +64,7 @@ func (k *k8sPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 }
 
 func (k *k8sPoolBackend) RequestDelete(ctx context.Context, workerName string) error {
-	err := k.client().Pods(k.podTemplate.Namespace).Delete(ctx, workerName, metav1.DeleteOptions{})
+	err := k.client.Pods(k.podTemplate.Namespace).Delete(ctx, workerName, metav1.DeleteOptions{})
 	if err != nil {
 		return err
 	}
@@ -75,7 +72,7 @@ func (k *k8sPoolBackend) RequestDelete(ctx context.Context, workerName string) e
 }
 
 func (k *k8sPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus, error) {
-	pods, err := k.client().Pods(k.podTemplate.Namespace).List(ctx, metav1.ListOptions{LabelSelector: k.podSelector})
+	pods, err := k.client.Pods(k.podTemplate.Namespace).List(ctx, metav1.ListOptions{LabelSelector: k.podSelector})
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +127,7 @@ func (f *k8sPoolFactory) NewBackend(pb *proto.AutoscalerBackend) (broker.Resourc
 		return nil, fmt.Errorf("failed to decode pod template: %w", err)
 	}
 
-	return NewK8sPoolBackend(config, pod, cfg.PodSelector), nil
+	return NewK8sPoolBackend(config, pod, cfg.PodSelector)
 }
 
 func init() {

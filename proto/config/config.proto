@@ -156,6 +156,19 @@ message KubernetesProvisioner {
   // Use in-cluster AgentPool custom resource definition or default cluster.
   // TODO: Should always use the namespace that apiserver runs.
   string namespace = 1;
+
+
+  message GoogleKubernetesEngine {
+    string project = 1;
+    string location = 2;
+    string cluster_name = 3;
+  }
+
+  // How to fetch the cluster credential.
+  // If not set, will default to default config used in kubectl.
+  oneof cluster {
+    GoogleKubernetesEngine gke = 2;
+  }
 }
 
 // Use AWS SSM parameter to provision agent pools.

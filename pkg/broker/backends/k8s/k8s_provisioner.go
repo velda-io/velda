@@ -15,14 +15,20 @@ package k8s
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/container/v1"
+	"google.golang.org/api/option"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -128,7 +134,11 @@ func (p *K8sProvisioner) update(obj interface{}, new bool) error {
 	}
 	filter := strings.Join(filters, ",")
 
-	backend := NewK8sPoolBackend(p.cfg, &template, filter)
+	backend, err := NewK8sPoolBackend(p.cfg, &template, filter)
+	if err != nil {
+		log.Printf("Failed to create backend: %v", err)
+		return err
+	}
 	// TODO: Should reset current backend?
 	pool.PoolManager.UpdateConfig(&broker.AutoScaledPoolConfig{
 		Backend:              backend,
@@ -163,20 +173,77 @@ func (p *K8sProvisioner) onDelete(obj interface{}) error {
 
 type K8sProvisionerFactory struct{}
 
-func (*K8sProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedulers *broker.SchedulerSet) (backends.Provisioner, error) {
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		// TODO: Get in-cluster config
-		homeDir, errh := os.UserHomeDir()
-		if errh != nil {
-			return nil, errh
+func getClusterConfig(cfg *configpb.KubernetesProvisioner) (*rest.Config, error) {
+	ctx := context.Background()
+	switch cfg.Cluster.(type) {
+	case *configpb.KubernetesProvisioner_Gke:
+		gke := cfg.GetGke()
+		// 1) Get Google creds (ADC). Works with:
+		//    - GOOGLE_APPLICATION_CREDENTIALS (service account JSON)
+		//    - GCE/GKE metadata server
+		//    - gcloud auth application-default login (optional; still no gcloud invocation)
+		creds, err := google.FindDefaultCredentials(ctx, container.CloudPlatformScope)
+		if err != nil {
+			return nil, fmt.Errorf("find default creds: %w", err)
 		}
 
-		// Load Kubernetes configuration (e.g., from ~/.kube/config)
-		kubeconfig := filepath.Join(homeDir, ".kube", "config")
+		// 2) Look up the cluster to get endpoint + CA bundle.
+		gkeSvc, err := container.NewService(ctx, option.WithTokenSource(creds.TokenSource))
+		if err != nil {
+			return nil, fmt.Errorf("container service: %w", err)
+		}
+		name := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", gke.GetProject(), gke.GetLocation(), gke.GetClusterName())
+		cl, err := gkeSvc.Projects.Locations.Clusters.Get(name).Context(ctx).Do()
 
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("get cluster: %w", err)
+		}
+
+		caPEM, err := base64.StdEncoding.DecodeString(cl.MasterAuth.ClusterCaCertificate)
+		if err != nil {
+			return nil, fmt.Errorf("decode cluster CA: %w", err)
+		}
+
+		// 3) Build rest.Config and wrap transport with OAuth2 so tokens auto-refresh.
+		cfg := &rest.Config{
+			Host: fmt.Sprintf("https://%s", cl.Endpoint),
+			TLSClientConfig: rest.TLSClientConfig{
+				CAData: caPEM,
+			},
+			Timeout:   30 * time.Second,
+			UserAgent: "velda-apiserver/1.0",
+		}
+
+		// Inject OAuth2 bearer tokens (auto-refreshing) into all kube API calls.
+		cfg.WrapTransport = func(rt http.RoundTripper) http.RoundTripper {
+			return &oauth2.Transport{
+				Base:   rt,
+				Source: creds.TokenSource,
+			}
+		}
+		return cfg, nil
+	default:
+		config, err := rest.InClusterConfig()
+		if err != nil {
+			homeDir, errh := os.UserHomeDir()
+			if errh != nil {
+				return nil, errh
+			}
+
+			// Load Kubernetes configuration (e.g., from ~/.kube/config)
+			kubeconfig := filepath.Join(homeDir, ".kube", "config")
+
+			config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return config, nil
 	}
+}
+
+func (*K8sProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedulers *broker.SchedulerSet) (backends.Provisioner, error) {
+	config, err := getClusterConfig(cfg.GetKubernetes())
 	if err != nil {
 		return nil, err
 	}
