@@ -421,7 +421,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/CreateInstance", runtime.WithHTTPPathPattern("/velda/instances"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/CreateInstance", runtime.WithHTTPPathPattern("/rest/instances"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -441,7 +441,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/GetInstance", runtime.WithHTTPPathPattern("/velda/instances/{instance_id}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/GetInstance", runtime.WithHTTPPathPattern("/rest/instances/{instance_id}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -461,7 +461,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/GetInstanceByName", runtime.WithHTTPPathPattern("/velda/instances/by_name/{instance_name}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/GetInstanceByName", runtime.WithHTTPPathPattern("/rest/instances/by_name/{instance_name}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -481,7 +481,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/DeleteInstance", runtime.WithHTTPPathPattern("/velda/instances/{instance_id}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/DeleteInstance", runtime.WithHTTPPathPattern("/rest/instances/{instance_id}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -501,7 +501,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/ListInstances", runtime.WithHTTPPathPattern("/velda/instances"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/ListInstances", runtime.WithHTTPPathPattern("/rest/instances"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -521,7 +521,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/CreateSnapshot", runtime.WithHTTPPathPattern("/velda/instances/{instance_id}/snapshot/{snapshot_name}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/CreateSnapshot", runtime.WithHTTPPathPattern("/rest/instances/{instance_id}/snapshot/{snapshot_name}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -541,7 +541,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/DeleteSnapshot", runtime.WithHTTPPathPattern("/velda/instances/{instance_id}/snapshot/{snapshot_name}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/DeleteSnapshot", runtime.WithHTTPPathPattern("/rest/instances/{instance_id}/snapshot/{snapshot_name}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -561,7 +561,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/ListImages", runtime.WithHTTPPathPattern("/velda/images"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/ListImages", runtime.WithHTTPPathPattern("/rest/images"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -581,7 +581,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/CreateImage", runtime.WithHTTPPathPattern("/velda/images"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/CreateImage", runtime.WithHTTPPathPattern("/rest/images"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -601,7 +601,7 @@ func RegisterInstanceServiceHandlerServer(ctx context.Context, mux *runtime.Serv
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/DeleteImage", runtime.WithHTTPPathPattern("/velda/images/{image_name}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.InstanceService/DeleteImage", runtime.WithHTTPPathPattern("/rest/images/{image_name}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -659,7 +659,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/CreateInstance", runtime.WithHTTPPathPattern("/velda/instances"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/CreateInstance", runtime.WithHTTPPathPattern("/rest/instances"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -676,7 +676,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/GetInstance", runtime.WithHTTPPathPattern("/velda/instances/{instance_id}"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/GetInstance", runtime.WithHTTPPathPattern("/rest/instances/{instance_id}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -693,7 +693,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/GetInstanceByName", runtime.WithHTTPPathPattern("/velda/instances/by_name/{instance_name}"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/GetInstanceByName", runtime.WithHTTPPathPattern("/rest/instances/by_name/{instance_name}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -710,7 +710,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/DeleteInstance", runtime.WithHTTPPathPattern("/velda/instances/{instance_id}"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/DeleteInstance", runtime.WithHTTPPathPattern("/rest/instances/{instance_id}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -727,7 +727,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/ListInstances", runtime.WithHTTPPathPattern("/velda/instances"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/ListInstances", runtime.WithHTTPPathPattern("/rest/instances"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -744,7 +744,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/CreateSnapshot", runtime.WithHTTPPathPattern("/velda/instances/{instance_id}/snapshot/{snapshot_name}"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/CreateSnapshot", runtime.WithHTTPPathPattern("/rest/instances/{instance_id}/snapshot/{snapshot_name}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -761,7 +761,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/DeleteSnapshot", runtime.WithHTTPPathPattern("/velda/instances/{instance_id}/snapshot/{snapshot_name}"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/DeleteSnapshot", runtime.WithHTTPPathPattern("/rest/instances/{instance_id}/snapshot/{snapshot_name}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -778,7 +778,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/ListImages", runtime.WithHTTPPathPattern("/velda/images"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/ListImages", runtime.WithHTTPPathPattern("/rest/images"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -795,7 +795,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/CreateImage", runtime.WithHTTPPathPattern("/velda/images"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/CreateImage", runtime.WithHTTPPathPattern("/rest/images"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -812,7 +812,7 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/DeleteImage", runtime.WithHTTPPathPattern("/velda/images/{image_name}"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.InstanceService/DeleteImage", runtime.WithHTTPPathPattern("/rest/images/{image_name}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -829,16 +829,16 @@ func RegisterInstanceServiceHandlerClient(ctx context.Context, mux *runtime.Serv
 }
 
 var (
-	pattern_InstanceService_CreateInstance_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"velda", "instances"}, ""))
-	pattern_InstanceService_GetInstance_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"velda", "instances", "instance_id"}, ""))
-	pattern_InstanceService_GetInstanceByName_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3}, []string{"velda", "instances", "by_name", "instance_name"}, ""))
-	pattern_InstanceService_DeleteInstance_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"velda", "instances", "instance_id"}, ""))
-	pattern_InstanceService_ListInstances_0     = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"velda", "instances"}, ""))
-	pattern_InstanceService_CreateSnapshot_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3, 1, 0, 4, 1, 5, 4}, []string{"velda", "instances", "instance_id", "snapshot", "snapshot_name"}, ""))
-	pattern_InstanceService_DeleteSnapshot_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3, 1, 0, 4, 1, 5, 4}, []string{"velda", "instances", "instance_id", "snapshot", "snapshot_name"}, ""))
-	pattern_InstanceService_ListImages_0        = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"velda", "images"}, ""))
-	pattern_InstanceService_CreateImage_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"velda", "images"}, ""))
-	pattern_InstanceService_DeleteImage_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"velda", "images", "image_name"}, ""))
+	pattern_InstanceService_CreateInstance_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"rest", "instances"}, ""))
+	pattern_InstanceService_GetInstance_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"rest", "instances", "instance_id"}, ""))
+	pattern_InstanceService_GetInstanceByName_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3}, []string{"rest", "instances", "by_name", "instance_name"}, ""))
+	pattern_InstanceService_DeleteInstance_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"rest", "instances", "instance_id"}, ""))
+	pattern_InstanceService_ListInstances_0     = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"rest", "instances"}, ""))
+	pattern_InstanceService_CreateSnapshot_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3, 1, 0, 4, 1, 5, 4}, []string{"rest", "instances", "instance_id", "snapshot", "snapshot_name"}, ""))
+	pattern_InstanceService_DeleteSnapshot_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2, 2, 3, 1, 0, 4, 1, 5, 4}, []string{"rest", "instances", "instance_id", "snapshot", "snapshot_name"}, ""))
+	pattern_InstanceService_ListImages_0        = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"rest", "images"}, ""))
+	pattern_InstanceService_CreateImage_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"rest", "images"}, ""))
+	pattern_InstanceService_DeleteImage_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 2}, []string{"rest", "images", "image_name"}, ""))
 )
 
 var (

@@ -20,7 +20,7 @@ message ListPoolsResponse {
 service PoolManagerService {
   rpc ListPools(ListPoolsRequest) returns (ListPoolsResponse) {
     option (google.api.http) = {
-            get: "/velda/pool"
+            get: "/rest/velda/pool"
         };
   };
 }

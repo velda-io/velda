@@ -242,7 +242,7 @@ func ProvideGrpcServer(metrics *prometheus_grpc.ServerMetrics, authInterceptor S
 
 func ProvideGrpcMux(httpHandler *http.ServeMux) *runtime.ServeMux {
 	m := runtime.NewServeMux()
-	httpHandler.Handle("/", m)
+	httpHandler.Handle("/rest/", m)
 	return m
 }
 

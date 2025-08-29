@@ -127,7 +127,7 @@ func RegisterBrokerServiceHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.BrokerService/RequestSession", runtime.WithHTTPPathPattern("/broker/v1/session"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.BrokerService/RequestSession", runtime.WithHTTPPathPattern("/rest/broker/v1/session"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -147,7 +147,7 @@ func RegisterBrokerServiceHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.BrokerService/KillSession", runtime.WithHTTPPathPattern("/broker/v1/session/kill"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.BrokerService/KillSession", runtime.WithHTTPPathPattern("/rest/broker/v1/session/kill"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -167,7 +167,7 @@ func RegisterBrokerServiceHandlerServer(ctx context.Context, mux *runtime.ServeM
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.BrokerService/ListSessions", runtime.WithHTTPPathPattern("/broker/v1/sessions"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.BrokerService/ListSessions", runtime.WithHTTPPathPattern("/rest/broker/v1/sessions"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -225,7 +225,7 @@ func RegisterBrokerServiceHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.BrokerService/RequestSession", runtime.WithHTTPPathPattern("/broker/v1/session"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.BrokerService/RequestSession", runtime.WithHTTPPathPattern("/rest/broker/v1/session"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -242,7 +242,7 @@ func RegisterBrokerServiceHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.BrokerService/KillSession", runtime.WithHTTPPathPattern("/broker/v1/session/kill"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.BrokerService/KillSession", runtime.WithHTTPPathPattern("/rest/broker/v1/session/kill"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -259,7 +259,7 @@ func RegisterBrokerServiceHandlerClient(ctx context.Context, mux *runtime.ServeM
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.BrokerService/ListSessions", runtime.WithHTTPPathPattern("/broker/v1/sessions"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.BrokerService/ListSessions", runtime.WithHTTPPathPattern("/rest/broker/v1/sessions"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -276,9 +276,9 @@ func RegisterBrokerServiceHandlerClient(ctx context.Context, mux *runtime.ServeM
 }
 
 var (
-	pattern_BrokerService_RequestSession_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"broker", "v1", "session"}, ""))
-	pattern_BrokerService_KillSession_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"broker", "v1", "session", "kill"}, ""))
-	pattern_BrokerService_ListSessions_0   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"broker", "v1", "sessions"}, ""))
+	pattern_BrokerService_RequestSession_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"rest", "broker", "v1", "session"}, ""))
+	pattern_BrokerService_KillSession_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"rest", "broker", "v1", "session", "kill"}, ""))
+	pattern_BrokerService_ListSessions_0   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"rest", "broker", "v1", "sessions"}, ""))
 )
 
 var (

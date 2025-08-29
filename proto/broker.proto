@@ -264,21 +264,21 @@ service BrokerService {
 
   rpc RequestSession(SessionRequest) returns (ExecutionStatus) {
     option (google.api.http) = {
-      post : "/broker/v1/session"
+      post : "/rest/broker/v1/session"
       body : "*"
     };
   }
 
   rpc KillSession(KillSessionRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      post : "/broker/v1/session/kill"
+      post : "/rest/broker/v1/session/kill"
       body : "*"
     };
   }
 
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse) {
     option (google.api.http) = {
-      get : "/broker/v1/sessions"
+      get : "/rest/broker/v1/sessions"
     };
   }
 }

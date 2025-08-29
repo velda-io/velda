@@ -91,64 +91,64 @@ message DeleteImageRequest {
 service InstanceService {
   rpc CreateInstance(CreateInstanceRequest) returns (Instance) {
     option (google.api.http) = {
-      put: "/velda/instances"
+      put: "/rest/instances"
     };
   }
 
   rpc GetInstance(GetInstanceRequest) returns (Instance) {
     option (google.api.http) = {
-      get: "/velda/instances/{instance_id}"
+      get: "/rest/instances/{instance_id}"
     };
   }
 
   rpc GetInstanceByName(GetInstanceByNameRequest) returns (Instance) {
     option (google.api.http) = {
-      get: "/velda/instances/by_name/{instance_name}"
+      get: "/rest/instances/by_name/{instance_name}"
     };
   }
 
   rpc DeleteInstance(DeleteInstanceRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      delete: "/velda/instances/{instance_id}"
+      delete: "/rest/instances/{instance_id}"
     };
   }
 
   rpc ListInstances(ListInstancesRequest) returns (ListInstancesResponse) {
     option (google.api.http) = {
-      get: "/velda/instances"
+      get: "/rest/instances"
     };
   }
 
   rpc CreateSnapshot(CreateSnapshotRequest)
       returns (SnapshotReference) {
     option (google.api.http) = {
-      put: "/velda/instances/{instance_id}/snapshot/{snapshot_name}"
+      put: "/rest/instances/{instance_id}/snapshot/{snapshot_name}"
       body: "*"
     };
   }
 
   rpc DeleteSnapshot(DeleteSnapshotRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      delete: "/velda/instances/{instance_id}/snapshot/{snapshot_name}"
+      delete: "/rest/instances/{instance_id}/snapshot/{snapshot_name}"
     };
   }
 
   rpc ListImages(ListImagesRequest) returns (ListImagesResponse) {
     option (google.api.http) = {
-      get: "/velda/images"
+      get: "/rest/images"
     };
   }
 
   rpc CreateImage(CreateImageRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      put: "/velda/images"
+      put: "/rest/images"
       body: "*"
     };
   }
 
   rpc DeleteImage(DeleteImageRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-      delete: "/velda/images/{image_name}"
+      delete: "/rest/images/{image_name}"
     };
   }
 }

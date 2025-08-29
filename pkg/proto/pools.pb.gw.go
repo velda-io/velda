@@ -65,7 +65,7 @@ func RegisterPoolManagerServiceHandlerServer(ctx context.Context, mux *runtime.S
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.PoolManagerService/ListPools", runtime.WithHTTPPathPattern("/velda/pool"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.PoolManagerService/ListPools", runtime.WithHTTPPathPattern("/rest/velda/pool"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -123,7 +123,7 @@ func RegisterPoolManagerServiceHandlerClient(ctx context.Context, mux *runtime.S
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/ListPools", runtime.WithHTTPPathPattern("/velda/pool"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/ListPools", runtime.WithHTTPPathPattern("/rest/velda/pool"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -140,7 +140,7 @@ func RegisterPoolManagerServiceHandlerClient(ctx context.Context, mux *runtime.S
 }
 
 var (
-	pattern_PoolManagerService_ListPools_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"velda", "pool"}, ""))
+	pattern_PoolManagerService_ListPools_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"rest", "velda", "pool"}, ""))
 )
 
 var (
