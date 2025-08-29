@@ -92,18 +92,18 @@ message LogTaskResponse {
 service TaskService {
   rpc GetTask(GetTaskRequest) returns (Task) {
     option (google.api.http) = {
-            get: "/github.com/velda-io/velda/task/info/{task_id=**}"
+            get: "/rest/task/info/{task_id=**}"
         };
   };
   rpc ListTasks(ListTasksRequest) returns (TaskPageResult) {
     option (google.api.http) = {
-            get: "/github.com/velda-io/velda/task/tasks/{parent_id=**}"
+            get: "/rest/task/tasks/{parent_id=**}"
         };
   };
 
   rpc SearchTasks(SearchTasksRequest) returns (TaskPageResult) {
     option (google.api.http) = {
-            get: "/github.com/velda-io/velda/tasks/search"
+            get: "/rest/task/search"
         };
   };
 
