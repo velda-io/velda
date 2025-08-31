@@ -99,3 +99,7 @@ func unexportNFS(path, host string) error {
 func (n *NfsExportAuth) GrantAccessToClient(ctx context.Context, session *Session, status *proto.ExecutionStatus) error {
 	return nil
 }
+
+func (n *NfsExportAuth) UpdateServerInfo(ctx context.Context, info *proto.ServerInfo) error {
+	return nil
+}

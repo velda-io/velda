@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,6 +28,7 @@ type authProvider interface {
 	RenameProfile(oldName, newName string) error
 	DeleteProfile(profile string) error
 	SshDial(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error)
+	HandleServerInfo(ctx context.Context, info *proto.ServerInfo) error
 }
 
 var (
@@ -55,6 +56,10 @@ func DeleteProfile(profile string) error {
 
 func SshConnect(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error) {
 	return theAuthProvider.SshDial(cmd, sshConn, user)
+}
+
+func HandleServerInfo(ctx context.Context, info *proto.ServerInfo) error {
+	return theAuthProvider.HandleServerInfo(ctx, info)
 }
 
 func SetAuthProvider(provider authProvider) {

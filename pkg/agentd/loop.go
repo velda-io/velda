@@ -25,6 +25,8 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"github.com/google/uuid"
 
+	"velda.io/velda"
+	"velda.io/velda/pkg/clientlib"
 	"velda.io/velda/pkg/proto"
 	agentpb "velda.io/velda/pkg/proto/agent"
 	"velda.io/velda/pkg/utils"
@@ -146,11 +148,17 @@ func (a *Agent) run(ctx context.Context) error {
 				stream.CloseSend()
 			}
 			for key := range a.sessions {
-				a.runner.Cleanup(key)
+				a.runner.Kill(key, true)
 			}
 			// Still wait until all sessions are completed
 		case resp := <-chanReq:
 			req := &proto.AgentUpdateRequest{}
+			if resp.GetServerInfo() != nil {
+				log.Printf("Server version: %s, agent version: %s", resp.GetServerInfo().Version, velda.GetVersion())
+				if err := clientlib.HandleServerInfo(ctx, resp.GetServerInfo()); err != nil {
+					log.Printf("Failed to handle server info: %v", err)
+				}
+			}
 			if resp.SessionRequest != nil {
 				session := resp.SessionRequest
 				var resp *proto.SessionInitResponse
