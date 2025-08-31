@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"velda.io/velda"
 	"velda.io/velda/pkg/db"
 	"velda.io/velda/pkg/proto"
 	"velda.io/velda/pkg/rbac"
@@ -39,6 +40,7 @@ type TaskDb interface {
 }
 
 type AuthHelper interface {
+	UpdateServerInfo(context.Context, *proto.ServerInfo) error
 	GrantAccessToAgent(context.Context, *Agent, *Session) error
 	RevokeAccessToAgent(context.Context, *Agent, *Session) error
 	GrantAccessToClient(context.Context, *Session, *proto.ExecutionStatus) error
@@ -109,6 +111,15 @@ func (s *server) AgentUpdate(stream proto.BrokerService_AgentUpdateServer) error
 			continue
 		}
 		log.Printf("Agent %s: Reconnected session %s", agent.id, session.Key())
+	}
+	serverInfo := &proto.ServerInfo{
+		Version: velda.GetVersion(),
+	}
+	if err := s.UpdateServerInfo(s.ctx, serverInfo); err != nil {
+		return err
+	}
+	if err := stream.Send(&proto.AgentUpdateResponse{ServerInfo: serverInfo}); err != nil {
+		return err
 	}
 	return agent.Run(stream, s.ctx)
 }

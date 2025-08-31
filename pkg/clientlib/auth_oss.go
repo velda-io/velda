@@ -91,6 +91,10 @@ func (o OssAuthProvider) SshDial(cmd *cobra.Command, sshConn *proto.ExecutionSta
 	return &SshClient{Client: client, ShutdownMessage: ""}, nil
 }
 
+func (o OssAuthProvider) HandleServerInfo(ctx context.Context, info *proto.ServerInfo) error {
+	return nil
+}
+
 func unaryAuthInterceptor(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 	if IsInSession() {
 		sessionInfo := fmt.Sprintf("%d:%s:%s", agentConfig.Instance, agentConfig.Session, agentConfig.TaskId)

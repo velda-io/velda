@@ -183,7 +183,14 @@ message KillSessionAgentRequest {
   bool force = 3;
 }
 
+message ServerInfo {
+  string version = 1;
+
+  reserved 64 to 128;
+}
+
 message AgentUpdateResponse {
+  ServerInfo server_info = 3;
   SessionRequest session_request = 1;
   KillSessionAgentRequest kill_session_request = 2;
 }

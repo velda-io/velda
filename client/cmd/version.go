@@ -30,6 +30,7 @@ var versionCmd = &cobra.Command{
 			version = "dev"
 		}
 		verbose, _ := cmd.Flags().GetBool("verbose")
+		cmd.SetOut(cmd.OutOrStdout())
 		if verbose {
 			cmd.Println("version:", version)
 			buildInfo, ok := debug.ReadBuildInfo()
