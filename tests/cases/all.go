@@ -13,7 +13,12 @@
 // limitations under the License.
 package cases
 
-import "testing"
+import (
+	"flag"
+	"testing"
+)
+
+var runSlowTests = flag.Bool("run-slow-tests", false, "Run slow tests")
 
 func RunAllTests(t *testing.T, runner Runner) {
 	runner.Setup(t)
