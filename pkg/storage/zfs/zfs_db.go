@@ -16,6 +16,7 @@ package zfs
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,6 +129,7 @@ func (c *createCommitter) Commit() error {
 	if err != nil {
 		return err
 	}
+	log.Printf("Created instance %d as %s", c.id, c.name)
 	c.committed = true
 	return nil
 }

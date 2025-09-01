@@ -16,6 +16,7 @@ package cases
 import (
 	"log"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -117,5 +118,27 @@ func testUbuntu(t *testing.T, r Runner) {
 
 		require.NoError(t, runVelda("kill-session", "--instance", instanceName, "-s", "victim2", "--force"))
 		<-complete
+	})
+
+	// The test is to repro an issue where cloning disk would erase the transient entry in exportfs.
+	// Note it currently takes over 30s to run due to NFS attribute caching.
+	t.Run("CloneWhileRunning", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
+		if !*runSlowTests {
+			t.Skip("Skipping slow test")
+		}
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		// Verify the image exists in the list
+		go func() {
+			require.NoError(t, runCommand("sh", "-c", "touch start; while ! [ -f testfile3 ]; do sleep 0.1; done"))
+			wg.Done()
+		}()
+		require.NoError(t, runCommand("sh", "-c", "while [ -f start ]; do sleep 0.1; done"))
+		require.NoError(t, runVelda("instance", "create", "-f", instanceName, instanceName+"-clone"))
+		assert.NoError(t, runCommand("touch", "testfile3"), "Failed to read test file")
+		wg.Wait()
 	})
 }
