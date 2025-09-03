@@ -93,6 +93,11 @@ jobs:
           name: release-bin
           path: ./bin
 
+      - name: Upload to corresponding buckets
+        run: |
+          gsutil cp ./bin/velda-${{ needs.build-package.outputs.version }}-linux-amd64 gs://velda-release/velda-${{ needs.build-package.outputs.version }}-linux-amd64
+          aws s3 cp ./bin/velda-${{ needs.build-package.outputs.version }}-linux-amd64 s3://velda-release/velda-${{ needs.build-package.outputs.version }}-linux-amd64
+
       - name: Install packer
         uses: hashicorp/setup-packer@v3
         with:
