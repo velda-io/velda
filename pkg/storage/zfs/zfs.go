@@ -21,6 +21,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"velda.io/velda/pkg/storage"
@@ -105,12 +106,62 @@ func (z *Zfs) CreateInstanceFromImage(ctx context.Context, instanceId int64, ima
 }
 
 func (z *Zfs) DeleteInstance(ctx context.Context, instanceId int64) error {
-	return z.runCommand(
-		ctx,
-		"zfs",
-		"destroy",
-		"-r",
-		fmt.Sprintf("%s/%d", z.pool, instanceId))
+	var errDestroy error
+	target := fmt.Sprintf("%s/%d", z.pool, instanceId)
+	for retry := 0; retry < 3; retry++ {
+		errDestroy = z.runCommand(
+			ctx,
+			"zfs",
+			"destroy",
+			"-rf",
+			target)
+		if errDestroy == nil {
+			return nil
+		}
+		if strings.Contains(errDestroy.Error(), "filesystem has dependent clones") {
+			// If the instance has dependent clones, we need to promote them to be the primary
+			// Search for clones by check "origin" property
+			instanceList, err := z.runCommandGetOutput(
+				ctx,
+				"zfs",
+				"list",
+				"-d", "1",
+				"-H",
+				"-o",
+				"name,origin",
+				fmt.Sprintf("%s", z.pool))
+			if err != nil {
+				return fmt.Errorf("failed to list ZFS instances: %w", err)
+			}
+			prefix := fmt.Sprintf("%s/%d@", z.pool, instanceId)
+			for _, line := range strings.Split(instanceList, "\n") {
+				// Each line is in the format "name origin"
+				parts := strings.Fields(line)
+				if len(parts) != 2 {
+					continue
+				}
+				name := parts[0]
+				origin := parts[1]
+				if strings.HasPrefix(origin, prefix) {
+					// Promote the clone
+					log.Printf("Promoting clone %s because %d is deleting", name, instanceId)
+					if err := z.runCommand(
+						ctx,
+						"zfs",
+						"promote",
+						name); err != nil {
+						return fmt.Errorf("failed to promote clone %s: %w", name, err)
+					}
+					break
+				}
+			}
+		} else if strings.Contains(errDestroy.Error(), "pool or dataset is busy") {
+			// If the dataset is busy, we need to wait for it to become idle
+			log.Printf("Dataset %d is busy, unmount & waiting...", instanceId)
+			time.Sleep(10 * time.Second)
+		}
+	}
+	return errDestroy
 }
 
 func (z *Zfs) CreateSnapshot(ctx context.Context, instanceId int64, snapshotName string) error {
