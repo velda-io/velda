@@ -4,3 +4,5 @@ ami_regions = [
     "us-west-1",
     "us-west-2",
 ]
+
+docker_username="veldaio"
