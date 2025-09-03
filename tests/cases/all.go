@@ -28,6 +28,9 @@ func RunAllTests(t *testing.T, runner Runner) {
 	t.Run("ImagesCommand", func(t *testing.T) {
 		testImagesCommand(t, runner)
 	})
+	t.Run("InstanceClone", func(t *testing.T) {
+		testInstanceClone(t, runner)
+	})
 	t.Run("Ubuntu", func(t *testing.T) {
 		if !runner.Supports("ubuntu") {
 			t.Skip("Ubuntu tests are not supported by this runner")

@@ -70,6 +70,7 @@ type Feature string
 
 const (
 	FeatureImage      Feature = "image"
+	FeatureSnapshot   Feature = "snapshot"
 	FeatureMultiAgent Feature = "multi-agent"
 )
 

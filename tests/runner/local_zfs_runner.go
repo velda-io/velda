@@ -64,7 +64,7 @@ func (r *LocalZfsRunner) Setup(t *testing.T) {
 	t.Cleanup(func() {
 		// ZFS volume stays busy for a while, so we need to run a command to destroy it after some time.
 		// This is a workaround to avoid the dataset being busy immediately after the test.
-		cmd := exec.Command("sh", "-c", fmt.Sprintf("sleep 120 && sudo zfs destroy -r %s", suiteName))
+		cmd := exec.Command("sh", "-c", fmt.Sprintf("sleep 120 && sudo zfs destroy -rf %s", suiteName))
 		if err := cmd.Start(); err != nil {
 			t.Errorf("Failed to start detached process to destroy ZFS dataset %s: %v", suiteName, err)
 		}
@@ -209,7 +209,7 @@ func (r *LocalZfsRunner) CreateTestInstance(t *testing.T, namePrefix string, ima
 	if image != "" {
 		args = append(args, "--image", image)
 	}
-	require.NoError(t, exec.Command(r.veldaBin, args...).Run(),
-		"Failed to create test instance")
+	o, e := exec.Command(r.veldaBin, args...).CombinedOutput()
+	require.NoError(t, e, "Failed to create test instance: %s", o)
 	return instanceName
 }

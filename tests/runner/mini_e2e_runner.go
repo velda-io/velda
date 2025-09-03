@@ -79,6 +79,8 @@ func (r *MiniE2ERunner) Supports(feature cases.Feature) bool {
 	switch feature {
 	case cases.FeatureImage:
 		return false
+	case cases.FeatureSnapshot:
+		return false
 	case cases.FeatureMultiAgent:
 		return false
 	}
