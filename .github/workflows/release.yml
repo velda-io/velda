@@ -93,6 +93,11 @@ jobs:
           name: release-bin
           path: ./bin
 
+      - name: Upload to corresponding buckets
+        run: |
+          gsutil cp ./bin/velda-${{ needs.build-package.outputs.version }}-linux-amd64 gs://velda-release/velda-${{ needs.build-package.outputs.version }}-linux-amd64
+          aws s3 cp ./bin/velda-${{ needs.build-package.outputs.version }}-linux-amd64 s3://velda-release/velda-${{ needs.build-package.outputs.version }}-linux-amd64
+
       - name: Install packer
         uses: hashicorp/setup-packer@v3
         with:
@@ -102,7 +107,7 @@ jobs:
         run: packer init packer
 
       - name: Build images
-        run: exec packer build -var="version=${{ needs.build-package.outputs.version }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" -var-file=packer/prod.pkrvars.hcl packer
+        run: exec packer build -var="version=${{ needs.build-package.outputs.version }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" -var="docker_password=${{ secrets.DOCKER_PASSWORD }}" -var-file=packer/prod.pkrvars.hcl packer
 
       - name: Update permissions
         run: make -C packer update_permission
