@@ -19,11 +19,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
 	"path"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 
 	pb "google.golang.org/protobuf/proto"
@@ -69,10 +66,8 @@ ORDER BY create_time DESC
 LIMIT ?`
 
 type SqliteDatabase struct {
-	db *sql.DB
-	// In-memory pool notifications
-	poolMutex sync.Mutex
-	poolChans map[string]chan struct{}
+	db     *sql.DB
+	notifs chan struct{}
 }
 
 func NewSqliteDatabase(dbPath string) (*SqliteDatabase, error) {
@@ -91,8 +86,8 @@ func NewSqliteDatabase(dbPath string) (*SqliteDatabase, error) {
 	}
 
 	sqliteDB := &SqliteDatabase{
-		db:        db,
-		poolChans: make(map[string]chan struct{}),
+		db:     db,
+		notifs: make(chan struct{}, 1),
 	}
 
 	if err := sqliteDB.Init(); err != nil {
@@ -398,7 +393,7 @@ ON CONFLICT(parent_id, task_id) DO NOTHING
 
 	// Mark pool for polling if task is ready to be queued
 	if status == "QUEUEING" && upstreamCnt == 0 {
-		err = s.markPoolForPolling(ctx, tx, session.Pool)
+		err = s.notifyPollReady()
 		if err != nil {
 			log.Printf("Warning: failed to mark pool for polling: %v", err)
 		}
@@ -546,17 +541,9 @@ SELECT status FROM tasks WHERE parent_id = ? AND task_id = ?`,
 	return triggerMet, nil
 }
 
-func (s *SqliteDatabase) markPoolForPolling(ctx context.Context, tx *sql.Tx, pool string) error {
-	s.poolMutex.Lock()
-	defer s.poolMutex.Unlock()
-	// ensure channel exists and notify non-blocking
-	ch, ok := s.poolChans[pool]
-	if !ok {
-		ch = make(chan struct{}, 1)
-		s.poolChans[pool] = ch
-	}
+func (s *SqliteDatabase) notifyPollReady() error {
 	select {
-	case ch <- struct{}{}:
+	case s.notifs <- struct{}{}:
 	default:
 	}
 	return nil
@@ -698,7 +685,7 @@ WHERE status = 'QUEUEING' AND pending_upstreams = 0`)
 			for rows.Next() {
 				var pool string
 				if err := rows.Scan(&pool); err == nil {
-					s.markPoolForPolling(ctx, tx, pool)
+					s.notifyPollReady()
 				}
 			}
 		}
@@ -760,7 +747,7 @@ WHERE parent_id = ? AND status NOT IN ('COMPLETED')`, cleanParentId+"/").Scan(&f
 	return nil
 }
 
-func (s *SqliteDatabase) pollTasksOnce(ctx context.Context, pool string, leaserIdentity string) ([]*TaskWithUser, error) {
+func (s *SqliteDatabase) pollTasksOnce(ctx context.Context, leaserIdentity string) ([]*TaskWithUser, error) {
 	options := columnOptions{hasPayload: true}
 
 	// SQLite doesn't support UPDATE...FROM with complex joins like PostgreSQL
@@ -771,14 +758,14 @@ WITH available_tasks AS (
 		   create_time, start_time, finish_time, resolve_time, 
 		   completed_children, total_children, status, pending_upstreams, payload
 	FROM tasks 
-	WHERE status = 'QUEUEING' AND pool = ? AND pending_upstreams = 0
+	WHERE status = 'QUEUEING' AND pending_upstreams = 0
 	ORDER BY priority DESC, create_time ASC
 	LIMIT 10
 )
 UPDATE tasks 
 SET status = 'LEASED', lease_by = ?
 WHERE (parent_id, task_id) IN (SELECT parent_id, task_id FROM available_tasks)
-RETURNING `+taskColumns(options), pool, leaserIdentity)
+RETURNING `+taskColumns(options), leaserIdentity)
 
 	if err != nil {
 		return nil, err
@@ -802,7 +789,6 @@ RETURNING `+taskColumns(options), pool, leaserIdentity)
 // Task polling with trigger-based and interval-based mechanisms
 func (s *SqliteDatabase) PollTasks(
 	ctx context.Context,
-	pool string,
 	leaserIdentity string,
 	callback func(leaserIdentity string, task *TaskWithUser) error) error {
 
@@ -812,24 +798,15 @@ func (s *SqliteDatabase) PollTasks(
 	pollTicker := time.NewTicker(pollInterval)
 	defer pollTicker.Stop()
 
-	// ensure pool channel exists
-	s.poolMutex.Lock()
-	ch, ok := s.poolChans[pool]
-	if !ok {
-		ch = make(chan struct{}, 1)
-		s.poolChans[pool] = ch
-	}
-	s.poolMutex.Unlock()
-
 	// Helper function to poll and process tasks
 	pollAndProcess := func(reason string) error {
-		tasks, err := s.pollTasksOnce(ctx, pool, leaserIdentity)
+		tasks, err := s.pollTasksOnce(ctx, leaserIdentity)
 		if err != nil {
 			return fmt.Errorf("failed to poll tasks (%s): %w", reason, err)
 		}
 
 		if len(tasks) > 0 {
-			log.Printf("Found %d tasks to process (%s) for pool %s", len(tasks), reason, pool)
+			log.Printf("Found %d tasks to process (%s)", len(tasks), reason)
 		}
 
 		for _, task := range tasks {
@@ -851,11 +828,10 @@ func (s *SqliteDatabase) PollTasks(
 		case <-ctx.Done():
 			return ctx.Err()
 
-		case <-ch:
+		case <-s.notifs:
 			// triggered by markPoolForPolling
 			if err := pollAndProcess("triggered"); err != nil {
-				log.Printf("Error in triggered poll: %v", err)
-				syscall.Kill(os.Getpid(), syscall.SIGABRT)
+				return fmt.Errorf("error in triggered poll: %w", err)
 			}
 
 		case <-pollTicker.C:
@@ -931,7 +907,7 @@ RETURNING pool`, cutoffTime)
 
 		// Mark affected pools for polling
 		for pool := range poolsToNotify {
-			if err := s.markPoolForPolling(ctx, nil, pool); err != nil {
+			if err := s.notifyPollReady(); err != nil {
 				log.Printf("Warning: failed to mark pool %s for polling: %v", pool, err)
 			}
 		}

@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,14 +19,13 @@ import (
 	"time"
 
 	"velda.io/velda/pkg/db"
-	"velda.io/velda/pkg/rbac"
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/rbac"
 )
 
 type TaskQueueDb interface {
 	PollTasks(
 		ctx context.Context,
-		pool string,
 		leaserIdentity string,
 		callback func(leaserIdentity string, task *db.TaskWithUser) error) error
 	RenewLeaser(ctx context.Context, leaserIdentity string, now time.Time) error
@@ -52,13 +51,14 @@ func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db Ta
 	return result
 }
 
-func (t *TaskTracker) PollTasks(ctx context.Context, pool string) error {
-	scheduler, err := t.scheduler.GetPool(pool)
-	if err != nil {
-		return err
-	}
-	err = t.db.PollTasks(ctx, pool, t.identity,
+func (t *TaskTracker) PollTasks(ctx context.Context) error {
+	err := t.db.PollTasks(ctx, t.identity,
 		func(_ string, task *db.TaskWithUser) error {
+			pool := task.Task.Pool
+			scheduler, err := t.scheduler.GetPool(pool)
+			if err != nil {
+				return err
+			}
 			req := &proto.SessionRequest{
 				Workload:   task.Workload,
 				TaskId:     task.Id,

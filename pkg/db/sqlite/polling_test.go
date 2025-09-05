@@ -75,7 +75,7 @@ func TestPollTasks(t *testing.T) {
 	pollDone := make(chan bool)
 	go func() {
 		defer close(pollDone)
-		database.PollTasks(pollCtx, "test-pool", "test-leaser", callback)
+		database.PollTasks(pollCtx, "test-leaser", callback)
 	}()
 
 	// Wait a moment for polling to start and process the task
@@ -96,7 +96,7 @@ func TestPollTasks(t *testing.T) {
 	mu.Unlock()
 
 	// Verify the task is now leased by checking we can't poll it again
-	tasks, err := database.pollTasksOnce(ctx, "test-pool", "another-leaser")
+	tasks, err := database.pollTasksOnce(ctx, "another-leaser")
 	assert.NoError(t, err)
 	assert.Len(t, tasks, 0, "Task should not be available for polling again")
 }
@@ -142,7 +142,7 @@ func TestPollTasksWithDependencies(t *testing.T) {
 	assert.Equal(t, 1, upstreamCount, "Downstream task should have 1 dependency")
 
 	// Initially, only upstream task should be available for polling
-	tasks, err := database.pollTasksOnce(ctx, "test-pool", "test-leaser")
+	tasks, err := database.pollTasksOnce(ctx, "test-leaser")
 	assert.NoError(t, err, "Failed to poll tasks")
 	assert.Len(t, tasks, 1, "Should only have upstream task available")
 	assert.Equal(t, "test-job/upstream", tasks[0].Task.Id)
@@ -160,7 +160,7 @@ func TestPollTasksWithDependencies(t *testing.T) {
 	assert.NoError(t, err, "Failed to update upstream task")
 
 	// Now downstream task should be available for polling
-	tasks, err = database.pollTasksOnce(ctx, "test-pool", "test-leaser")
+	tasks, err = database.pollTasksOnce(ctx, "test-leaser")
 	assert.NoError(t, err, "Failed to poll tasks after upstream completion")
 	assert.Len(t, tasks, 1, "Should have downstream task available")
 	assert.Equal(t, "test-job/downstream", tasks[0].Task.Id)

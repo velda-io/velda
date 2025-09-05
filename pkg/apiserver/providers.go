@@ -175,14 +175,12 @@ func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler 
 	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId)
 
 	// Start task trackers for each pool
-	for _, pool := range config.GetAgentPools() {
-		go func(poolName string) {
-			err := tracker.PollTasks(ctx, poolName)
-			if !errors.Is(err, context.Canceled) {
-				log.Printf("Task tracker for pool %s exited: %v", poolName, err)
-			}
-		}(pool.Name)
-	}
+	go func() {
+		err := tracker.PollTasks(ctx)
+		if !errors.Is(err, context.Canceled) {
+			log.Printf("Task tracker exited: %v", err)
+		}
+	}()
 	return tracker
 }
 
