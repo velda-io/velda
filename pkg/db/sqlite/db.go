@@ -393,7 +393,7 @@ ON CONFLICT(parent_id, task_id) DO NOTHING
 
 	// Mark pool for polling if task is ready to be queued
 	if status == "QUEUEING" && upstreamCnt == 0 {
-		err = s.markPoolForPolling(ctx, tx, session.Pool)
+		err = s.notifyPollReady()
 		if err != nil {
 			log.Printf("Warning: failed to mark pool for polling: %v", err)
 		}
@@ -541,7 +541,7 @@ SELECT status FROM tasks WHERE parent_id = ? AND task_id = ?`,
 	return triggerMet, nil
 }
 
-func (s *SqliteDatabase) markPoolForPolling(ctx context.Context, tx *sql.Tx, pool string) error {
+func (s *SqliteDatabase) notifyPollReady() error {
 	select {
 	case s.notifs <- struct{}{}:
 	default:
@@ -685,7 +685,7 @@ WHERE status = 'QUEUEING' AND pending_upstreams = 0`)
 			for rows.Next() {
 				var pool string
 				if err := rows.Scan(&pool); err == nil {
-					s.markPoolForPolling(ctx, tx, pool)
+					s.notifyPollReady()
 				}
 			}
 		}
@@ -907,7 +907,7 @@ RETURNING pool`, cutoffTime)
 
 		// Mark affected pools for polling
 		for pool := range poolsToNotify {
-			if err := s.markPoolForPolling(ctx, nil, pool); err != nil {
+			if err := s.notifyPollReady(); err != nil {
 				log.Printf("Warning: failed to mark pool %s for polling: %v", pool, err)
 			}
 		}
