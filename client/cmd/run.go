@@ -428,7 +428,7 @@ func init() {
 	runCmd.Flags().StringSlice("after-success", nil, "For batch task, run it after other tasks finished successfully (return 0)")
 	runCmd.Flags().StringSlice("after-fail", nil, "For batch task, run it after other tasks are failed")
 	runCmd.Flags().StringSliceP("labels", "l", nil, "Labels for the task")
-	runCmd.Flags().Int32P("total-shards", "N", 0, "Total number of shards to run. Each shard will have environment variable VELDA_CURRENT_SHARD & VELDA_TOTAL_SHARDS set. Batch job only. Implies Gang scheduling and all shards will always start at the same time.")
+	runCmd.Flags().Int32P("total-shards", "N", 0, "Total number of shards to run. Each shard will have environment variable VELDA_SHARD_ID & VELDA_TOTAL_SHARDS set. Batch job only. Implies Gang scheduling and all shards will always start at the same time.")
 	runCmd.Flags().Duration("keep-alive-time", 0, "How long to keep the session alive after all connections are closed. Default to 0, which means no keep-alive.")
 	runCmd.Flags().SetInterspersed(false)
 }
