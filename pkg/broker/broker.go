@@ -158,6 +158,9 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 			req.Labels = append(req.Labels, "job")
 		}
 		req.Labels = append(req.Labels, s.permissions.SearchKeys(ctx)...)
+		if req.Workload.TotalShards > 0 {
+			req.Workload.ShardIndex = -1
+		}
 
 		taskid, _, err := s.db.CreateTask(ctx, req)
 		if err != nil {

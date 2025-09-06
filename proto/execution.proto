@@ -40,6 +40,24 @@ message Workload {
   uint32 uid = 6;
   uint32 gid = 7;
   repeated uint32 groups = 8;
+
+  // For multi-shard jobs, these fields are used to specify the shard
+  // configuration.
+  
+  // Total number of shards.
+  int32 total_shards = 10;
+  enum ShardScheduling {
+    // Default to standard
+    SHARD_SCHEDULING_UNSPECIFIED = 0;
+    // Each shard is scheduled independently.
+    SHARD_SCHEDULING_STANDARD = 1;
+    // All shards are scheduled together.
+    SHARD_SCHEDULING_GANG = 2;
+  }
+  ShardScheduling shard_scheduling = 11;
+  // 0-based index of the current shard.
+  // -1 is used for parent group.
+  int32 shard_index = 12;
 }
 
 message BatchTaskResult {

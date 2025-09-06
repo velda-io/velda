@@ -334,6 +334,7 @@ func getWorkload(cmd *cobra.Command, args []string) (*proto.Workload, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Error finding command path: %v", err)
 	}
+	shards, _ := cmd.Flags().GetInt32("total-shards")
 
 	return &proto.Workload{
 		Command:     command,
@@ -345,6 +346,7 @@ func getWorkload(cmd *cobra.Command, args []string) (*proto.Workload, error) {
 		Uid:         uint32(uid),
 		Gid:         uint32(gid),
 		Groups:      groupsUint32,
+		TotalShards: shards,
 	}, nil
 }
 
@@ -411,7 +413,7 @@ func init() {
 	runCmd.Flags().String("tty", "auto", "TTy mode. auto|yes|no. Default to auto, will be based on input.")
 	runCmd.Flags().BoolP("noinput", "I", false, "Don't take input from stdin. Only used with a command.")
 	runCmd.Flags().Bool("shell", false, "Use shell")
-	runCmd.Flags().Bool("batch", false, "Batch mode. Return immediately")
+	runCmd.Flags().Bool("batch", false, "Batch mode. Queue the job, and return immediately")
 	runCmd.Flags().Bool("new-session", false, "Always create a new session")
 	runCmd.Flags().Bool("keep-alive", false, "Keep the session alive after all processes exits even if all connections are closed.")
 	runCmd.Flags().BoolP("quiet", "q", false, "Suppress all non-error loggings.")
@@ -426,6 +428,7 @@ func init() {
 	runCmd.Flags().StringSlice("after-success", nil, "For batch task, run it after other tasks finished successfully (return 0)")
 	runCmd.Flags().StringSlice("after-fail", nil, "For batch task, run it after other tasks are failed")
 	runCmd.Flags().StringSliceP("labels", "l", nil, "Labels for the task")
+	runCmd.Flags().Int32P("total-shards", "N", 0, "Total number of shards to run. Each shard will have environment variable VELDA_CURRENT_SHARD & VELDA_TOTAL_SHARDS set. Batch job only. Implies Gang scheduling and all shards will always start at the same time.")
 	runCmd.Flags().Duration("keep-alive-time", 0, "How long to keep the session alive after all connections are closed. Default to 0, which means no keep-alive.")
 	runCmd.Flags().SetInterspersed(false)
 }

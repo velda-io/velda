@@ -14,6 +14,7 @@
 package cases
 
 import (
+	"log"
 	"strings"
 	"testing"
 	"time"
@@ -107,6 +108,37 @@ vbatch ./script_rec.sh testfile_rec
 				return false
 			}
 			assert.Equal(t, "COMPLETED\n", output)
+			return true
+		}, 30*time.Second, 1000*time.Millisecond)
+	})
+	t.Run("Sharded", func(t *testing.T) {
+		// Setup test scripts
+		require.NoError(t, runCommand("sh", "-c", `
+cat << EOF > script.sh
+#!/bin/sh
+echo \${VELDA_SHARD_ID}/\${VELDA_TOTAL_SHARDS} > \$1.\${VELDA_SHARD_ID}
+EOF
+chmod +x script.sh
+vbatch -N 2 ./script.sh testfile_sharded
+`))
+
+		// Wait until the job is finished
+		assert.Eventually(t, func() bool {
+			output, err := runCommandGetOutput("cat", "testfile_sharded.0")
+			if err != nil {
+				log.Printf("%v", err)
+				return false
+			}
+			assert.Equal(t, "0/2\n", output)
+			return true
+		}, 30*time.Second, 1000*time.Millisecond)
+		// Wait until the job is finished
+		assert.Eventually(t, func() bool {
+			output, err := runCommandGetOutput("cat", "testfile_sharded.1")
+			if err != nil {
+				return false
+			}
+			assert.Equal(t, "1/2\n", output)
 			return true
 		}, 30*time.Second, 1000*time.Millisecond)
 	})
