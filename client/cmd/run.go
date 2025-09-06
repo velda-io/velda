@@ -335,18 +335,24 @@ func getWorkload(cmd *cobra.Command, args []string) (*proto.Workload, error) {
 		return nil, fmt.Errorf("Error finding command path: %v", err)
 	}
 	shards, _ := cmd.Flags().GetInt32("total-shards")
+	gang, _ := cmd.Flags().GetBool("gang")
+	shardMode := proto.Workload_SHARD_SCHEDULING_UNSPECIFIED
+	if gang {
+		shardMode = proto.Workload_SHARD_SCHEDULING_GANG
+	}
 
 	return &proto.Workload{
-		Command:     command,
-		CommandPath: commandPath,
-		Args:        argv,
-		WorkingDir:  cwd,
-		Environs:    environs,
-		Shell:       shell,
-		Uid:         uint32(uid),
-		Gid:         uint32(gid),
-		Groups:      groupsUint32,
-		TotalShards: shards,
+		Command:         command,
+		CommandPath:     commandPath,
+		Args:            argv,
+		WorkingDir:      cwd,
+		Environs:        environs,
+		Shell:           shell,
+		Uid:             uint32(uid),
+		Gid:             uint32(gid),
+		Groups:          groupsUint32,
+		TotalShards:     shards,
+		ShardScheduling: shardMode,
 	}, nil
 }
 
@@ -428,7 +434,8 @@ func init() {
 	runCmd.Flags().StringSlice("after-success", nil, "For batch task, run it after other tasks finished successfully (return 0)")
 	runCmd.Flags().StringSlice("after-fail", nil, "For batch task, run it after other tasks are failed")
 	runCmd.Flags().StringSliceP("labels", "l", nil, "Labels for the task")
-	runCmd.Flags().Int32P("total-shards", "N", 0, "Total number of shards to run. Each shard will have environment variable VELDA_SHARD_ID & VELDA_TOTAL_SHARDS set. Batch job only. Implies Gang scheduling and all shards will always start at the same time.")
+	runCmd.Flags().Int32P("total-shards", "N", 0, "Total number of shards to run. Each shard will have environment variable VELDA_SHARD_ID & VELDA_TOTAL_SHARDS set. Batch job only.")
+	runCmd.Flags().Bool("gang", false, "Enable gang scheduling for the task. Ignored if total shard is 0")
 	runCmd.Flags().Duration("keep-alive-time", 0, "How long to keep the session alive after all connections are closed. Default to 0, which means no keep-alive.")
 	runCmd.Flags().SetInterspersed(false)
 }

@@ -36,9 +36,10 @@ type agentDelegate interface {
 var ErrorFailedToStartSession = errors.New("Failed to start session, check agent logs")
 
 type SessionRequest struct {
-	session *Session
-	ctx     context.Context
-	accept  bool
+	session          *Session
+	ctx              context.Context
+	accept           bool
+	holdResourceOnly bool
 }
 
 type AgentStatusResponse struct {
@@ -153,6 +154,7 @@ func (a *Agent) Run(
 			a.stopping = true
 		}
 	}
+	// Shut-down requested by autoscaler.
 	shutdownRequested := false
 
 	for !a.stopping || a.receiving {
@@ -252,13 +254,20 @@ func (a *Agent) Run(
 			}
 			req := reqData.session
 
+			_, ok := a.mySessions[req.Key()]
 			a.mySessions[req.Key()] = req
 			if a.slots > len(a.mySessions) {
 				a.receiving = true
 				a.scheduler.AddAgent(a)
 			}
 
-			poolManager.MarkBusy(a.id, a.slots-len(a.mySessions))
+			if !ok {
+				poolManager.MarkBusy(a.id, a.slots-len(a.mySessions))
+			}
+			if reqData.holdResourceOnly {
+				log.Printf("Holding resources for session %s on agent %s", req, a.id)
+				continue
+			}
 			log.Printf("Sending session %s to agent %s", req, a.id)
 			resChan <- func() {
 				var err error

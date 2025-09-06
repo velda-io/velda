@@ -17,6 +17,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path"
+	"sync"
 	"time"
 
 	pb "google.golang.org/protobuf/proto"
@@ -42,6 +44,8 @@ type TaskTracker struct {
 
 	db       TaskQueueDb
 	identity string
+	gangMu   sync.Mutex
+	gangs    map[string]*GangCoordinator
 }
 
 func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db TaskQueueDb, identity string) *TaskTracker {
@@ -50,11 +54,27 @@ func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db Ta
 		sessions:  sessions,
 		db:        db,
 		identity:  identity,
+		gangs:     make(map[string]*GangCoordinator),
 	}
 	go result.renewLeaser(schedulerSet.ctx)
 	return result
 }
 
+func (t *TaskTracker) getOrCreateGang(id string, desired int) *GangCoordinator {
+	t.gangMu.Lock()
+	defer t.gangMu.Unlock()
+	gang, ok := t.gangs[id]
+	if !ok {
+		gang = NewGangCoordinator(desired + 1)
+		t.gangs[id] = gang
+		gang.Notify(-1, func() {
+			t.gangMu.Lock()
+			defer t.gangMu.Unlock()
+			delete(t.gangs, id)
+		})
+	}
+	return gang
+}
 func (t *TaskTracker) PollTasks(ctx context.Context) error {
 	err := t.db.PollTasks(ctx, t.identity,
 		func(_ string, task *db.TaskWithUser) error {
@@ -93,6 +113,11 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 				return nil
 			}
 			schedCtx := rbac.ContextWithUser(ctx, task.User)
+			if task.Task.Workload.TotalShards > 0 && task.Task.Workload.ShardScheduling == proto.Workload_SHARD_SCHEDULING_GANG {
+				parentTaskId := path.Dir(task.Id)
+				gang := t.getOrCreateGang(parentTaskId, int(task.Task.Workload.TotalShards))
+				session.SetGang(gang)
+			}
 			go session.Schedule(schedCtx)
 			return nil
 		})
