@@ -15,8 +15,11 @@ package broker
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
+
+	pb "google.golang.org/protobuf/proto"
 
 	"velda.io/velda/pkg/db"
 	"velda.io/velda/pkg/proto"
@@ -28,6 +31,7 @@ type TaskQueueDb interface {
 		ctx context.Context,
 		leaserIdentity string,
 		callback func(leaserIdentity string, task *db.TaskWithUser) error) error
+	CreateTask(ctx context.Context, session *proto.SessionRequest) (string, int, error)
 	RenewLeaser(ctx context.Context, leaserIdentity string, now time.Time) error
 	ReconnectTask(ctx context.Context, taskId string, leaserIdentity string) error
 }
@@ -55,10 +59,6 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 	err := t.db.PollTasks(ctx, t.identity,
 		func(_ string, task *db.TaskWithUser) error {
 			pool := task.Task.Pool
-			scheduler, err := t.scheduler.GetPool(pool)
-			if err != nil {
-				return err
-			}
 			req := &proto.SessionRequest{
 				Workload:   task.Workload,
 				TaskId:     task.Id,
@@ -66,8 +66,27 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 				InstanceId: task.InstanceId,
 				Priority:   task.Priority,
 			}
+			if task.Task.Workload.TotalShards > 0 && task.Task.Workload.ShardIndex < 0 {
+				for i := 0; i < int(task.Task.Workload.TotalShards); i++ {
+					taskShard := pb.Clone(req).(*proto.SessionRequest)
+					taskShard.Workload.ShardIndex = int32(i)
+					taskShard.Workload.Environs = append(taskShard.Workload.Environs,
+						fmt.Sprintf("VELDA_SHARD_ID=%d", i),
+						fmt.Sprintf("VELDA_TOTAL_SHARDS=%d", task.Task.Workload.TotalShards))
+					taskShard.TaskId = fmt.Sprintf("%s/%d", taskShard.TaskId, i)
+					if _, _, err := t.db.CreateTask(ctx, taskShard); err != nil {
+						return err
+					}
+				}
+				// TODO: Handle gang scheduling.
+				return nil
+			}
 			// Always assume normal user for batch tasks.
 
+			scheduler, err := t.scheduler.GetPool(pool)
+			if err != nil {
+				return err
+			}
 			session, err := t.sessions.AddSession(req, scheduler)
 			if err != nil {
 				log.Printf("Failed to add session for task %v: %v", task.Id, err)
