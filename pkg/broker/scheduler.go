@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -82,24 +82,35 @@ type Scheduler struct {
 	sessions    treeset.Set
 	ctx         context.Context
 
-	addAgent      chan *Agent
-	removeAgent   chan *Agent
-	addSession    chan *Session
-	removeSession chan *Session
+	addAgent    chan *Agent
+	removeAgent chan *Agent
+	// sessions are stored as an abstract type so implementations can be replaced
+	addSession    chan SessionLike
+	removeSession chan SessionLike
+}
+
+// SessionLike is the minimal interface a session must implement to be
+// scheduled. Extracted here so the scheduler can operate on different
+// implementations.
+type SessionLike interface {
+	ID() string
+	Priority() int64
+	AgentChan() chan *Agent
+	CancelConfirmChan() chan struct{}
 }
 
 func sessionComparator(ap, bp interface{}) int {
-	a, b := ap.(*Session), bp.(*Session)
-	if a.priority < b.priority {
+	a, b := ap.(SessionLike), bp.(SessionLike)
+	if a.Priority() < b.Priority() {
 		return -1
 	}
-	if a.priority > b.priority {
+	if a.Priority() > b.Priority() {
 		return 1
 	}
-	if a.id < b.id {
+	if a.ID() < b.ID() {
 		return -1
 	}
-	if a.id > b.id {
+	if a.ID() > b.ID() {
 		return 1
 	}
 	return 0
@@ -112,8 +123,8 @@ func newScheduler(ctx context.Context) *Scheduler {
 		ctx:           ctx,
 		addAgent:      make(chan *Agent, 1),
 		removeAgent:   make(chan *Agent, 1),
-		addSession:    make(chan *Session, 1),
-		removeSession: make(chan *Session, 1),
+		addSession:    make(chan SessionLike, 1),
+		removeSession: make(chan SessionLike, 1),
 	}
 	go s.Run()
 	return s
@@ -140,16 +151,16 @@ func (p *Scheduler) Run() {
 				a = v
 				break
 			}
-			var s *Session
+			var s SessionLike
 			it := p.sessions.Iterator()
 			if it.First() {
-				s = it.Value().(*Session)
+				s = it.Value().(SessionLike)
 			} else {
 				panic(fmt.Errorf("session set is not empty (size %d) but iterator is empty", p.sessions.Size()))
 			}
 			p.sessions.Remove(s)
 			delete(p.agents, a.id)
-			s.agentChan <- a
+			s.AgentChan() <- a
 		}
 
 		cancelled := p.ctx.Done()
@@ -172,7 +183,7 @@ func (p *Scheduler) Run() {
 				continue
 			}
 			p.sessions.Remove(s)
-			s.cancelConfirm <- struct{}{}
+			s.CancelConfirmChan() <- struct{}{}
 		case <-cancelled:
 			shuttingDown = true
 		}
@@ -187,10 +198,10 @@ func (p *Scheduler) RemoveAgent(a *Agent) {
 	p.removeAgent <- a
 }
 
-func (p *Scheduler) AddSession(s *Session) {
+func (p *Scheduler) AddSession(s SessionLike) {
 	p.addSession <- s
 }
 
-func (p *Scheduler) RemoveSession(s *Session) {
+func (p *Scheduler) RemoveSession(s SessionLike) {
 	p.removeSession <- s
 }

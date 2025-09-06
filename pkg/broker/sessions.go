@@ -401,6 +401,24 @@ func (s *Session) String() string {
 	return str
 }
 
+// SessionLike compatibility methods so *Session implements the interface
+// expected by the scheduler.
+func (s *Session) ID() string {
+	return s.id
+}
+
+func (s *Session) Priority() int64 {
+	return s.priority
+}
+
+func (s *Session) AgentChan() chan *Agent {
+	return s.agentChan
+}
+
+func (s *Session) CancelConfirmChan() chan struct{} {
+	return s.cancelConfirm
+}
+
 func (s *Session) recordExecution(finalState proto.SessionExecutionFinalState) error {
 	if s.accounting == nil {
 		return fmt.Errorf("No accounting database configured for session %s", s.id)
