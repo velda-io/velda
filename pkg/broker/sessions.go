@@ -69,6 +69,7 @@ type Session struct {
 	agentChan     chan *Agent
 	agentResponse chan AgentSessionResponse
 	cancelConfirm chan struct{}
+	gang          *GangCoordinator
 
 	scheduleCompletion chan struct{}
 	schedulingErr      error
@@ -108,6 +109,13 @@ func NewSession(request *proto.SessionRequest, scheduler *Scheduler, accounting 
 	}
 }
 
+func (s *Session) SetGang(gang *GangCoordinator) {
+	if s.status.Status != proto.ExecutionStatus_STATUS_UNSPECIFIED {
+		panic("Cannot set gang after scheduling started")
+	}
+	s.gang = gang
+}
+
 func (s *Session) Status() *proto.ExecutionStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -143,6 +151,8 @@ func (s *Session) Schedule(ctx context.Context) (*proto.ExecutionStatus, error) 
 			case proto.ExecutionStatus_STATUS_QUEUEING:
 				s.scheduleCtx = append(s.scheduleCtx, ctx)
 				return nil, s.scheduleCompletion
+			case proto.ExecutionStatus_STATUS_WAITING_FOR_OTHER_SHARDS:
+				return s.status, nil
 			case proto.ExecutionStatus_STATUS_STALE:
 				s.scheduleCtx = append(s.scheduleCtx, ctx)
 				close(s.staleConnectionRequest)
@@ -214,6 +224,14 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 			case agent := <-s.agentChan:
 				// This should not block with buffer size 1.
 				s.agent = agent
+				if s.gang != nil {
+					s.agent.sessionReq <- SessionRequest{session: s, ctx: ctx, accept: true, holdResourceOnly: true}
+					s.status.Status = proto.ExecutionStatus_STATUS_WAITING_FOR_OTHER_SHARDS
+					s.gang.Notify(int(s.Request.Workload.ShardIndex), func() {
+						s.agent.sessionReq <- SessionRequest{session: s, ctx: ctx, accept: true}
+					})
+					return
+				}
 				s.agent.sessionReq <- SessionRequest{session: s, ctx: ctx, accept: true}
 				nextState = schedulingStateSentToAgent
 			}
@@ -331,6 +349,16 @@ func (s *Session) MarkStale(lastActiveTime time.Time) {
 			s.scheduleCtx = append(s.scheduleCtx, s.scheduler.ctx)
 		}
 		go s.scheduleLoop(schedulingStateStale)
+	} else if s.status.Status == proto.ExecutionStatus_STATUS_WAITING_FOR_OTHER_SHARDS {
+		// TODO: There may be race if the gang is ready at the same time.
+		s.gang.Unnotify(int(s.Request.Workload.ShardIndex))
+		// Restart the scheduling.
+		s.status.Status = proto.ExecutionStatus_STATUS_QUEUEING
+		s.scheduleCompletion = make(chan struct{})
+		if s.Request.TaskId != "" {
+			s.scheduleCtx = append(s.scheduleCtx, s.scheduler.ctx)
+		}
+		go s.scheduleLoop(schedulingStateCreated)
 	}
 }
 
@@ -399,6 +427,24 @@ func (s *Session) String() string {
 		str += fmt.Sprintf(" Service %s", s.Request.ServiceName)
 	}
 	return str
+}
+
+// SessionLike compatibility methods so *Session implements the interface
+// expected by the scheduler.
+func (s *Session) ID() string {
+	return s.id
+}
+
+func (s *Session) Priority() int64 {
+	return s.priority
+}
+
+func (s *Session) AgentChan() chan *Agent {
+	return s.agentChan
+}
+
+func (s *Session) CancelConfirmChan() chan struct{} {
+	return s.cancelConfirm
 }
 
 func (s *Session) recordExecution(finalState proto.SessionExecutionFinalState) error {

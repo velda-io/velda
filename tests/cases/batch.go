@@ -16,6 +16,7 @@ package cases
 import (
 	"log"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,5 +142,39 @@ vbatch -N 2 ./script.sh testfile_sharded
 			assert.Equal(t, "1/2\n", output)
 			return true
 		}, 30*time.Second, 1000*time.Millisecond)
+	})
+	t.Run("Gang", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
+		// Occupy one worker
+		completed := false
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			require.NoError(t, runCommand("sh", "-c", "touch gang.start; sleep 1"))
+			completed = true
+			wg.Done()
+		}()
+		require.NoError(t, runCommand("sh", "-c", `
+cat << EOF > script.sh
+#!/bin/sh
+echo \${VELDA_SHARD_ID}/\${VELDA_TOTAL_SHARDS} > \$1.\${VELDA_SHARD_ID}
+EOF
+chmod +x script.sh
+while [ ! -f gang.start ]; do sleep 0.1; done
+vbatch -N 5 --gang ./script.sh testfile_gang
+`))
+		// Wait until the job is finished
+		assert.Eventually(t, func() bool {
+			output, err := runCommandGetOutput("cat", "testfile_gang.0")
+			if err != nil {
+				return false
+			}
+			assert.Equal(t, "0/5\n", output)
+			assert.True(t, completed, "Gang job started before all shards are ready")
+			return true
+		}, 30*time.Second, 1000*time.Millisecond)
+		wg.Wait()
 	})
 }

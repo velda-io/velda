@@ -210,6 +210,8 @@ message ExecutionStatus {
     // Lost heartbeat from the agent, but the agent may be still running.
     STATUS_STALE = 5;
     STATUS_CHECKPOINTED = 6;
+    // In gang-scheduling, resource has been allocated for this shard.
+    STATUS_WAITING_FOR_OTHER_SHARDS = 7;
   }
 
   Status status = 3;
