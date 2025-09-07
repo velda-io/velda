@@ -65,6 +65,7 @@ func (t *TaskTracker) getOrCreateGang(id string, desired int) *GangCoordinator {
 	defer t.gangMu.Unlock()
 	gang, ok := t.gangs[id]
 	if !ok {
+		// Add an extra member to cleanup the coordinator once scheduled.
 		gang = NewGangCoordinator(desired + 1)
 		t.gangs[id] = gang
 		gang.Notify(-1, func() {

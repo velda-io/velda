@@ -353,7 +353,6 @@ func (s *Session) MarkStale(lastActiveTime time.Time) {
 		// TODO: There may be race if the gang is ready at the same time.
 		s.gang.Unnotify(int(s.Request.Workload.ShardIndex))
 		// Restart the scheduling.
-		s.scheduleCompletion = make(chan struct{})
 		s.status.Status = proto.ExecutionStatus_STATUS_QUEUEING
 		s.scheduleCompletion = make(chan struct{})
 		if s.Request.TaskId != "" {

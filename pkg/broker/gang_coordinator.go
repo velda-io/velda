@@ -3,9 +3,10 @@ package broker
 import "sync"
 
 type GangCoordinator struct {
-	desired int
-	mu      sync.Mutex
-	notif   map[int]func()
+	mu        sync.Mutex
+	desired   int
+	notif     map[int]func()
+	triggered bool
 }
 
 func NewGangCoordinator(desired int) *GangCoordinator {
@@ -19,18 +20,18 @@ func (g *GangCoordinator) Notify(id int, f func()) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.notif[id] = f
-	if len(g.notif) == g.desired {
+	if len(g.notif) == g.desired && !g.triggered {
 		for _, fn := range g.notif {
 			fn()
 		}
-		g.notif = nil
+		g.triggered = true
 	}
 }
 
 func (g *GangCoordinator) Unnotify(id int) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.notif == nil {
+	if !g.triggered {
 		return false
 	}
 	delete(g.notif, id)

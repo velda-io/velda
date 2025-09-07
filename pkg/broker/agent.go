@@ -254,14 +254,14 @@ func (a *Agent) Run(
 			}
 			req := reqData.session
 
-			_, ok := a.mySessions[req.Key()]
+			_, isExistingSession := a.mySessions[req.Key()]
 			a.mySessions[req.Key()] = req
 			if a.slots > len(a.mySessions) {
 				a.receiving = true
 				a.scheduler.AddAgent(a)
 			}
 
-			if !ok {
+			if !isExistingSession {
 				poolManager.MarkBusy(a.id, a.slots-len(a.mySessions))
 			}
 			if reqData.holdResourceOnly {
