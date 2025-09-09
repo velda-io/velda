@@ -96,15 +96,22 @@ func PrintListOutput(full proto.Message, list []proto.Message, header bool, fiel
 }
 
 func printFullMessage(msg proto.Message, outFmt string, w io.Writer) error {
-	if outFmt == "json" {
+	switch outFmt {
+	case "json":
 		b, err := protojson.Marshal(msg)
 		if err != nil {
 			return err
 		}
 		_, _ = w.Write(b)
 		return nil
+	case "yaml":
+		return PrintProtoYaml(msg, w)
+	default:
+		return fmt.Errorf("unknown output format: %s", outFmt)
 	}
-	// yaml
+}
+
+func PrintProtoYaml(msg proto.Message, w io.Writer) error {
 	b, err := protojson.Marshal(msg)
 	if err != nil {
 		return err

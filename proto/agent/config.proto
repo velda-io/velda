@@ -102,6 +102,7 @@ message AgentConfig {
   message Broker {
     // The URL of the broker.
     string address = 1;
+    string public_address = 2;
   }
   Broker broker = 1;
   string session = 2;
