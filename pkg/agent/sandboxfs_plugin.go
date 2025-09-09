@@ -20,11 +20,10 @@ import (
 	"path"
 	"syscall"
 
-	"gopkg.in/yaml.v3"
-
 	"velda.io/velda/pkg/clientlib"
 	"velda.io/velda/pkg/proto"
 	agentpb "velda.io/velda/pkg/proto/agent"
+	"velda.io/velda/pkg/utils"
 )
 
 type SandboxFsPlugin struct {
@@ -62,15 +61,16 @@ func (r *SandboxFsPlugin) initAgentDir(session *proto.SessionRequest, sessionDir
 	instanceId := session.InstanceId
 	sessionId := session.SessionId
 	configData := clientlib.GenerateAgentConfig(instanceId, sessionId, session.TaskId)
-	yamlData, err := yaml.Marshal(configData)
-	if err != nil {
-		return fmt.Errorf("Marshal yaml: %w", err)
-	}
-	err = os.Mkdir(path.Join(sessionDir, "velda"), 0755)
+	err := os.Mkdir(path.Join(sessionDir, "velda"), 0755)
 	if err != nil && !os.IsExist(err) {
 		return fmt.Errorf("Mkdir velda: %w", err)
 	}
-	if err := os.WriteFile(path.Join(sessionDir, "velda/velda.yaml"), yamlData, 0444); err != nil {
+	configFile, err := os.Create(path.Join(sessionDir, "velda/velda.yaml"))
+	if err != nil {
+		return fmt.Errorf("Create config file: %w", err)
+	}
+	defer configFile.Close()
+	if err := utils.PrintProtoYaml(configData, configFile); err != nil {
 		return fmt.Errorf("WriteFile agent.yaml: %w", err)
 	}
 	if err := os.WriteFile(path.Join(sessionDir, "velda/velda"), nil, 0555); err != nil {

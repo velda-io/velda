@@ -226,9 +226,10 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 				s.agent = agent
 				if s.gang != nil {
 					s.agent.sessionReq <- SessionRequest{session: s, ctx: ctx, accept: true, holdResourceOnly: true}
+					c := ctx
 					s.status.Status = proto.ExecutionStatus_STATUS_WAITING_FOR_OTHER_SHARDS
 					s.gang.Notify(int(s.Request.Workload.ShardIndex), func() {
-						s.agent.sessionReq <- SessionRequest{session: s, ctx: ctx, accept: true}
+						s.agent.sessionReq <- SessionRequest{session: s, ctx: c, accept: true}
 					})
 					return
 				}

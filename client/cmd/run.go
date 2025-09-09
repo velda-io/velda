@@ -175,6 +175,11 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	DebugLog("Got response: %s. Connecting ", resp.String())
 	if batch {
 		fmt.Printf("%s\n", resp.GetTaskId())
+		if !quiet && clientlib.GetAgentConfig().TaskId == "" && clientlib.GetAgentConfig().GetBroker().GetPublicAddress() != "" {
+			publicAddr := clientlib.GetAgentConfig().GetBroker().GetPublicAddress()
+			taskUrl := fmt.Sprintf("%s/tasks/%s", publicAddr, resp.GetTaskId())
+			cmd.PrintErrf("Track task at %s\n", taskUrl)
+		}
 		return nil
 	}
 
