@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,17 +32,17 @@ type SshdPlugin struct {
 	waiter            any // *WaiterPlugin
 	request           any // *SessionRequestPlugin
 	completionSignal  any // *CompletionSignalPlugin
-	hasGpu            bool
+	commandModifier   CommandModifier
 }
 
-func NewSshdPlugin(agentName string, authDecoderPlugin any, waiter any, request any, completionSignal any, hasGpu bool) *SshdPlugin {
+func NewSshdPlugin(agentName string, authDecoderPlugin any, waiter any, request any, completionSignal any, commandModifier CommandModifier) *SshdPlugin {
 	return &SshdPlugin{
 		AgentName:         agentName,
 		authDecoderPlugin: authDecoderPlugin,
 		waiter:            waiter,
 		request:           request,
 		completionSignal:  completionSignal,
-		hasGpu:            hasGpu,
+		commandModifier:   commandModifier,
 	}
 }
 
@@ -66,9 +66,7 @@ func (p *SshdPlugin) Run(ctx context.Context) (err error) {
 	sshd.IdleTimeout = req.IdleTimeout.AsDuration()
 	sshd.AgentName = p.AgentName
 	sshd.OnIdle = req.ConnectionFinishAction
-	if p.hasGpu {
-		sshd.CommandModifier = gpuModifier("/var/nvidia/lib", "/var/nvidia/bin")
-	}
+	sshd.CommandModifier = p.commandModifier
 	batch := req.Workload != nil
 	if !batch {
 		completion := ctx.Value(p.completionSignal).(chan error)
@@ -90,8 +88,8 @@ func (p *SshdPlugin) Run(ctx context.Context) (err error) {
 	return p.RunNext(context.WithValue(ctx, p, sshd))
 }
 
-func gpuModifier(libraryPath, binPath string) func(*exec.Cmd) *exec.Cmd {
-	return func(cmd *exec.Cmd) *exec.Cmd {
+func gpuModifier(libraryPath, binPath string) func(*exec.Cmd) {
+	return func(cmd *exec.Cmd) {
 		existingLdLibraryPath := ""
 		existingPath := ""
 
@@ -113,6 +111,5 @@ func gpuModifier(libraryPath, binPath string) func(*exec.Cmd) *exec.Cmd {
 		}
 		cmd.Env = append(cmd.Env, "LD_LIBRARY_PATH="+libraryPath)
 		cmd.Env = append(cmd.Env, "PATH="+binPath)
-		return cmd
 	}
 }

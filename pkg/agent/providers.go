@@ -73,6 +73,13 @@ func ProvideRunPid1Plugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig,
 	return NewRunPid1Plugin(string(workDir), sandboxConfig, agentDaemonPlugin, requestPlugin)
 }
 
+func ProvideCommandModifier(nvidiaPlugin *NvidiaPlugin) CommandModifier {
+	if nvidiaPlugin.HasGpu() {
+		return gpuModifier("/var/nvidia/lib", "/var/nvidia/bin")
+	}
+	return nil
+}
+
 func ProvideAgentName(cmd *cobra.Command) AgentName {
 	agentName, _ := cmd.Flags().GetString("agent-name")
 	return AgentName(agentName)
@@ -90,13 +97,14 @@ func ProvideCompletionSignalPlugin() *CompletionSignalPlugin {
 	return NewCompletionSignalPlugin()
 }
 
-func ProvideBatchPlugin(waiterPlugin *WaiterPlugin, requestPlugin *SessionRequestPlugin, completionSignalPlugin *CompletionSignalPlugin) *BatchPlugin {
-	return NewBatchPlugin(waiterPlugin, requestPlugin, completionSignalPlugin)
+func ProvideBatchPlugin(waiterPlugin *WaiterPlugin, requestPlugin *SessionRequestPlugin, completionSignalPlugin *CompletionSignalPlugin, commandModifier CommandModifier) *BatchPlugin {
+	return NewBatchPlugin(waiterPlugin, requestPlugin, completionSignalPlugin, commandModifier)
 }
 
-func ProvideSshdPlugin(agentName AgentName, auth AuthPluginType, waiterPlugin *WaiterPlugin, requestPlugin *SessionRequestPlugin, completionSignalPlugin *CompletionSignalPlugin, nvidiaPlugin *NvidiaPlugin) *SshdPlugin {
-	return NewSshdPlugin(string(agentName), auth, waiterPlugin, requestPlugin, completionSignalPlugin, nvidiaPlugin.HasGpu())
+func ProvideSshdPlugin(agentName AgentName, auth AuthPluginType, waiterPlugin *WaiterPlugin, requestPlugin *SessionRequestPlugin, completionSignalPlugin *CompletionSignalPlugin, commandModifier CommandModifier) *SshdPlugin {
+	return NewSshdPlugin(string(agentName), auth, waiterPlugin, requestPlugin, completionSignalPlugin, commandModifier)
 }
+
 func ProvideReportStatusPlugin(sshdPlugin *SshdPlugin) *ReportStatusPlugin {
 	return NewReportStatusPlugin(sshdPlugin)
 }

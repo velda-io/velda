@@ -76,6 +76,7 @@ func providePid1Runner(requestPlugin *agent.SessionRequestPlugin, authPlugin age
 func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agentpb.SandboxConfig) Pid1Runner {
 	wire.Build(
 		agent.ProvideNvidiaPlugin,
+		agent.ProvideCommandModifier,
 		agent.ProvideMaxSessionTime,
 		agent.ProvideWorkdir,
 		agent.ProvideAgentName,

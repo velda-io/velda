@@ -47,7 +47,11 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	if err != nil {
 		return nil, err
 	}
-	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase)
+	provisionRunner, err := ProvideProvisioners(context, config, schedulerSet)
+	if err != nil {
+		return nil, err
+	}
+	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase, provisionRunner)
 	localDiskProvider := ProvideLocalDiskStorage(storage)
 	nfsExportAuth, err := broker.NewNfsExportAuth(localDiskProvider)
 	if err != nil {
@@ -60,10 +64,6 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storage, permissions)
 	registry := _wireRegistryValue
 	metricRegistryRunner := ProvideMetrics(registry, serverMetrics)
-	provisionRunner, err := ProvideProvisioners(context, config, schedulerSet)
-	if err != nil {
-		return nil, err
-	}
 	grpcRunner, err := ProvideGrpcRunner(serviceCtx, config, server)
 	if err != nil {
 		return nil, err

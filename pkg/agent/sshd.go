@@ -92,7 +92,7 @@ type SSHD struct {
 	waiter                   *Waiter
 	AppArmorProfile          string
 	OnShutdown               func()
-	CommandModifier          func(*exec.Cmd) *exec.Cmd
+	CommandModifier          CommandModifier
 
 	OnIdle             proto.SessionRequest_ConnectionFinishAction
 	connections        map[*ssh.ServerConn]struct{}
@@ -418,7 +418,7 @@ type sshSession struct {
 
 	envVars         map[string]string
 	execCompletion  chan *ProcessState
-	CommandModifier func(*exec.Cmd) *exec.Cmd
+	CommandModifier CommandModifier
 }
 
 func (s *sshSession) handleSessionChannel(newChannel ssh.NewChannel) {
@@ -715,11 +715,11 @@ func (s *sshSession) handleSftpSubsystem(channel ssh.Channel, req *ssh.Request) 
 }
 
 func (s *sshSession) handleCommand(channel ssh.Channel, req *ssh.Request, command *exec.Cmd) {
-	if s.CommandModifier != nil {
-		command = s.CommandModifier(command)
-	}
 	if command.SysProcAttr == nil {
 		command.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	if s.CommandModifier != nil {
+		s.CommandModifier(command)
 	}
 	command.SysProcAttr.Setsid = true
 	// Set up PTY if requested
