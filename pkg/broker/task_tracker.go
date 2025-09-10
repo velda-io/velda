@@ -106,7 +106,8 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 
 			scheduler, err := t.scheduler.GetPool(pool)
 			if err != nil {
-				return err
+				log.Printf("Failed to get pool %s for task %s: %v", pool, task.Id, err)
+				return nil
 			}
 			session, err := t.sessions.AddSession(req, scheduler)
 			if err != nil {

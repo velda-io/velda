@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	pb "google.golang.org/protobuf/proto"
@@ -32,13 +33,15 @@ type BatchPlugin struct {
 	waiterPlugin     any // *WaiterPlugin
 	requestPlugin    any // *SessionRequestPlugin
 	completionSignal any // *CompletionSignalPlugin
+	commandModifier  CommandModifier
 }
 
-func NewBatchPlugin(waiterPlugin any, requestPlugin any, completionSignal any) *BatchPlugin {
+func NewBatchPlugin(waiterPlugin any, requestPlugin any, completionSignal any, commandModifier CommandModifier) *BatchPlugin {
 	return &BatchPlugin{
 		waiterPlugin:     waiterPlugin,
 		requestPlugin:    requestPlugin,
 		completionSignal: completionSignal,
+		commandModifier:  commandModifier,
 	}
 }
 
@@ -61,16 +64,20 @@ func (p *BatchPlugin) Run(ctx context.Context) error {
 func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) error {
 	workload := sessionReq.Workload
 	wait := waiter.AcquireLock()
-	commandPath := workload.Command
-	if filepath.Base(commandPath) == commandPath {
-		var err error
-		commandPath, err = exec.LookPath(workload.Command)
-		if err != nil {
-			return fmt.Errorf("Command not found in PATH: %w", err)
-		}
+	commandPath := workload.CommandPath
+	if commandPath == "" {
+		commandPath = workload.Command
+	}
+	if strings.Contains(commandPath, "/") && commandPath[0] != '/' {
+		// Convert to absolute dir first, because current working dir can be different.
+		commandPath = filepath.Join(workload.WorkingDir, workload.Command)
+	}
+	commandPath, err := exec.LookPath(commandPath)
+	if err != nil {
+		return fmt.Errorf("Command not found in PATH: %w", err)
 	}
 	taskId := sessionReq.TaskId
-	err := os.MkdirAll(fmt.Sprintf("/.velda_tasks/%s", filepath.Dir(taskId)), 0755)
+	err = os.MkdirAll(fmt.Sprintf("/.velda_tasks/%s", filepath.Dir(taskId)), 0755)
 	if err != nil {
 		return fmt.Errorf("Failed to create task directories %s: %w", taskId, err)
 	}
@@ -86,18 +93,23 @@ func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) erro
 	if err != nil {
 		return fmt.Errorf("Failed to open stderr file %s: %w", taskId, err)
 	}
-	command, err := os.StartProcess(commandPath, append([]string{workload.Command}, workload.Args...), &os.ProcAttr{
-		Env:   workload.Environs,
-		Dir:   workload.WorkingDir,
-		Files: []*os.File{stdin, stdout, stderr},
-		Sys: &syscall.SysProcAttr{
-			Credential: &syscall.Credential{
-				Uid:    workload.Uid,
-				Gid:    workload.Gid,
-				Groups: workload.Groups,
-			},
+	cmd := exec.Command(commandPath, workload.Args...)
+	cmd.Dir = workload.WorkingDir
+	cmd.Env = workload.Environs
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid:    workload.Uid,
+			Gid:    workload.Gid,
+			Groups: workload.Groups,
 		},
-	})
+	}
+	if p.commandModifier != nil {
+		p.commandModifier(cmd)
+	}
+	err = cmd.Start()
 	stdin.Close()
 	stdout.Close()
 	stderr.Close()
@@ -107,10 +119,12 @@ func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) erro
 	// TODO: Return result.
 	processStateChan := make(chan *ProcessState)
 	wait <- &WaitRequest{
-		Pid:   command.Pid,
+		Pid:   cmd.Process.Pid,
 		State: processStateChan,
 	}
 	processState := <-processStateChan
+	// Release resources managed by exec.Cmd
+	cmd.Wait()
 	resultPb := &proto.BatchTaskResult{}
 	sysState := processState.WaitStatus
 	if sysState.Exited() {

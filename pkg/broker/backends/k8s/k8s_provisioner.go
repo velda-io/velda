@@ -109,6 +109,7 @@ func (p *K8sProvisioner) Run(ctx context.Context) {
 
 	log.Printf("Starting CRD watcher")
 	// Start informer
+	// TODO: Wait until one update is completed.
 	go informer.Run(ctx.Done())
 }
 

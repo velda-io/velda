@@ -41,10 +41,7 @@ type GcsPoolProvisioner struct {
 func (p *GcsPoolProvisioner) Run(ctx context.Context) {
 	p.lastSeenVersion = make(map[string]time.Time)
 	p.lastSeenTime = make(map[string]time.Time)
-	go p.run(ctx)
-}
 
-func (p *GcsPoolProvisioner) run(ctx context.Context) {
 	interval := p.cfg.UpdateInterval.AsDuration()
 	if interval == 0 {
 		interval = 60 * time.Second
@@ -88,14 +85,16 @@ func (p *GcsPoolProvisioner) run(ctx context.Context) {
 	}
 	updateLoop(time.Now())
 
-	for {
-		select {
-		case t := <-ticker.C:
-			updateLoop(t)
-		case <-ctx.Done():
-			return
+	go func() {
+		for {
+			select {
+			case t := <-ticker.C:
+				updateLoop(t)
+			case <-ctx.Done():
+				return
+			}
 		}
-	}
+	}()
 }
 
 func (p *GcsPoolProvisioner) update(ctx context.Context, attr *storage.ObjectAttrs, new bool) error {

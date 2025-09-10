@@ -170,16 +170,14 @@ func ProvideSchedulers(ctx context.Context, cfg *configpb.Config) (*broker.Sched
 
 var ProvideSessionDb = broker.NewSessionDatabase
 
-func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler *broker.SchedulerSet, sessiondb *broker.SessionDatabase, taskdb broker.TaskQueueDb) *broker.TaskTracker {
+func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler *broker.SchedulerSet, sessiondb *broker.SessionDatabase, taskdb broker.TaskQueueDb, _ ProvisionRunner) *broker.TaskTracker {
 	taskTrackerId := uuid.New().String()
 	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId)
 
 	// Start task trackers for each pool
 	go func() {
 		err := tracker.PollTasks(ctx)
-		if !errors.Is(err, context.Canceled) {
-			log.Printf("Task tracker exited: %v", err)
-		}
+		log.Printf("Task tracker exited: %v", err)
 	}()
 	return tracker
 }
