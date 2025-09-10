@@ -69,6 +69,7 @@ func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) erro
 		commandPath = workload.Command
 	}
 	if strings.Contains(commandPath, "/") && commandPath[0] != '/' {
+		// Convert to absolute dir first, because current working dir can be different.
 		commandPath = filepath.Join(workload.WorkingDir, workload.Command)
 	}
 	commandPath, err := exec.LookPath(commandPath)
@@ -122,6 +123,7 @@ func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) erro
 		State: processStateChan,
 	}
 	processState := <-processStateChan
+	// Release resources managed by exec.Cmd
 	cmd.Wait()
 	resultPb := &proto.BatchTaskResult{}
 	sysState := processState.WaitStatus

@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os/exec"
 	"syscall"
 	"time"
 
@@ -86,30 +85,4 @@ func (p *SshdPlugin) Run(ctx context.Context) (err error) {
 		}
 	}()
 	return p.RunNext(context.WithValue(ctx, p, sshd))
-}
-
-func gpuModifier(libraryPath, binPath string) func(*exec.Cmd) {
-	return func(cmd *exec.Cmd) {
-		existingLdLibraryPath := ""
-		existingPath := ""
-
-		for _, env := range cmd.Env {
-			if len(env) > 15 && env[:15] == "LD_LIBRARY_PATH=" {
-				existingLdLibraryPath = env[16:]
-			}
-			if len(env) > 5 && env[:5] == "PATH=" {
-				existingPath = env[5:]
-			}
-		}
-
-		if existingLdLibraryPath != "" {
-			libraryPath = libraryPath + ":" + existingLdLibraryPath
-		}
-
-		if existingPath != "" {
-			binPath = binPath + ":" + existingPath
-		}
-		cmd.Env = append(cmd.Env, "LD_LIBRARY_PATH="+libraryPath)
-		cmd.Env = append(cmd.Env, "PATH="+binPath)
-	}
 }
