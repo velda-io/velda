@@ -24,6 +24,7 @@ import (
 )
 
 var ErrPoolMaxSizeReached = errors.New("pool is full")
+var ErrNotSupportingBatchScheduler = errors.New("pool does not support batch scheduling")
 
 type WorkerStatusCode int
 
@@ -97,6 +98,10 @@ type ResourcePoolBackend interface {
 	ListWorkers(ctx context.Context) ([]WorkerStatus, error)
 }
 
+type BatchedPoolBackend interface {
+	RequestBatch(ctx context.Context, count int, label string) ([]string, error)
+}
+
 /*
 Handler that manages the lifecycle of workers in a pool.
 
@@ -136,6 +141,7 @@ type AutoScaledPool struct {
 	syncNow              chan struct{}
 
 	currentSyncVersion atomic.Int32
+	batch              bool
 
 	mu              sync.Mutex
 	pendingSessions int
@@ -170,6 +176,7 @@ type AutoScaledPoolConfig struct {
 	SyncLoopInterval     time.Duration
 	KillUnknownAfter     time.Duration
 	DefaultSlotsPerAgent int
+	Batch                bool
 }
 
 func NewAutoScaledPool(name string, config AutoScaledPoolConfig) *AutoScaledPool {
@@ -189,6 +196,7 @@ func NewAutoScaledPool(name string, config AutoScaledPoolConfig) *AutoScaledPool
 	pool.idleWorkers = pool.workersByStatus[WorkerStatusIdle]
 	pool.pendingWorkers = pool.workersByStatus[WorkerStatusPending]
 	pool.deletingWorkers = pool.workersByStatus[WorkerStatusDeleting]
+	pool.batch = config.Batch
 
 	pool.lastKnownTime = make(map[string]time.Time)
 	pool.killIdleTimer = time.AfterFunc(1000*time.Hour, pool.deleteOneIdleWorker)
@@ -394,6 +402,40 @@ func (p *AutoScaledPool) NotifyAgentAvailable(name string, busy bool, statusChan
 	return nil
 }
 
+func (p *AutoScaledPool) SupportsBatch() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.batch {
+		return false
+	}
+	_, ok := p.backend.(BatchedPoolBackend)
+	return ok
+}
+
+func (p *AutoScaledPool) RequestBatch(ctx context.Context, count int, label string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.batch {
+		return ErrNotSupportingBatchScheduler
+	}
+	batchBackend, ok := p.backend.(BatchedPoolBackend)
+	if !ok {
+		return ErrNotSupportingBatchScheduler
+	}
+	// TODO: Check size & queue the request.
+	nodes, err := batchBackend.RequestBatch(ctx, count, label)
+	if err != nil {
+		return err
+	}
+	p.pendingSessions += count
+	now := time.Now()
+	for _, name := range nodes {
+		p.lastKnownTime[name] = now
+		p.setWorkerStatusLocked(name, WorkerStatusPending, p.defaultSlotsPerAgent)
+	}
+	return nil
+}
+
 func (p *AutoScaledPool) UpdateConfig(config *AutoScaledPoolConfig) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -404,6 +446,7 @@ func (p *AutoScaledPool) UpdateConfig(config *AutoScaledPoolConfig) {
 	p.maxIdle = config.MaxIdle
 	p.idleDecay = config.IdleDecay
 	p.maxSize = config.MaxSize
+	p.batch = config.Batch
 	p.killUnknownAfter = config.KillUnknownAfter
 	if p.killingIdle {
 		p.killIdleTimer.Stop()
@@ -455,7 +498,7 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 	if p.ctx.Err() != nil {
 		return
 	}
-	for p.idleSizeLocked() < p.minIdle && p.sizeLocked() < p.maxSize {
+	for p.idleSizeLocked() < p.minIdle && p.sizeLocked() < p.maxSize && !p.batch {
 		name, err := p.backend.RequestScaleUp(p.ctx)
 		p.logPrintf("Creating worker %s, before idle size: %d", name, p.idleSizeLocked())
 		if err != nil {

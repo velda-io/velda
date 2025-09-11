@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -202,6 +203,7 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 		}
 	}()
 
+	batched := strings.Contains(s.Request.Pool, ":")
 	s.schedulingErr = nil
 	defer close(s.scheduleCompletion)
 	for {
@@ -209,7 +211,10 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 		switch s.state {
 		case schedulingStateCreated:
 			nextState = schedulingStateQueueing
-			pool.RequestWorker()
+			if !batched {
+				// For batched, the request happens during reservation.
+				pool.RequestWorker()
+			}
 			scheduler.AddSession(s)
 		case schedulingStateQueueing:
 			select {

@@ -177,4 +177,29 @@ vbatch -N 5 --gang ./script.sh testfile_gang
 		}, 30*time.Second, 1000*time.Millisecond)
 		wg.Wait()
 	})
+	t.Run("BatchedGang", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
+		if !r.Supports(FeatureBatchedSchedule) {
+			t.Skip("Batched scheduling feature is not supported")
+		}
+		require.NoError(t, runCommand("sh", "-c", `
+cat << EOF > bgang_script.sh
+#!/bin/sh
+echo \${VELDA_SHARD_ID}/\${VELDA_TOTAL_SHARDS} > \$1.\${VELDA_SHARD_ID}
+EOF
+chmod +x bgang_script.sh
+vbatch -N 5 --gang -P batch ./bgang_script.sh testfile_bgang
+`))
+		// Wait until the job is finished
+		assert.Eventually(t, func() bool {
+			output, err := runCommandGetOutput("cat", "testfile_bgang.0")
+			if err != nil {
+				return false
+			}
+			assert.Equal(t, "0/5\n", output)
+			return true
+		}, 30*time.Second, 1000*time.Millisecond)
+	})
 }

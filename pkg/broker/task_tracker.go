@@ -15,6 +15,7 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"path"
@@ -88,6 +89,13 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 				Priority:   task.Priority,
 			}
 			if task.Task.Workload.TotalShards > 0 && task.Task.Workload.ShardIndex < 0 {
+				if task.Task.Workload.ShardScheduling == proto.Workload_SHARD_SCHEDULING_GANG {
+					// If supported, use batch-scheduling.
+					// This may modify the req object
+					if err := t.tryBatchScheduling(ctx, req); err != nil && !errors.Is(err, ErrNotSupportingBatchScheduler) {
+						log.Printf("Cannot use batch-mode scheduling for task %s: %v", task.Id, err)
+					}
+				}
 				for i := 0; i < int(task.Task.Workload.TotalShards); i++ {
 					taskShard := pb.Clone(req).(*proto.SessionRequest)
 					taskShard.Workload.ShardIndex = int32(i)
@@ -99,7 +107,6 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 						return err
 					}
 				}
-				// TODO: Handle gang scheduling.
 				return nil
 			}
 			// Always assume normal user for batch tasks.
@@ -124,6 +131,26 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 			return nil
 		})
 	return err
+}
+
+func (t *TaskTracker) tryBatchScheduling(ctx context.Context, req *proto.SessionRequest) error {
+	scheduler, err := t.scheduler.GetPool(req.Pool)
+	if err != nil {
+		log.Printf("Failed to get pool %s for task %s: %v", req.Pool, req.TaskId, err)
+		return nil
+	}
+	if err := scheduler.PoolManager.RequestBatch(ctx, int(req.Workload.TotalShards), req.TaskId); err != nil {
+		return fmt.Errorf("failed to request batch: %v", err)
+	}
+	req.Pool = fmt.Sprintf("%s:%s", req.Pool, req.TaskId)
+	newScheduler, err := t.scheduler.GetOrCreatePool(req.Pool)
+	if err != nil {
+		log.Printf("Failed to create or get pool %s: %v", req.Pool, err)
+		return nil
+	}
+	log.Printf("New pool created: %s", req.Pool)
+	newScheduler.PoolManager = scheduler.PoolManager
+	return nil
 }
 
 func (t *TaskTracker) renewLeaser(ctx context.Context) error {

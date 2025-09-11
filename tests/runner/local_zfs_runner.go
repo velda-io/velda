@@ -109,21 +109,42 @@ agent_pools:
 - name: "shell"
   auto_scaler:
     backend:
-     command:
-       start: |
+      command:
+        start: |
           name=agent-test-${RANDOM}
           docker run  -d --name $name --add-host=host.docker.internal:host-gateway  -e AGENT_NAME=$name -v %s/agent.yaml:/run/velda/velda.yaml -h $name  --mount type=volume,target=/tmp/agent --rm -v %s:/velda --privileged -q veldaio/agent:latest > /dev/null
           echo $name
-       stop: |
-         name=$1
-         docker rm -f $name -v >/dev/null
-       list: |
-         docker ps -a --format '{{.Names}}' | egrep "agent-test-[0-9]+\$" | grep -v -- -1926 || true
+        stop: |
+          name=$1
+          docker rm -f $name -v >/dev/null
+        list: |
+          docker ps -a --format '{{.Names}}' | egrep "agent-test-[0-9]+\$" | grep -v -- -1926 || true
     max_agents: 5
     min_idle_agents: 0
     max_idle_agents: 3
     idle_decay: 40s
-`, suiteName, configDir, veldaBin)
+- name: "batch"
+  auto_scaler:
+    backend:
+      command:
+        stop: |
+          name=$1
+          docker rm -f $name -v >/dev/null
+        list: |
+          docker ps -a --format '{{.Names}}' | egrep "agent-testbatch-[0-9]+\$" | grep -v -- -1926 || true
+        batchStart: |
+          CNT=$1
+          LABEL=$2
+          for i in $(seq 1 $CNT); do
+            name=agent-testbatch-${RANDOM}
+            docker run  -d --name $name --add-host=host.docker.internal:host-gateway  -e AGENT_NAME=$name -v %s/agent.yaml:/run/velda/velda.yaml -h $name  --mount type=volume,target=/tmp/agent --rm -v %s:/velda --privileged -q veldaio/agent:latest --pool batch:$LABEL > /dev/null
+            echo $name
+          done
+    max_agents: 5
+    min_idle_agents: 0
+    max_idle_agents: 0
+    mode: MODE_BATCH
+`, suiteName, configDir, veldaBin, configDir, veldaBin)
 
 	if err := os.WriteFile(configFile, []byte(config), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
