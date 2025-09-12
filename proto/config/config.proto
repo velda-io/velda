@@ -75,6 +75,23 @@ message AgentPool {
     // This is only used for auto-scaling purpose.
     // An agent may run less sessions than this.
     int32 default_slots_per_agent = 9;
+
+    enum Mode {
+      MODE_UNSPECIFIED = 0;
+      // Standard mode: Request worker one-by-one.
+      MODE_STANDARD = 1;
+      // Batch mode: Request workers for all shards in a single request, and
+      // nodes will be immediately shut-down after the job is completed.
+      //
+      // This is used to request nodes with special relationship requirement,
+      // e.g.  affinity, or topology proximity requirements.
+      // The actual implementation may vary depending on the underlying
+      // backend.
+      //
+      // In batch mode, the pool name is pool:label
+      MODE_BATCH = 2;
+    }
+    Mode mode = 10;
   }
   AutoScaler auto_scaler = 2;
 }
@@ -140,6 +157,7 @@ message AutoscalerBackendCommand {
   string start = 1;
   string stop = 2;
   string list = 3;
+  string batch_start = 4;
 }
 
 message Provisioner {

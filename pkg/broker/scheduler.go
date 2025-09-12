@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/emirpasic/gods/sets/treeset"
@@ -55,9 +56,11 @@ func (s *SchedulerSet) getOrCreatePool(pool string, createAllowed bool) (*Schedu
 	if !ok {
 		if createAllowed {
 			p = newScheduler(s.ctx)
-			p.SetPoolManager(NewAutoScaledPool(pool, AutoScaledPoolConfig{
-				Context: s.ctx,
-			}))
+			if !strings.Contains(pool, ":") {
+				p.SetPoolManager(NewAutoScaledPool(pool, AutoScaledPoolConfig{
+					Context: s.ctx,
+				}))
+			}
 			s.agents[pool] = p
 		} else {
 			return nil, fmt.Errorf("%w: %s", UnknownPoolError, pool)
@@ -71,7 +74,10 @@ func (s *SchedulerSet) GetPools() []string {
 	defer s.mu.Unlock()
 	result := make([]string, 0, len(s.agents))
 	for k := range s.agents {
-		result = append(result, k)
+		// Skip all labeled subpools.
+		if !strings.Contains(k, ":") {
+			result = append(result, k)
+		}
 	}
 	return result
 }

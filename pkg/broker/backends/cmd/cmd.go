@@ -15,6 +15,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -25,19 +26,20 @@ import (
 )
 
 type cmdPoolBackend struct {
-	startCmd string
-	stopCmd  string
-	listCmd  string
+	startCmd      string
+	stopCmd       string
+	listCmd       string
+	batchStartCmd string
 }
 
-func NewCmdPoolBackend(startCmd, stopCmd, listCmd string) broker.ResourcePoolBackend {
+func NewCmdPoolBackend(startCmd, stopCmd, listCmd, batchStartCmd string) broker.ResourcePoolBackend {
 	return &cmdPoolBackend{
-		startCmd: startCmd,
-		stopCmd:  stopCmd,
-		listCmd:  listCmd,
+		startCmd:      startCmd,
+		stopCmd:       stopCmd,
+		listCmd:       listCmd,
+		batchStartCmd: batchStartCmd,
 	}
 }
-
 func (c *cmdPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	command := exec.Command("bash")
 	command.Stdin = strings.NewReader(c.startCmd)
@@ -81,6 +83,17 @@ func (c *cmdPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus
 	return workers, nil
 }
 
+func (c *cmdPoolBackend) RequestBatch(ctx context.Context, count int, label string) ([]string, error) {
+	command := exec.Command("bash", "-s", fmt.Sprintf("%d", count), label)
+	command.Stdin = strings.NewReader(c.batchStartCmd)
+	command.Stderr = os.Stderr
+	output, err := command.Output()
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(strings.TrimSpace(string(output)), "\n"), nil
+}
+
 type cmdPoolFactory struct{}
 
 func (f *cmdPoolFactory) CanHandle(pb *proto.AutoscalerBackend) bool {
@@ -93,7 +106,7 @@ func (f *cmdPoolFactory) CanHandle(pb *proto.AutoscalerBackend) bool {
 
 func (f *cmdPoolFactory) NewBackend(pb *proto.AutoscalerBackend) (broker.ResourcePoolBackend, error) {
 	cmd := pb.GetCommand()
-	return NewCmdPoolBackend(cmd.Start, cmd.Stop, cmd.List), nil
+	return NewCmdPoolBackend(cmd.Start, cmd.Stop, cmd.List, cmd.BatchStart), nil
 }
 
 func init() {

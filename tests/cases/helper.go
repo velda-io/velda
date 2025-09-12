@@ -69,9 +69,10 @@ func runVeldaWithOutErr(args ...string) (string, string, error) {
 type Feature string
 
 const (
-	FeatureImage      Feature = "image"
-	FeatureSnapshot   Feature = "snapshot"
-	FeatureMultiAgent Feature = "multi-agent"
+	FeatureImage           Feature = "image"
+	FeatureSnapshot        Feature = "snapshot"
+	FeatureMultiAgent      Feature = "multi-agent"
+	FeatureBatchedSchedule Feature = "batched-schedule"
 )
 
 type Runner interface {

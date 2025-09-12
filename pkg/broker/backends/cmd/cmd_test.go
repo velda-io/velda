@@ -25,6 +25,7 @@ func TestCmdBackend(t *testing.T) {
 		"basename $(mktemp "+tmpdir+"/worker-XXXXX)",
 		"rm "+tmpdir+"/$1",
 		"ls "+tmpdir,
+		"",
 	)
 	backend_testing.TestSimpleScaleUpDown(t, backend)
 }
