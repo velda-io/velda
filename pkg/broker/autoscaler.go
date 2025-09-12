@@ -498,7 +498,7 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 	if p.ctx.Err() != nil {
 		return
 	}
-	for p.idleSizeLocked() < p.minIdle && p.sizeLocked() < p.maxSize && !p.batch {
+	for !p.batch && p.idleSizeLocked() < p.minIdle && p.sizeLocked() < p.maxSize {
 		name, err := p.backend.RequestScaleUp(p.ctx)
 		p.logPrintf("Creating worker %s, before idle size: %d", name, p.idleSizeLocked())
 		if err != nil {

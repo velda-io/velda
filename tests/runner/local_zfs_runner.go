@@ -137,7 +137,20 @@ agent_pools:
           LABEL=$2
           for i in $(seq 1 $CNT); do
             name=agent-testbatch-${RANDOM}
-            docker run  -d --name $name --add-host=host.docker.internal:host-gateway  -e AGENT_NAME=$name -v %s/agent.yaml:/run/velda/velda.yaml -h $name  --mount type=volume,target=/tmp/agent --rm -v %s:/velda --privileged -q veldaio/agent:latest --pool batch:$LABEL > /dev/null
+            docker run \
+              -d \
+              --name $name \
+              --add-host=host.docker.internal:host-gateway \
+              -e AGENT_NAME=$name \
+              -v %s/agent.yaml:/run/velda/velda.yaml \
+              -h $name \
+              --mount type=volume,target=/tmp/agent \
+              --rm \
+              -v %s:/velda \
+              --privileged \
+              -q veldaio/agent:latest \
+              --pool batch:$LABEL \
+              > /dev/null
             echo $name
           done
     max_agents: 5
