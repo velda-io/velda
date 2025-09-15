@@ -91,14 +91,6 @@ func (s *server) AgentUpdate(stream proto.BrokerService_AgentUpdateServer) error
 			InstanceId: request.InstanceId,
 			SessionId:  request.SessionId,
 		}
-		if request.TaskId != "" {
-			err := s.taskTracker.ReconnectTask(stream.Context(), request.TaskId)
-			if err != nil {
-				log.Printf("Failed to reconnect task %s: %v", request.TaskId, err)
-				// We should terminate the task? Also need to validate the previous leaser identity.
-				// For now, let's just ignore it.
-			}
-		}
 		update := func(sess *Session) error {
 			agent.mySessions[key] = sess
 			agent.handleSessionInitResponse(session.Response)
@@ -109,6 +101,14 @@ func (s *server) AgentUpdate(stream proto.BrokerService_AgentUpdateServer) error
 		if err != nil {
 			log.Printf("Failed to register session %s: %v", request.SessionId, err)
 			continue
+		}
+		if request.TaskId != "" {
+			err := s.taskTracker.ReconnectTask(stream.Context(), session)
+			if err != nil {
+				log.Printf("Failed to reconnect task %s: %v", request.TaskId, err)
+				// We should terminate the task? Also need to validate the previous leaser identity.
+				// For now, let's just ignore it.
+			}
 		}
 		log.Printf("Agent %s: Reconnected session %s", agent.id, session.Key())
 	}

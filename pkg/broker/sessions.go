@@ -87,8 +87,8 @@ type Session struct {
 	startTime      time.Time
 	lastActiveTime time.Time
 
-	OnCompletion func()
-	accounting   AccountingDb
+	completions []func()
+	accounting  AccountingDb
 }
 
 func NewSession(request *proto.SessionRequest, scheduler *Scheduler, accounting AccountingDb) *Session {
@@ -410,10 +410,16 @@ func (s *Session) Kill(ctx context.Context, force bool) error {
 	return fmt.Errorf("Session %s is not running, cannot kill", s.id)
 }
 
+func (s *Session) AddCompletion(completion func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.completions = append(s.completions, completion)
+}
+
 func (s *Session) completeLocked(finalStatus proto.SessionExecutionFinalState) {
 	s.status.Status = proto.ExecutionStatus_STATUS_TERMINATED
-	if s.OnCompletion != nil {
-		s.OnCompletion()
+	for i := len(s.completions) - 1; i >= 0; i-- {
+		s.completions[i]()
 	}
 	s.recordExecution(finalStatus)
 }

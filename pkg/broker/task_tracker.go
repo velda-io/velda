@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,17 @@ import (
 	"velda.io/velda/pkg/db"
 	"velda.io/velda/pkg/proto"
 	"velda.io/velda/pkg/rbac"
+)
+
+var (
+	// How to buffer the cancel job list to avoid race
+	cleanupAfterCancel = 10 * time.Minute
+
+	// The minimal internal cleanup interval
+	cleanupMinimumInterval = 1 * time.Minute
+
+	// The maximum number of cancelled jobs to keep in the buffer
+	cleanupMaxCancelledJobs = 128
 )
 
 type TaskQueueDb interface {
@@ -47,15 +59,22 @@ type TaskTracker struct {
 	identity string
 	gangMu   sync.Mutex
 	gangs    map[string]*GangCoordinator
+
+	sessionMu      sync.Mutex
+	leasedSessions map[string]map[string]*Session // jobId -> taskId -> session
+	cancelled      map[string]time.Time
+	lastCleanup    time.Time
 }
 
 func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db TaskQueueDb, identity string) *TaskTracker {
 	result := &TaskTracker{
-		scheduler: schedulerSet,
-		sessions:  sessions,
-		db:        db,
-		identity:  identity,
-		gangs:     make(map[string]*GangCoordinator),
+		scheduler:      schedulerSet,
+		sessions:       sessions,
+		db:             db,
+		identity:       identity,
+		gangs:          make(map[string]*GangCoordinator),
+		leasedSessions: make(map[string]map[string]*Session),
+		cancelled:      make(map[string]time.Time),
 	}
 	go result.renewLeaser(schedulerSet.ctx)
 	return result
@@ -127,7 +146,14 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 				gang := t.getOrCreateGang(parentTaskId, int(task.Task.Workload.TotalShards))
 				session.SetGang(gang)
 			}
-			go session.Schedule(schedCtx)
+			if !t.registerSession(session) {
+				log.Printf("Task %s is already cancelled. Immediately cancelling.", task.Id)
+				cancelCtx, cancel := context.WithCancel(schedCtx)
+				cancel()
+				go session.Schedule(cancelCtx)
+			} else {
+				go session.Schedule(schedCtx)
+			}
 			return nil
 		})
 	return err
@@ -140,7 +166,7 @@ func (t *TaskTracker) tryBatchScheduling(ctx context.Context, req *proto.Session
 		return nil
 	}
 	if err := scheduler.PoolManager.RequestBatch(ctx, int(req.Workload.TotalShards), req.TaskId); err != nil {
-		return fmt.Errorf("failed to request batch: %v", err)
+		return fmt.Errorf("failed to request batch: %w", err)
 	}
 	req.Pool = fmt.Sprintf("%s:%s", req.Pool, req.TaskId)
 	newScheduler, err := t.scheduler.GetOrCreatePool(req.Pool)
@@ -151,6 +177,33 @@ func (t *TaskTracker) tryBatchScheduling(ctx context.Context, req *proto.Session
 	log.Printf("New pool created: %s", req.Pool)
 	newScheduler.PoolManager = scheduler.PoolManager
 	return nil
+}
+
+func (t *TaskTracker) registerSession(session *Session) bool {
+	t.sessionMu.Lock()
+	defer t.sessionMu.Unlock()
+	taskId := session.Request.TaskId
+	segments := strings.SplitN(taskId, "/", 2)
+	jobId := segments[0]
+	if _, ok := t.cancelled[jobId]; ok {
+		// Job is already cancelled.
+		return false
+	}
+	sessionInJob := t.leasedSessions[jobId]
+	if sessionInJob == nil {
+		sessionInJob = make(map[string]*Session)
+		t.leasedSessions[jobId] = sessionInJob
+	}
+	sessionInJob[taskId] = session
+	session.AddCompletion(func() {
+		t.sessionMu.Lock()
+		defer t.sessionMu.Unlock()
+		delete(sessionInJob, taskId)
+		if len(sessionInJob) == 0 {
+			delete(t.leasedSessions, jobId)
+		}
+	})
+	return true
 }
 
 func (t *TaskTracker) renewLeaser(ctx context.Context) error {
@@ -171,6 +224,50 @@ func (t *TaskTracker) renewLeaser(ctx context.Context) error {
 	}
 }
 
-func (t *TaskTracker) ReconnectTask(ctx context.Context, taskId string) error {
-	return t.db.ReconnectTask(ctx, taskId, t.identity)
+func (t *TaskTracker) ReconnectTask(ctx context.Context, session *Session) error {
+	taskId := session.Request.TaskId
+	err := t.db.ReconnectTask(ctx, taskId, t.identity)
+	if err != nil {
+		return err
+	}
+	if !t.registerSession(session) {
+		log.Printf("Task %s is already cancelled, killing", taskId)
+		session.Kill(ctx, false)
+	}
+	return nil
+}
+
+func (t *TaskTracker) CancelJob(ctx context.Context, jobId string) error {
+	var sessions map[string]*Session
+	func() {
+		t.sessionMu.Lock()
+		defer t.sessionMu.Unlock()
+		t.cancelled[jobId] = time.Now()
+		sessions = t.leasedSessions[jobId]
+
+		if len(t.cancelled) > cleanupMaxCancelledJobs || time.Since(t.lastCleanup) > cleanupMinimumInterval {
+			newCancelled := make(map[string]time.Time)
+			for k, v := range t.cancelled {
+				if time.Since(v) < cleanupAfterCancel {
+					newCancelled[k] = v
+				}
+			}
+			t.cancelled = newCancelled
+			t.lastCleanup = time.Now()
+		}
+	}()
+	log.Printf("Cancelling job %s with %d running sessions", jobId, len(sessions))
+	if len(sessions) == 0 {
+		return nil
+	}
+	for _, session := range sessions {
+		err := session.Kill(ctx, false)
+		if err != nil {
+			// TODO: Handle this?
+			log.Printf("Failed to kill session %s: %v", session.Request.SessionId, err)
+		} else {
+			log.Printf("Killed canceled task %s", session.Request.TaskId)
+		}
+	}
+	return nil
 }

@@ -45,3 +45,7 @@ type sessionUser struct {
 	rbac.EmptyUser
 	taskId string
 }
+
+func (u *sessionUser) TaskId() string {
+	return u.taskId
+}

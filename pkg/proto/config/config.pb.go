@@ -39,8 +39,18 @@ type AgentPool_AutoScaler_Mode int32
 
 const (
 	AgentPool_AutoScaler_MODE_UNSPECIFIED AgentPool_AutoScaler_Mode = 0
-	AgentPool_AutoScaler_MODE_STANDARD    AgentPool_AutoScaler_Mode = 1
-	AgentPool_AutoScaler_MODE_BATCH       AgentPool_AutoScaler_Mode = 2
+	// Standard mode: Request worker one-by-one.
+	AgentPool_AutoScaler_MODE_STANDARD AgentPool_AutoScaler_Mode = 1
+	// Batch mode: Request workers for all shards in a single request, and
+	// nodes will be immediately shut-down after the job is completed.
+	//
+	// This is used to request nodes with special relationship requirement,
+	// e.g.  affinity, or topology proximity requirements.
+	// The actual implementation may vary depending on the underlying
+	// backend.
+	//
+	// In batch mode, the pool name is pool:label
+	AgentPool_AutoScaler_MODE_BATCH AgentPool_AutoScaler_Mode = 2
 )
 
 // Enum value maps for AgentPool_AutoScaler_Mode.

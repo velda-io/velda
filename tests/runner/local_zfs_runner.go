@@ -79,7 +79,7 @@ sandbox_config:
   max_time: "3600s"
   disk_source:
     nfs_mount_source: 
-      mount_options: nolock
+      mount_options: nolock,acregmax=5,acregmin=1,acdirmax=5,acdirmin=1
 daemon_config:
 pool: shell
 `)
