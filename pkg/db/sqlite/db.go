@@ -581,10 +581,10 @@ func (s *SqliteDatabase) UpdateTaskFinalResult(ctx context.Context, taskId strin
 UPDATE tasks
 SET
 	total_children = (SELECT COUNT(*) FROM tasks WHERE parent_id = ?),
-	status = CASE 
-		WHEN (SELECT COUNT(*) FROM tasks WHERE parent_id = ?) > completed_children 
-		THEN 'RUNNING_SUBTASKS' 
-		ELSE status 
+	status = CASE
+		WHEN (SELECT COUNT(*) FROM tasks WHERE parent_id = ?) > completed_children
+		THEN 'RUNNING_SUBTASKS'
+		ELSE status
 	END,
 	start_time = ?,
 	finish_time = ?,
@@ -622,7 +622,7 @@ WITH RECURSIVE downstream_updates AS (
 	UNION ALL
 
 	-- Recursive case: find downstream tasks affected by upstream completion
-	SELECT 
+	SELECT
 		deps.downstream_task_id AS task_id,
 		deps.parent_id AS parent_id,
 		CASE
@@ -631,11 +631,11 @@ WITH RECURSIVE downstream_updates AS (
 			ELSE 'met'
 		END AS outcome
 	FROM task_dependencies deps
-	JOIN downstream_updates upstream ON 
-		deps.upstream_parent_id = upstream.parent_id AND 
+	JOIN downstream_updates upstream ON
+		deps.upstream_parent_id = upstream.parent_id AND
 		deps.upstream_task_id = upstream.task_id
-	JOIN tasks t ON 
-		t.parent_id = deps.parent_id AND 
+	JOIN tasks t ON
+		t.parent_id = deps.parent_id AND
 		t.task_id = deps.downstream_task_id
 	WHERE t.status IN ('QUEUEING', 'LEASED', 'RUNNING_SUBTASKS') AND upstream.outcome != 'met'
 ),
@@ -644,9 +644,9 @@ downstream_counts AS (
 		task_id,
 		parent_id,
 		-- Use first non-'met' outcome, or NULL if all are 'met'
-		(SELECT outcome FROM downstream_updates du2 
-		 WHERE du2.task_id = downstream_updates.task_id 
-		   AND du2.parent_id = downstream_updates.parent_id 
+		(SELECT outcome FROM downstream_updates du2
+		 WHERE du2.task_id = downstream_updates.task_id
+		   AND du2.parent_id = downstream_updates.parent_id
 		   AND outcome != 'met' LIMIT 1) AS outcome,
 		COUNT(*) FILTER (WHERE outcome IN ('met', 'fail_upstream')) AS upstream_met
 	FROM downstream_updates
@@ -658,13 +658,13 @@ SET
 		WHEN downstream_counts.outcome = 'success' THEN 'COMPLETED'
 		WHEN downstream_counts.outcome = 'fail' THEN 'FAILED'
 		WHEN downstream_counts.outcome = 'fail_upstream' THEN 'FAILED_UPSTREAM'
-		ELSE status 
+		ELSE status
 	END,
 	pending_upstreams = pending_upstreams - COALESCE(downstream_counts.upstream_met, 0),
 	resolve_time = CASE
-		WHEN downstream_counts.outcome IN ('success', 'fail', 'fail_upstream') 
+		WHEN downstream_counts.outcome IN ('success', 'fail', 'fail_upstream')
 		THEN COALESCE(resolve_time, datetime('now'))
-		ELSE resolve_time 
+		ELSE resolve_time
 	END
 FROM downstream_counts
 WHERE tasks.parent_id = downstream_counts.parent_id AND tasks.task_id = downstream_counts.task_id
@@ -676,8 +676,8 @@ WHERE tasks.parent_id = downstream_counts.parent_id AND tasks.task_id = downstre
 
 		// Mark pools for polling for tasks that became ready (in-memory)
 		rows, err := tx.QueryContext(ctx, `
-SELECT DISTINCT pool 
-FROM tasks 
+SELECT DISTINCT pool
+FROM tasks
 WHERE status = 'QUEUEING' AND pending_upstreams = 0`)
 
 		if err != nil {
@@ -756,15 +756,15 @@ func (s *SqliteDatabase) pollTasksOnce(ctx context.Context, leaserIdentity strin
 	// We need to use a different approach
 	rows, err := s.db.QueryContext(ctx, `
 WITH available_tasks AS (
-	SELECT parent_id, task_id, pool, instance_id, priority, labels, 
-		   create_time, start_time, finish_time, resolve_time, 
+	SELECT parent_id, task_id, pool, instance_id, priority, labels,
+		   create_time, start_time, finish_time, resolve_time,
 		   completed_children, total_children, status, pending_upstreams, payload
-	FROM tasks 
+	FROM tasks
 	WHERE status = 'QUEUEING' AND pending_upstreams = 0
 	ORDER BY priority DESC, create_time ASC
 	LIMIT 10
 )
-UPDATE tasks 
+UPDATE tasks
 SET status = 'LEASED', lease_by = ?
 WHERE (parent_id, task_id) IN (SELECT parent_id, task_id FROM available_tasks)
 RETURNING `+taskColumns(options), leaserIdentity)
@@ -881,7 +881,7 @@ func (s *SqliteDatabase) ReleaseExpiredLeaser(ctx context.Context, lastLeaseTime
 	rows, err := s.db.QueryContext(ctx, `
 UPDATE tasks
 SET status = 'QUEUEING', lease_by = NULL
-WHERE status = 'LEASED' 
+WHERE status = 'LEASED'
   AND lease_by IN (
     SELECT id FROM leasers WHERE last_heartbeat < ?
   )
@@ -926,7 +926,14 @@ func (s *SqliteDatabase) CancelJob(ctx context.Context, jobId string) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE tasks
 SET status = 'CANCELLED'
-WHERE substr(parent_id, 1, instr(parent_id || '/', '/') - 1) = ? AND status != 'LEASED'`, jobId)
+WHERE
+	(
+		CASE
+			WHEN parent_id = '' THEN task_id
+			ELSE substr(parent_id, 1, instr(parent_id || '/', '/') - 1)
+		END
+	) = ?
+	AND status != 'LEASED'`, jobId)
 	return err
 }
 

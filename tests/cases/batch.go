@@ -39,6 +39,11 @@ func testBatch(t *testing.T, r Runner) {
 	runCommand := func(args ...string) error {
 		return runVelda(append([]string{"run", "--instance", instanceName, "-s", ""}, args...)...)
 	}
+	getTaskStatus := func(t *testing.T, taskId string) string {
+		o, err := runVeldaWithOutput("task", "get", taskId, "-o", "status", "--header=false")
+		require.NoError(t, err, "Failed to get task status %s", taskId)
+		return strings.TrimSpace(o)
+	}
 
 	t.Run("Simple", func(t *testing.T) {
 		// Setup test scripts
@@ -222,5 +227,44 @@ while [ ! -f testfile_cancel.STARTED ]; do sleep 0.2; done
 velda task cancel $job_id
 while ! (velda task get $job_id | grep -q TASK_STATUS_FAIL); do sleep 0.1; done
 `))
+	})
+
+	t.Run("CancelRecursive", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
+		jobId, err := runCommandGetOutput("bash", "-c", `
+cat << EOF > cancel_script2.sh
+#!/bin/bash
+set +x
+trap "touch \$1.CANCELLED" SIGTERM
+touch \$1.STARTED_STEP2
+tail -f /dev/null # Sleep forever
+EOF
+chmod +x cancel_script2.sh
+
+cat << EOF > cancel_script_wrapper.sh
+#!/bin/bash
+set +x
+touch \$1.STARTED
+vbatch --name actual_task ./cancel_script2.sh \$1
+vbatch --after-success actual_task --name succ true
+vbatch --after-success actual_task --name fail true
+EOF
+chmod +x cancel_script_wrapper.sh
+job_id=$(vbatch ./cancel_script_wrapper.sh testfile_cancel_rec)
+
+while [ ! -f testfile_cancel_rec.STARTED_STEP2 ]; do sleep 0.2; done
+velda task cancel $job_id
+while ! (velda task get $job_id/actual_task | grep -q TASK_STATUS_FAIL); do sleep 0.1; done
+echo $job_id
+`)
+		jobId = strings.TrimSpace(jobId)
+		require.NoError(t, err, "Failed to run cancel recursive", jobId)
+		assert.Equal(t, "TASK_STATUS_CANCELLED", getTaskStatus(t, jobId))
+		// Started task have status FAILURE.
+		assert.Equal(t, "TASK_STATUS_FAILURE", getTaskStatus(t, jobId+"/actual_task"))
+		assert.Equal(t, "TASK_STATUS_CANCELLED", getTaskStatus(t, jobId+"/succ"))
+		assert.Equal(t, "TASK_STATUS_CANCELLED", getTaskStatus(t, jobId+"/fail"))
 	})
 }

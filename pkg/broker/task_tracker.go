@@ -166,7 +166,7 @@ func (t *TaskTracker) tryBatchScheduling(ctx context.Context, req *proto.Session
 		return nil
 	}
 	if err := scheduler.PoolManager.RequestBatch(ctx, int(req.Workload.TotalShards), req.TaskId); err != nil {
-		return fmt.Errorf("failed to request batch: %v", err)
+		return fmt.Errorf("failed to request batch: %w", err)
 	}
 	req.Pool = fmt.Sprintf("%s:%s", req.Pool, req.TaskId)
 	newScheduler, err := t.scheduler.GetOrCreatePool(req.Pool)
@@ -185,7 +185,7 @@ func (t *TaskTracker) registerSession(session *Session) bool {
 	taskId := session.Request.TaskId
 	segments := strings.SplitN(taskId, "/", 2)
 	jobId := segments[0]
-	if _, ok := t.cancelled[taskId]; ok {
+	if _, ok := t.cancelled[jobId]; ok {
 		// Job is already cancelled.
 		return false
 	}
@@ -237,13 +237,12 @@ func (t *TaskTracker) ReconnectTask(ctx context.Context, session *Session) error
 	return nil
 }
 
-func (t *TaskTracker) CancelJob(ctx context.Context, taskId string) error {
+func (t *TaskTracker) CancelJob(ctx context.Context, jobId string) error {
 	var sessions map[string]*Session
 	func() {
-		jobId := strings.SplitN(taskId, "/", 2)[0]
 		t.sessionMu.Lock()
 		defer t.sessionMu.Unlock()
-		t.cancelled[taskId] = time.Now()
+		t.cancelled[jobId] = time.Now()
 		sessions = t.leasedSessions[jobId]
 
 		if len(t.cancelled) > cleanupMaxCancelledJobs || time.Since(t.lastCleanup) > cleanupMinimumInterval {
@@ -257,7 +256,7 @@ func (t *TaskTracker) CancelJob(ctx context.Context, taskId string) error {
 			t.lastCleanup = time.Now()
 		}
 	}()
-	log.Printf("Cancelling job %s with %d running sessions", taskId, len(sessions))
+	log.Printf("Cancelling job %s with %d running sessions", jobId, len(sessions))
 	if len(sessions) == 0 {
 		return nil
 	}

@@ -104,7 +104,7 @@ var listTaskCmd = &cobra.Command{
 				return fmt.Errorf("failed to print: %w", err)
 			}
 			if resp.GetNextPageToken() != "" && !fetchAll {
-				fmt.Printf("Next page token: %s\n", resp.GetNextPageToken())
+				cmd.Printf("Next page token: %s\n", resp.GetNextPageToken())
 			}
 			pageToken = resp.GetNextPageToken()
 			if pageToken == "" || !fetchAll {
@@ -150,7 +150,7 @@ var searchTaskCmd = &cobra.Command{
 				return fmt.Errorf("failed to print: %w", err)
 			}
 			if resp.GetNextPageToken() != "" && !fetchAll {
-				fmt.Printf("Next page token: %s\n", resp.GetNextPageToken())
+				cmd.Printf("Next page token: %s\n", resp.GetNextPageToken())
 			}
 			pageToken = resp.GetNextPageToken()
 			if pageToken == "" || !fetchAll {
@@ -218,7 +218,7 @@ var cancelTaskCmd = &cobra.Command{
 			return fmt.Errorf("Error cancelling job: %w", err)
 		}
 
-		fmt.Printf("Job %s cancelled successfully\n", jobId)
+		cmd.Printf("Job %s cancelled successfully\n", jobId)
 		return nil
 	},
 }
