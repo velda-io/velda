@@ -22,19 +22,26 @@ import (
 	"strings"
 	"sync"
 
+	"google.golang.org/protobuf/types/known/emptypb"
 	"velda.io/velda/pkg/proto"
 	"velda.io/velda/pkg/rbac"
 	"velda.io/velda/pkg/storage"
 )
 
 const (
-	ActionGetTask = "task.get"
+	ActionGetTask   = "task.get"
+	ActionCancelJob = "task.cancel"
 )
 
 type TaskDb interface {
 	GetTask(ctx context.Context, taskId string) (*proto.Task, error)
 	ListTasks(ctx context.Context, request *proto.ListTasksRequest) ([]*proto.Task, string, error)
 	SearchTasks(ctx context.Context, request *proto.SearchTasksRequest) ([]*proto.Task, string, error)
+	CancelJob(ctx context.Context, jobId string) error
+}
+
+type TaskTracker interface {
+	CancelJob(ctx context.Context, jobId string) error
 }
 
 type TaskLogDb interface {
@@ -43,16 +50,18 @@ type TaskLogDb interface {
 
 type TaskServiceServer struct {
 	proto.UnimplementedTaskServiceServer
-	db         TaskDb
-	logDb      TaskLogDb
-	permission rbac.Permissions
+	db          TaskDb
+	logDb       TaskLogDb
+	taskTracker TaskTracker
+	permission  rbac.Permissions
 }
 
-func NewTaskServiceServer(db TaskDb, logDb TaskLogDb, permissions rbac.Permissions) *TaskServiceServer {
+func NewTaskServiceServer(db TaskDb, logDb TaskLogDb, taskTracker TaskTracker, permissions rbac.Permissions) *TaskServiceServer {
 	return &TaskServiceServer{
-		db:         db,
-		logDb:      logDb,
-		permission: permissions,
+		db:          db,
+		logDb:       logDb,
+		taskTracker: taskTracker,
+		permission:  permissions,
 	}
 }
 
@@ -99,6 +108,26 @@ func (s *TaskServiceServer) SearchTasks(ctx context.Context, in *proto.SearchTas
 		Tasks:         tasks,
 		NextPageToken: nextCursor,
 	}, nil
+}
+
+func (s *TaskServiceServer) CancelJob(ctx context.Context, in *proto.CancelJobRequest) (*emptypb.Empty, error) {
+	task, err := s.db.GetTask(ctx, in.JobId)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.permission.Check(ctx, ActionCancelJob, fmt.Sprintf("tasks/%d/%s", task.InstanceId, task.Id)); err != nil {
+		return nil, err
+	}
+	err = s.db.CancelJob(ctx, in.JobId)
+	if err != nil {
+		return nil, err
+	}
+	err = s.taskTracker.CancelJob(ctx, in.JobId)
+	if err != nil {
+		return nil, err
+	}
+
+	return &emptypb.Empty{}, nil
 }
 
 func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskService_LogsServer) error {

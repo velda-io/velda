@@ -16,6 +16,7 @@ syntax = "proto3";
 package velda;
 
 import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
 import "execution.proto";
@@ -31,6 +32,7 @@ enum TaskStatus {
   TASK_STATUS_SUCCESS = 5;
   TASK_STATUS_FAILURE = 6;
   TASK_STATUS_FAILED_UPSTREAM = 7;
+  TASK_STATUS_CANCELLED = 8;
 }
 
 message Task {
@@ -89,6 +91,10 @@ message LogTaskResponse {
   bytes data = 2;
 }
 
+message CancelJobRequest {
+  string job_id = 1;
+}
+
 service TaskService {
   rpc GetTask(GetTaskRequest) returns (Task) {
     option (google.api.http) = {
@@ -104,6 +110,12 @@ service TaskService {
   rpc SearchTasks(SearchTasksRequest) returns (TaskPageResult) {
     option (google.api.http) = {
             get: "/rest/task/search"
+        };
+  };
+
+  rpc CancelJob(CancelJobRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+            post: "/rest/task/cancel/{job_id=**}"
         };
   };
 

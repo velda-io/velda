@@ -59,7 +59,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	}
 	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, nfsExportAuth, apiserverDatabase)
 	taskLogDb := ProvideTaskLogDb(storage)
-	taskServiceServer := ProvideTaskService(server, runtimeServeMux, apiserverDatabase, taskLogDb, permissions)
+	taskServiceServer := ProvideTaskService(server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
 	poolManagerServiceServer := ProvidePoolService(server, runtimeServeMux, schedulerSet)
 	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storage, permissions)
 	registry := _wireRegistryValue

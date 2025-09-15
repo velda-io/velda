@@ -200,12 +200,36 @@ var logTaskCmd = &cobra.Command{
 	},
 }
 
+var cancelTaskCmd = &cobra.Command{
+	Use:   "cancel <job-id>",
+	Short: "Cancel a job",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		conn, err := clientlib.GetApiConnection()
+		if err != nil {
+			return fmt.Errorf("Error getting API connection: %w", err)
+		}
+		defer conn.Close()
+		client := proto.NewTaskServiceClient(conn)
+
+		jobId := args[0]
+		_, err = client.CancelJob(cmd.Context(), &proto.CancelJobRequest{JobId: jobId})
+		if err != nil {
+			return fmt.Errorf("Error cancelling job: %w", err)
+		}
+
+		fmt.Printf("Job %s cancelled successfully\n", jobId)
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(getTaskCmd)
 	taskCmd.AddCommand(logTaskCmd)
 	taskCmd.AddCommand(listTaskCmd)
 	taskCmd.AddCommand(searchTaskCmd)
+	taskCmd.AddCommand(cancelTaskCmd)
 
 	listTaskCmd.Flags().String("page-token", "", "Page token")
 	listTaskCmd.Flags().Int32("max-results", 0, "Max results")

@@ -281,6 +281,8 @@ func rowToTask(row interface {
 		task.Status = proto.TaskStatus_TASK_STATUS_FAILURE
 	case "FAILED_UPSTREAM":
 		task.Status = proto.TaskStatus_TASK_STATUS_FAILED_UPSTREAM
+	case "CANCELLED":
+		task.Status = proto.TaskStatus_TASK_STATUS_CANCELLED
 	}
 
 	// Parse labels if present (stored as JSON array string)
@@ -917,6 +919,14 @@ RETURNING pool`, cutoffTime)
 	_, err = s.db.ExecContext(ctx, `
 DELETE FROM leasers WHERE last_heartbeat < ?`, cutoffTime)
 
+	return err
+}
+
+func (s *SqliteDatabase) CancelJob(ctx context.Context, jobId string) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE tasks
+SET status = 'CANCELLED'
+WHERE substr(parent_id, 1, instr(parent_id || '/', '/') - 1) = ? AND status != 'LEASED'`, jobId)
 	return err
 }
 

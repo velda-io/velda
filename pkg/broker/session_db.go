@@ -120,9 +120,9 @@ func (db *SessionDatabase) registerSession(instance *Instance, sessionReq *proto
 	sessionID := sessionReq.SessionId
 
 	session := NewSession(sessionReq, scheduler, db.accountingDb)
-	session.OnCompletion = func() {
+	session.AddCompletion(func() {
 		db.RemoveSession(session)
-	}
+	})
 
 	if sessionReq.ServiceName != "" {
 		var sessions map[string]bool

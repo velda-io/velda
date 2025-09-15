@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/pflag"
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/tasks"
 )
 
 func ProvideRunners(
@@ -54,6 +55,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		ProvideSessionDb,
 		ProvideTaskTracker,
 		ProvideLocalDiskStorage,
+		wire.Bind(new(tasks.TaskTracker), (**broker.TaskTracker)(nil)),
 		wire.InterfaceValue(new(broker.AccountingDb), broker.AccountingDb(nil)),
 		DatabaseProviders,
 		wire.Value(ServerAuthUnaryInterceptor(sessionInterceptor)),

@@ -202,4 +202,25 @@ vbatch -N 5 --gang -P batch ./bgang_script.sh testfile_bgang
 			return true
 		}, 30*time.Second, 1000*time.Millisecond)
 	})
+
+	t.Run("Cancel", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
+		require.NoError(t, runCommand("bash", "-c", `
+cat << EOF > cancel_script.sh
+#!/bin/bash
+set +x
+trap "touch \$1.CANCELLED" SIGTERM
+touch \$1.STARTED
+tail -f /dev/null # Sleep forever
+EOF
+chmod +x cancel_script.sh
+job_id=$(vbatch ./cancel_script.sh testfile_cancel)
+
+while [ ! -f testfile_cancel.STARTED ]; do sleep 0.2; done
+velda task cancel $job_id
+while ! (velda task get $job_id | grep -q TASK_STATUS_FAIL); do sleep 0.1; done
+`))
+	})
 }
