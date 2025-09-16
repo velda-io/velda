@@ -237,6 +237,22 @@ func (t *TaskTracker) ReconnectTask(ctx context.Context, session *Session) error
 	return nil
 }
 
+func (t *TaskTracker) GetTaskStatus(ctx context.Context, taskId string) (*proto.ExecutionStatus, error) {
+	segments := strings.SplitN(taskId, "/", 2)
+	jobId := segments[0]
+	t.sessionMu.Lock()
+	sessions := t.leasedSessions[jobId]
+	t.sessionMu.Unlock()
+	if sessions == nil {
+		return nil, fmt.Errorf("task %s not found in tracker", taskId)
+	}
+	session, ok := sessions[taskId]
+	if !ok {
+		return nil, fmt.Errorf("task %s not found in tracker", taskId)
+	}
+	return session.Status(), nil
+}
+
 func (t *TaskTracker) CancelJob(ctx context.Context, jobId string) error {
 	var sessions map[string]*Session
 	func() {
