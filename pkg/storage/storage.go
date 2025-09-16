@@ -23,6 +23,10 @@ type ByteStream struct {
 	Err  chan error
 }
 
+type ReadFileOptions struct {
+	Follow bool
+}
+
 type Storage interface {
 	CreateInstance(ctx context.Context, instanceId int64) error
 
@@ -42,7 +46,7 @@ type Storage interface {
 
 	DeleteImage(ctx context.Context, imageName string) error
 
-	ReadFile(ctx context.Context, instanceId int64, path string) (ByteStream, error)
+	ReadFile(ctx context.Context, instanceId int64, path string, options *ReadFileOptions) (ByteStream, error)
 }
 
 type LocalStorageLogDb struct {
@@ -55,11 +59,11 @@ func NewLocalStorageLogDb(storage Storage) *LocalStorageLogDb {
 	}
 }
 
-func (l *LocalStorageLogDb) GetTaskLogs(ctx context.Context, instanceId int64, taskId string) (stdout ByteStream, stderr ByteStream, err error) {
-	stdout, err = l.storage.ReadFile(ctx, instanceId, fmt.Sprintf("/.velda_tasks/%s.stdout", taskId))
+func (l *LocalStorageLogDb) GetTaskLogs(ctx context.Context, instanceId int64, taskId string, options *ReadFileOptions) (stdout ByteStream, stderr ByteStream, err error) {
+	stdout, err = l.storage.ReadFile(ctx, instanceId, fmt.Sprintf("/.velda_tasks/%s.stdout", taskId), options)
 	if err != nil {
 		return
 	}
-	stderr, err = l.storage.ReadFile(ctx, instanceId, fmt.Sprintf("/.velda_tasks/%s.stderr", taskId))
+	stderr, err = l.storage.ReadFile(ctx, instanceId, fmt.Sprintf("/.velda_tasks/%s.stderr", taskId), options)
 	return
 }

@@ -41,7 +41,7 @@ func runVeldaWithOutput(args ...string) (string, error) {
 	return stdout, err
 }
 
-func runVeldaWithOutErr(args ...string) (string, string, error) {
+func runVeldaRaw(args ...string) (*exec.Cmd, error) {
 	veldaPath := os.Getenv("VELDA")
 	if veldaPath == "" {
 		var err error
@@ -50,7 +50,7 @@ func runVeldaWithOutErr(args ...string) (string, string, error) {
 			// Fall back to binary in the project
 			veldaPath = filepath.Join("..", "..", "bin", "client")
 			if _, err := os.Stat(veldaPath); os.IsNotExist(err) {
-				return "", "", fmt.Errorf("velda client binary not found: %v", err)
+				return nil, fmt.Errorf("velda client binary not found: %v", err)
 			}
 		}
 	}
@@ -60,6 +60,14 @@ func runVeldaWithOutErr(args ...string) (string, string, error) {
 	}
 	// Execute the command
 	cmd := exec.Command(veldaPath, args...)
+	return cmd, nil
+}
+
+func runVeldaWithOutErr(args ...string) (string, string, error) {
+	cmd, err := runVeldaRaw(args...)
+	if err != nil {
+		return "", "", err
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()

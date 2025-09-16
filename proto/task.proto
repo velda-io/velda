@@ -79,6 +79,7 @@ message TaskPageResult {
 
 message LogTaskRequest {
   string task_id = 1;
+  bool follow = 2;
 }
 
 message LogTaskResponse {

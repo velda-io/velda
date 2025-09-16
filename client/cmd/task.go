@@ -174,7 +174,12 @@ var logTaskCmd = &cobra.Command{
 		client := proto.NewTaskServiceClient(conn)
 
 		taskId := args[0]
-		stream, err := client.Logs(cmd.Context(), &proto.LogTaskRequest{TaskId: taskId})
+		follow, _ := cmd.Flags().GetBool("follow")
+		request := &proto.LogTaskRequest{
+			TaskId: taskId,
+			Follow: follow,
+		}
+		stream, err := client.Logs(cmd.Context(), request)
 		if err != nil {
 			return fmt.Errorf("Error opening log stream: %w", err)
 		}
@@ -242,6 +247,8 @@ func init() {
 	searchTaskCmd.Flags().Int32("max-results", 0, "Max results")
 	searchTaskCmd.Flags().Bool("header", true, "Show header")
 	searchTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
+
+	logTaskCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 
 	getTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 	getTaskCmd.Flags().Bool("header", true, "Show header")
