@@ -42,6 +42,7 @@ type TaskDb interface {
 
 type TaskTracker interface {
 	CancelJob(ctx context.Context, jobId string) error
+	GetTaskStatus(ctx context.Context, taskId string) (*proto.ExecutionStatus, error)
 }
 
 type TaskLogDb interface {
@@ -70,6 +71,7 @@ func (s *TaskServiceServer) GetTask(ctx context.Context, in *proto.GetTaskReques
 	if err != nil {
 		return nil, err
 	}
+	s.patchTaskStatus(ctx, task)
 	jobIdIndex := strings.Index(in.TaskId, "/")
 	jobId := in.TaskId
 	if jobIdIndex != -1 {
@@ -92,6 +94,7 @@ func (s *TaskServiceServer) ListTasks(ctx context.Context, in *proto.ListTasksRe
 			return nil, err
 		}
 	}
+	s.patchTaskStatus(ctx, tasks...)
 	return &proto.TaskPageResult{
 		Tasks:         tasks,
 		NextPageToken: nextCursor,
@@ -104,6 +107,7 @@ func (s *TaskServiceServer) SearchTasks(ctx context.Context, in *proto.SearchTas
 	if err != nil {
 		return nil, err
 	}
+	s.patchTaskStatus(ctx, tasks...)
 	return &proto.TaskPageResult{
 		Tasks:         tasks,
 		NextPageToken: nextCursor,
@@ -115,6 +119,7 @@ func (s *TaskServiceServer) CancelJob(ctx context.Context, in *proto.CancelJobRe
 	if err != nil {
 		return nil, err
 	}
+	s.patchTaskStatus(ctx, task)
 	if err := s.permission.Check(ctx, ActionCancelJob, fmt.Sprintf("tasks/%d/%s", task.InstanceId, task.Id)); err != nil {
 		return nil, err
 	}
@@ -132,6 +137,7 @@ func (s *TaskServiceServer) CancelJob(ctx context.Context, in *proto.CancelJobRe
 
 func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskService_LogsServer) error {
 	task, err := s.db.GetTask(stream.Context(), in.TaskId)
+	s.patchTaskStatus(stream.Context(), task)
 	stdout, stderr, err := s.logDb.GetTaskLogs(stream.Context(), task.InstanceId, in.TaskId)
 	if err != nil {
 		return err
@@ -156,5 +162,29 @@ func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskServ
 	go handleStream(proto.LogTaskResponse_STREAM_STDOUT, stdout)
 	go handleStream(proto.LogTaskResponse_STREAM_STDERR, stderr)
 	wg.Wait()
+	return nil
+}
+
+func (s *TaskServiceServer) patchTaskStatus(ctx context.Context, tasks ...*proto.Task) error {
+	// The storage returns running/queueuing as queueing.
+	// Needs to query the task tracker for the real status.
+	for _, task := range tasks {
+		if task.Status == proto.TaskStatus_TASK_STATUS_QUEUEING {
+			status, err := s.taskTracker.GetTaskStatus(ctx, task.Id)
+			// Possibly the task has finished and removed from the tracker.
+			// Check the status from DB again.
+			if err != nil {
+				newtask, err := s.db.GetTask(ctx, task.Id)
+				if err != nil {
+					return err
+				}
+				task.Status = newtask.Status
+				continue
+			}
+			if status != nil && status.Status == proto.ExecutionStatus_STATUS_RUNNING {
+				task.Status = proto.TaskStatus_TASK_STATUS_RUNNING
+			}
+		}
+	}
 	return nil
 }

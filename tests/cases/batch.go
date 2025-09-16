@@ -223,6 +223,7 @@ EOF
 chmod +x cancel_script.sh
 job_id=$(vbatch ./cancel_script.sh testfile_cancel)
 
+while [ velda task get $job_id | grep -q TASK_STATUS_RUNNING ]; do sleep 0.1; done
 while [ ! -f testfile_cancel.STARTED ]; do sleep 0.2; done
 velda task cancel $job_id
 while ! (velda task get $job_id | grep -q TASK_STATUS_FAIL); do sleep 0.1; done
