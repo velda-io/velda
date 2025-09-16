@@ -166,7 +166,7 @@ func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskServ
 }
 
 func (s *TaskServiceServer) patchTaskStatus(ctx context.Context, tasks ...*proto.Task) error {
-	// The storage returns running/queueuing as queueing.
+	// The storage returns running/queueing as queueing.
 	// Needs to query the task tracker for the real status.
 	for _, task := range tasks {
 		if task.Status == proto.TaskStatus_TASK_STATUS_QUEUEING {
