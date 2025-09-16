@@ -15,6 +15,7 @@ package cases
 
 import (
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -91,6 +92,48 @@ chmod +x script-log.sh
 		assert.Contains(t, stdout, "STDOUT")
 		assert.Contains(t, stderr, "STDERR")
 	})
+	t.Run("LogsFollow", func(t *testing.T) {
+		// Setup test scripts
+		require.NoError(t, runCommand("sh", "-c", `
+cat << EOF > script-log-follow.sh
+#!/bin/bash
+for ((i=0;i<5;i++)) do
+  echo \$i
+  sleep 1
+done
+EOF
+chmod +x script-log-follow.sh
+`))
+
+		taskId, err := runCommandGetOutput("vbatch", "./script-log-follow.sh")
+		require.NoError(t, err)
+		taskId = strings.TrimSpace(taskId)
+		// Wait until the job is finished
+		cmd, err := runVeldaRaw("task", "log", "-f", taskId)
+		require.NoError(t, err, "Failed to create command")
+		stdoutPipe, err := cmd.StdoutPipe()
+		require.NoError(t, err, "Failed to get stdout pipe")
+		cmd.Stderr = os.Stderr
+		// Wait until job is started.
+		// TODO: Handle job not started.
+		time.Sleep(1 * time.Second)
+		require.NoError(t, cmd.Start(), "Failed to start command")
+
+		// Wait until we see number 4
+		buf := make([]byte, 1024)
+		output := ""
+		require.Eventually(t, func() bool {
+			n, err := stdoutPipe.Read(buf)
+			if err != nil {
+				return false
+			}
+			output += string(buf[:n])
+			return strings.Contains(output, "4")
+		}, 30*time.Second, 100*time.Millisecond, "Did not receive expected log output")
+		cmd.Process.Kill()
+		cmd.Wait()
+	})
+
 	t.Run("Recursive", func(t *testing.T) {
 		// Setup test scripts
 		require.NoError(t, runCommand("sh", "-c", `

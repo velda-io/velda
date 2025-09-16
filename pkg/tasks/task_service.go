@@ -46,7 +46,7 @@ type TaskTracker interface {
 }
 
 type TaskLogDb interface {
-	GetTaskLogs(ctx context.Context, instanceId int64, taskId string) (stdout storage.ByteStream, stderr storage.ByteStream, err error)
+	GetTaskLogs(ctx context.Context, instanceId int64, taskId string, options *storage.ReadFileOptions) (stdout storage.ByteStream, stderr storage.ByteStream, err error)
 }
 
 type TaskServiceServer struct {
@@ -137,8 +137,11 @@ func (s *TaskServiceServer) CancelJob(ctx context.Context, in *proto.CancelJobRe
 
 func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskService_LogsServer) error {
 	task, err := s.db.GetTask(stream.Context(), in.TaskId)
+	options := &storage.ReadFileOptions{
+		Follow: in.Follow,
+	}
 	s.patchTaskStatus(stream.Context(), task)
-	stdout, stderr, err := s.logDb.GetTaskLogs(stream.Context(), task.InstanceId, in.TaskId)
+	stdout, stderr, err := s.logDb.GetTaskLogs(stream.Context(), task.InstanceId, in.TaskId, options)
 	if err != nil {
 		return err
 	}
