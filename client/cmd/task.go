@@ -248,7 +248,7 @@ func init() {
 	searchTaskCmd.Flags().Bool("header", true, "Show header")
 	searchTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 
-	logTaskCmd.Flags().BoolP("follow", "f", true, "Follow log output")
+	logTaskCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 
 	getTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 	getTaskCmd.Flags().Bool("header", true, "Show header")
