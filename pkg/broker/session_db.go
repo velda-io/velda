@@ -31,6 +31,7 @@ type SessionWatcher interface {
 	NotifyTaskChange(taskId string, state *proto.ExecutionStatus)
 }
 
+// A shared context object for session to call-back.
 type SessionHelper interface {
 	AccountingDb
 	SessionWatcher
@@ -45,9 +46,9 @@ func (db *NullAccountingDb) RecordExecution(data *proto.SessionExecutionRecord) 
 var AlreadyExistsError = errors.New("session already exists")
 
 type SessionDatabase struct {
-	mu           sync.Mutex
-	instances    map[int64]*Instance
-	accountingDb SessionHelper
+	mu        sync.Mutex
+	instances map[int64]*Instance
+	helpers   SessionHelper
 }
 
 type Instance struct {
@@ -58,10 +59,10 @@ type Instance struct {
 	services map[string]map[string]bool
 }
 
-func NewSessionDatabase(accountingDb SessionHelper) *SessionDatabase {
+func NewSessionDatabase(helpers SessionHelper) *SessionDatabase {
 	return &SessionDatabase{
-		instances:    make(map[int64]*Instance),
-		accountingDb: accountingDb,
+		instances: make(map[int64]*Instance),
+		helpers:   helpers,
 	}
 }
 
@@ -135,7 +136,7 @@ func (db *SessionDatabase) RegisterSession(sessionReq *proto.SessionRequest, sch
 func (db *SessionDatabase) registerSession(instance *Instance, sessionReq *proto.SessionRequest, scheduler *Scheduler, updater ...SessionUpdater) (*Session, error) {
 	sessionID := sessionReq.SessionId
 
-	session := NewSession(sessionReq, scheduler, db.accountingDb)
+	session := NewSession(sessionReq, scheduler, db.helpers)
 	session.AddCompletion(func() {
 		db.RemoveSession(session)
 	})

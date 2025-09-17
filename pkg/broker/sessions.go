@@ -493,6 +493,9 @@ func (s *Session) recordExecution(finalState proto.SessionExecutionFinalState) e
 }
 
 func (s *Session) notifyChangeLocked() {
+	if s.helpers == nil {
+		return
+	}
 	status := pb.Clone(s.status).(*proto.ExecutionStatus)
 	s.helpers.NotifyStateChange(s.Request.InstanceId, s.id, status)
 	if s.Request.TaskId != "" {
