@@ -22,7 +22,8 @@ import (
 func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	serverMetrics := ProvideGrpcMetrics()
 	serverAuthUnaryInterceptor := _wireServerAuthUnaryInterceptorValue
-	server := ProvideGrpcServer(serverMetrics, serverAuthUnaryInterceptor)
+	serverAuthStreamInterceptor := _wireServerAuthStreamInterceptorValue
+	server := ProvideGrpcServer(serverMetrics, serverAuthUnaryInterceptor, serverAuthStreamInterceptor)
 	serveMux := ProvideHttpHandler()
 	runtimeServeMux := ProvideGrpcMux(serveMux)
 	serviceCtx := ProvideBaseCtx()
@@ -82,9 +83,10 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 }
 
 var (
-	_wireServerAuthUnaryInterceptorValue = ServerAuthUnaryInterceptor(sessionInterceptor)
-	_wireNullAccountingDbValue           = &broker.NullAccountingDb{}
-	_wireRegistryValue                   = AllMetrics
+	_wireServerAuthUnaryInterceptorValue  = ServerAuthUnaryInterceptor(sessionInterceptor)
+	_wireServerAuthStreamInterceptorValue = ServerAuthStreamInterceptor(sessionStreamInterceptor)
+	_wireNullAccountingDbValue            = &broker.NullAccountingDb{}
+	_wireRegistryValue                    = AllMetrics
 )
 
 // wire.go:

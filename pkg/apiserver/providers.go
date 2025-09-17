@@ -229,6 +229,7 @@ func ProvidePoolService(grpcServer *grpc.Server, mux *runtime.ServeMux, schedule
 }
 
 type ServerAuthUnaryInterceptor grpc.UnaryServerInterceptor
+type ServerAuthStreamInterceptor grpc.StreamServerInterceptor
 
 func ProvideGrpcMetrics() *prometheus_grpc.ServerMetrics {
 	return prometheus_grpc.NewServerMetrics(
@@ -236,14 +237,15 @@ func ProvideGrpcMetrics() *prometheus_grpc.ServerMetrics {
 	)
 }
 
-func ProvideGrpcServer(metrics *prometheus_grpc.ServerMetrics, authInterceptor ServerAuthUnaryInterceptor) *grpc.Server {
+func ProvideGrpcServer(metrics *prometheus_grpc.ServerMetrics, authUnaryInterceptor ServerAuthUnaryInterceptor, authStreamInterceptor ServerAuthStreamInterceptor) *grpc.Server {
 	return grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			metrics.UnaryServerInterceptor(),
-			grpc.UnaryServerInterceptor(authInterceptor),
+			grpc.UnaryServerInterceptor(authUnaryInterceptor),
 		),
-		grpc.StreamInterceptor(
+		grpc.ChainStreamInterceptor(
 			metrics.StreamServerInterceptor(),
+			grpc.StreamServerInterceptor(authStreamInterceptor),
 		),
 	)
 }

@@ -25,6 +25,7 @@ type authProvider interface {
 	GetAccessToken(ctx context.Context) (string, error)
 	BindSession(ctx context.Context, session *proto.SessionRequest) context.Context
 	GetAuthInterceptor() grpc.UnaryClientInterceptor
+	GetStreamAuthInterceptor() grpc.StreamClientInterceptor
 	RenameProfile(oldName, newName string) error
 	DeleteProfile(profile string) error
 	SshDial(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error)
@@ -44,6 +45,10 @@ func BindSession(ctx context.Context, session *proto.SessionRequest) context.Con
 
 func GetAuthInterceptor() grpc.UnaryClientInterceptor {
 	return theAuthProvider.GetAuthInterceptor()
+}
+
+func GetStreamAuthInterceptor() grpc.StreamClientInterceptor {
+	return theAuthProvider.GetStreamAuthInterceptor()
 }
 
 func RenameProfile(oldName, newName string) error {

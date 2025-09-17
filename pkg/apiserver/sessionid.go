@@ -21,6 +21,27 @@ func sessionInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySe
 	return handler(ctx, req)
 }
 
+func sessionStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	user, err := userFromGrpc(ss.Context())
+	if err != nil {
+		return status.Error(codes.Unauthenticated, err.Error())
+	}
+	wrapped := &userServerStream{
+		ServerStream: ss,
+		ctx:          rbac.ContextWithUser(ss.Context(), user),
+	}
+	return handler(srv, wrapped)
+}
+
+type userServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (u *userServerStream) Context() context.Context {
+	return u.ctx
+}
+
 func userFromGrpc(ctx context.Context) (rbac.User, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
