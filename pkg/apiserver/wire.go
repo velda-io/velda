@@ -61,6 +61,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		wire.InterfaceValue(new(broker.AccountingDb), &broker.NullAccountingDb{}),
 		DatabaseProviders,
 		wire.Value(ServerAuthUnaryInterceptor(sessionInterceptor)),
+		wire.Value(ServerAuthStreamInterceptor(sessionStreamInterceptor)),
 		ProvideTaskLogDb,
 		ProvideBrokerServer,
 		ProvideTaskService,

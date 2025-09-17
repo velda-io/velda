@@ -310,7 +310,7 @@ vbatch ./test_watch.sh
 		// Watch the body.
 		// TODO: Watch the root job, currently do not support notification for child-tasks.
 		output, err := runVeldaWithOutput("task", "watch", jobId+"/body")
-		require.NoError(t, err, "Failed to watch task", jobId)
+		require.NoError(t, err, "Failed to watch task %s", jobId)
 		// Should contain all status.
 		assert.True(t, strings.Contains(output, "TASK_STATUS_PENDING"), "Expect pending status, got %s", output)
 		// Currently no queueing because it is immediately scheduled.

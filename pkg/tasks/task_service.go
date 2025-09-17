@@ -29,8 +29,9 @@ import (
 )
 
 const (
-	ActionGetTask   = "task.get"
-	ActionCancelJob = "task.cancel"
+	ActionGetTask    = "task.get"
+	ActionGetTaskLog = "task.get.log"
+	ActionCancelJob  = "task.cancel"
 )
 
 type TaskDb interface {
@@ -214,8 +215,15 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 
 func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskService_LogsServer) error {
 	task, err := s.db.GetTask(stream.Context(), in.TaskId)
-	options := &storage.ReadFileOptions{}
+	if err != nil {
+		return err
+	}
+
 	ctx := stream.Context()
+	if err := s.permission.Check(ctx, ActionGetTaskLog, fmt.Sprintf("tasks/%d/%s", task.InstanceId, task.Id)); err != nil {
+		return err
+	}
+	options := &storage.ReadFileOptions{}
 	if in.Follow && (task.Status == proto.TaskStatus_TASK_STATUS_PENDING || task.Status == proto.TaskStatus_TASK_STATUS_QUEUEING) {
 		// Wait until the task is started, and finish when completed.
 		subctx, cancel := context.WithCancel(ctx)

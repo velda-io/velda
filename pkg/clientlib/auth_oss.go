@@ -31,6 +31,10 @@ func (o OssAuthProvider) GetAuthInterceptor() grpc.UnaryClientInterceptor {
 	return unaryAuthInterceptor
 }
 
+func (o OssAuthProvider) GetStreamAuthInterceptor() grpc.StreamClientInterceptor {
+	return streamAuthInterceptor
+}
+
 func (o OssAuthProvider) GetAccessToken(ctx context.Context) (string, error) {
 	return "", nil
 }
@@ -101,4 +105,12 @@ func unaryAuthInterceptor(ctx context.Context, method string, req, reply any, cc
 		ctx = metadata.AppendToOutgoingContext(ctx, "velda-session", sessionInfo)
 	}
 	return invoker(ctx, method, req, reply, cc, opts...)
+}
+
+func streamAuthInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	if IsInSession() {
+		sessionInfo := fmt.Sprintf("%d:%s:%s", agentConfig.Instance, agentConfig.Session, agentConfig.TaskId)
+		ctx = metadata.AppendToOutgoingContext(ctx, "velda-session", sessionInfo)
+	}
+	return streamer(ctx, desc, cc, method, opts...)
 }
