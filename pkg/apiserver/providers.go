@@ -170,9 +170,9 @@ func ProvideSchedulers(ctx context.Context, cfg *configpb.Config) (*broker.Sched
 
 var ProvideSessionDb = broker.NewSessionDatabase
 
-func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler *broker.SchedulerSet, sessiondb *broker.SessionDatabase, taskdb broker.TaskQueueDb, _ ProvisionRunner) *broker.TaskTracker {
+func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler *broker.SchedulerSet, sessiondb *broker.SessionDatabase, taskdb broker.TaskQueueDb, _ ProvisionRunner, watcher *broker.Watcher) *broker.TaskTracker {
 	taskTrackerId := uuid.New().String()
-	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId)
+	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId, watcher)
 
 	// Start task trackers for each pool
 	go func() {
@@ -180,6 +180,18 @@ func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler 
 		log.Printf("Task tracker exited: %v", err)
 	}()
 	return tracker
+}
+
+var ProvideWatcher = broker.NewWatcher
+
+func ProvideSessionHelper(accountingDb broker.AccountingDb, watcher *broker.Watcher) broker.SessionHelper {
+	return struct {
+		broker.AccountingDb
+		broker.SessionWatcher
+	}{
+		AccountingDb:   accountingDb,
+		SessionWatcher: watcher,
+	}
 }
 
 func ProvideLocalDiskStorage(s storage.Storage) broker.LocalDiskProvider {
@@ -197,8 +209,8 @@ func ProvideBrokerServer(grpcServer *grpc.Server, mux *runtime.ServeMux, schedul
 	return s
 }
 
-func ProvideTaskService(grpcServer *grpc.Server, mux *runtime.ServeMux, db tasks.TaskDb, logdb tasks.TaskLogDb, taskTracker tasks.TaskTracker, perm rbac.Permissions) proto.TaskServiceServer {
-	s := tasks.NewTaskServiceServer(db, logdb, taskTracker, perm)
+func ProvideTaskService(ctx context.Context, grpcServer *grpc.Server, mux *runtime.ServeMux, db tasks.TaskDb, logdb tasks.TaskLogDb, taskTracker tasks.TaskTracker, perm rbac.Permissions) proto.TaskServiceServer {
+	s := tasks.NewTaskServiceServer(ctx, db, logdb, taskTracker, perm)
 	proto.RegisterTaskServiceServer(grpcServer, s)
 	proto.RegisterTaskServiceHandlerServer(context.Background(), mux, s)
 	return s

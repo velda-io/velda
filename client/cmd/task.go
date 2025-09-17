@@ -205,6 +205,59 @@ var logTaskCmd = &cobra.Command{
 	},
 }
 
+var watchTaskCmd = &cobra.Command{
+	Use:   "watch <task-id>",
+	Short: "Watch task status until completion",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		conn, err := clientlib.GetApiConnection()
+		if err != nil {
+			return fmt.Errorf("Error getting API connection: %w", err)
+		}
+		defer conn.Close()
+		client := proto.NewTaskServiceClient(conn)
+
+		taskId := args[0]
+
+		outFmt, _ := cmd.Flags().GetString("output")
+		if outFmt == "" {
+			outFmt = defaultTaskColumns
+		}
+		header, _ := cmd.Flags().GetBool("header")
+
+		// Open watch stream
+		stream, err := client.WatchTask(cmd.Context(), &proto.GetTaskRequest{TaskId: taskId})
+		if err != nil {
+			return fmt.Errorf("Error opening watch stream: %w", err)
+		}
+
+		first := true
+		for {
+			task, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return fmt.Errorf("Error receiving status update: %w", err)
+			}
+
+			if first {
+				// Print header according to flag; utils handles header for tables
+				if err := utils.PrintListOutput(task, []goproto.Message{task}, header, outFmt, os.Stdout); err != nil {
+					return fmt.Errorf("failed to print: %w", err)
+				}
+				first = false
+			} else {
+				// For subsequent updates, suppress header flag so only rows are printed.
+				if err := utils.PrintListOutput(task, []goproto.Message{task}, false, outFmt, os.Stdout); err != nil {
+					return fmt.Errorf("failed to print: %w", err)
+				}
+			}
+		}
+		return nil
+	},
+}
+
 var cancelTaskCmd = &cobra.Command{
 	Use:   "cancel <job-id>",
 	Short: "Cancel a job",
@@ -232,6 +285,7 @@ func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(getTaskCmd)
 	taskCmd.AddCommand(logTaskCmd)
+	taskCmd.AddCommand(watchTaskCmd)
 	taskCmd.AddCommand(listTaskCmd)
 	taskCmd.AddCommand(searchTaskCmd)
 	taskCmd.AddCommand(cancelTaskCmd)
@@ -249,6 +303,9 @@ func init() {
 	searchTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 
 	logTaskCmd.Flags().BoolP("follow", "f", false, "Follow log output")
+
+	watchTaskCmd.Flags().Bool("header", true, "Show header")
+	watchTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 
 	getTaskCmd.Flags().StringP("output", "o", "", "Output format (json|yaml|[[<fields>=]<path>]*)")
 	getTaskCmd.Flags().Bool("header", true, "Show header")

@@ -131,7 +131,7 @@ func TestPollTasksWithDependencies(t *testing.T) {
 		Workload:   &proto.Workload{Command: "echo downstream"},
 		Dependencies: []*proto.Dependency{
 			{
-				UpstreamTaskId: "test-job/upstream",
+				UpstreamTaskId: "upstream",
 				Type:           proto.Dependency_DEPENDENCY_TYPE_SUCCESS,
 			},
 		},
@@ -141,27 +141,29 @@ func TestPollTasksWithDependencies(t *testing.T) {
 	assert.NoError(t, err, "Failed to create downstream task")
 	assert.Equal(t, 1, upstreamCount, "Downstream task should have 1 dependency")
 
-	// Initially, only upstream task should be available for polling
-	tasks, err := database.pollTasksOnce(ctx, "test-leaser")
-	assert.NoError(t, err, "Failed to poll tasks")
-	assert.Len(t, tasks, 1, "Should only have upstream task available")
-	assert.Equal(t, "test-job/upstream", tasks[0].Task.Id)
-
-	// Complete upstream task
-	exitCode := int32(0)
-	result := &BatchTaskResult{
-		Payload: &proto.BatchTaskResult{
-			ExitCode: &exitCode,
-		},
-		StartTime: time.Now().Add(-time.Minute),
-	}
-
-	err = database.UpdateTaskFinalResult(ctx, "test-job/upstream", result)
-	assert.NoError(t, err, "Failed to update upstream task")
-
-	// Now downstream task should be available for polling
-	tasks, err = database.pollTasksOnce(ctx, "test-leaser")
-	assert.NoError(t, err, "Failed to poll tasks after upstream completion")
-	assert.Len(t, tasks, 1, "Should have downstream task available")
-	assert.Equal(t, "test-job/downstream", tasks[0].Task.Id)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	pollCtx, pollCancel := context.WithCancel(ctx)
+	completed := false
+	database.PollTasks(pollCtx, "test-leaser", func(leaserIdentity string, task *db.TaskWithUser) error {
+		if task.Id == "test-job/upstream" {
+			// Complete upstream task
+			exitCode := int32(0)
+			result := &BatchTaskResult{
+				Payload: &proto.BatchTaskResult{
+					ExitCode: &exitCode,
+				},
+				StartTime: time.Now().Add(-time.Minute),
+			}
+			completed = true
+			err = database.UpdateTaskFinalResult(ctx, "test-job/upstream", result)
+			assert.NoError(t, err, "Failed to update upstream task")
+		} else if task.Id == "test-job/downstream" {
+			// Downstream task should only be available after upstream is completed
+			assert.True(t, completed, "Downstream task polled before upstream completion")
+			pollCancel()
+		}
+		return nil
+	})
+	wg.Done()
 }

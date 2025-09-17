@@ -43,6 +43,7 @@ type TaskDb interface {
 type TaskTracker interface {
 	CancelJob(ctx context.Context, jobId string) error
 	GetTaskStatus(ctx context.Context, taskId string) (*proto.ExecutionStatus, error)
+	WatchTask(ctx context.Context, taskId string, callback func(*proto.ExecutionStatus) bool)
 }
 
 type TaskLogDb interface {
@@ -51,14 +52,16 @@ type TaskLogDb interface {
 
 type TaskServiceServer struct {
 	proto.UnimplementedTaskServiceServer
+	ctx         context.Context
 	db          TaskDb
 	logDb       TaskLogDb
 	taskTracker TaskTracker
 	permission  rbac.Permissions
 }
 
-func NewTaskServiceServer(db TaskDb, logDb TaskLogDb, taskTracker TaskTracker, permissions rbac.Permissions) *TaskServiceServer {
+func NewTaskServiceServer(ctx context.Context, db TaskDb, logDb TaskLogDb, taskTracker TaskTracker, permissions rbac.Permissions) *TaskServiceServer {
 	return &TaskServiceServer{
+		ctx:         ctx,
 		db:          db,
 		logDb:       logDb,
 		taskTracker: taskTracker,
@@ -135,13 +138,112 @@ func (s *TaskServiceServer) CancelJob(ctx context.Context, in *proto.CancelJobRe
 	return &emptypb.Empty{}, nil
 }
 
+func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.TaskService_WatchTaskServer) error {
+	ctx := stream.Context()
+	task, err := s.db.GetTask(ctx, in.TaskId)
+	if err != nil {
+		return err
+	}
+	if err := s.permission.Check(ctx, ActionGetTask, fmt.Sprintf("tasks/%d/%s", task.InstanceId, task.Id)); err != nil {
+		return err
+	}
+	if task.Status == proto.TaskStatus_TASK_STATUS_QUEUEING || task.Status == proto.TaskStatus_TASK_STATUS_PENDING {
+		sendErr := make(chan error, 1)
+		s.taskTracker.WatchTask(ctx, in.TaskId, func(status *proto.ExecutionStatus) bool {
+			if status == nil {
+				// Not leased yet. Send the initial task status.
+				err := stream.Send(task)
+				if err != nil {
+					sendErr <- err
+					return false
+				}
+				return true
+			}
+			switch status.Status {
+			case proto.ExecutionStatus_STATUS_RUNNING:
+				task.Status = proto.TaskStatus_TASK_STATUS_RUNNING
+				err := stream.Send(task)
+				if err != nil {
+					sendErr <- err
+					return false
+				}
+			case proto.ExecutionStatus_STATUS_QUEUEING:
+				task.Status = proto.TaskStatus_TASK_STATUS_QUEUEING
+				err := stream.Send(task)
+				if err != nil {
+					sendErr <- err
+					return false
+				}
+			case proto.ExecutionStatus_STATUS_TERMINATED:
+				sendErr <- io.EOF
+				return false
+			}
+			return true
+		})
+		select {
+		case err := <-sendErr:
+			if !errors.Is(err, io.EOF) {
+				return err
+			}
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		// Get final status from db
+		finalTask, err := s.db.GetTask(ctx, in.TaskId)
+		if err != nil {
+			return err
+		}
+		if finalTask.Status == proto.TaskStatus_TASK_STATUS_QUEUEING {
+			log.Printf("Unexpected: Task %s is still queueing after session terminated", in.TaskId)
+		}
+		err = stream.Send(finalTask)
+		if err != nil {
+			return err
+		}
+		return nil
+	} else {
+		err := stream.Send(task)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskService_LogsServer) error {
 	task, err := s.db.GetTask(stream.Context(), in.TaskId)
-	options := &storage.ReadFileOptions{
-		Follow: in.Follow,
+	options := &storage.ReadFileOptions{}
+	ctx := stream.Context()
+	if in.Follow && (task.Status == proto.TaskStatus_TASK_STATUS_PENDING || task.Status == proto.TaskStatus_TASK_STATUS_QUEUEING) {
+		// Wait until the task is started, and finish when completed.
+		subctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		ctx = subctx
+		taskStarted := make(chan struct{})
+		s.taskTracker.WatchTask(ctx, in.TaskId, func(status *proto.ExecutionStatus) bool {
+			if status == nil {
+				return true
+			}
+			switch status.Status {
+			case proto.ExecutionStatus_STATUS_RUNNING:
+				// TODO: Currently there's a chance of race if the file is not created yet.
+				close(taskStarted)
+			case proto.ExecutionStatus_STATUS_TERMINATED:
+				cancel()
+				return false
+			}
+			return true
+		})
+		select {
+		case <-taskStarted:
+			options.Follow = true
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	s.patchTaskStatus(stream.Context(), task)
-	stdout, stderr, err := s.logDb.GetTaskLogs(stream.Context(), task.InstanceId, in.TaskId, options)
+	stdout, stderr, err := s.logDb.GetTaskLogs(ctx, task.InstanceId, in.TaskId, options)
 	if err != nil {
 		return err
 	}
@@ -154,7 +256,7 @@ func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskServ
 			case line := <-s.Data:
 				stream.Send(&proto.LogTaskResponse{Stream: streamType, Data: line})
 			case err := <-s.Err:
-				if errors.Is(err, io.EOF) {
+				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return
 				}
 				log.Printf("Error reading stderr for task %s: %v", in.TaskId, err)
