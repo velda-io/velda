@@ -66,8 +66,8 @@ func providePid1Runner(requestPlugin *agent.SessionRequestPlugin, authPlugin age
 		waiterPlugin,
 		completionSignalPlugin,
 		sshdPlugin,
-		statusPlugin,
 		batchPlugin,
+		statusPlugin,
 		completionWaiter,
 	)
 }
