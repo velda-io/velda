@@ -15,7 +15,6 @@ package cases
 
 import (
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -108,30 +107,12 @@ chmod +x script-log-follow.sh
 		taskId, err := runCommandGetOutput("vbatch", "./script-log-follow.sh")
 		require.NoError(t, err)
 		taskId = strings.TrimSpace(taskId)
+		time.Sleep(1 * time.Second) // Wait a moment to ensure the task is started.
 		// Wait until the job is finished
-		cmd, err := runVeldaRaw("task", "log", "-f", taskId)
-		require.NoError(t, err, "Failed to create command")
-		stdoutPipe, err := cmd.StdoutPipe()
-		require.NoError(t, err, "Failed to get stdout pipe")
-		cmd.Stderr = os.Stderr
-		// Wait until job is started.
-		// TODO: Handle job not started.
-		time.Sleep(1 * time.Second)
-		require.NoError(t, cmd.Start(), "Failed to start command")
-
-		// Wait until we see number 4
-		buf := make([]byte, 1024)
-		output := ""
-		require.Eventually(t, func() bool {
-			n, err := stdoutPipe.Read(buf)
-			if err != nil {
-				return false
-			}
-			output += string(buf[:n])
-			return strings.Contains(output, "4")
-		}, 30*time.Second, 100*time.Millisecond, "Did not receive expected log output")
-		cmd.Process.Kill()
-		cmd.Wait()
+		output, err := runVeldaWithOutput("task", "log", "-f", taskId)
+		require.NoError(t, err, "Failed to get logs with err", output)
+		lines := strings.Split(strings.TrimSpace(output), "\n")
+		assert.GreaterOrEqual(t, len(lines), 5, "Expect at least 5 lines of output")
 	})
 
 	t.Run("Recursive", func(t *testing.T) {
@@ -310,5 +291,31 @@ echo $job_id
 		assert.Equal(t, "TASK_STATUS_FAILURE", getTaskStatus(t, jobId+"/actual_task"))
 		assert.Equal(t, "TASK_STATUS_CANCELLED", getTaskStatus(t, jobId+"/succ"))
 		assert.Equal(t, "TASK_STATUS_CANCELLED", getTaskStatus(t, jobId+"/fail"))
+	})
+	t.Run("Watch", func(t *testing.T) {
+		// Setup test scripts
+		jobId, err := runCommandGetOutput("sh", "-c", `
+cat << EOF > test_watch.sh
+#!/bin/sh
+vbatch --name begin sleep 3
+vbatch --name body --after-success begin sleep 2
+EOF
+chmod +x test_watch.sh
+vbatch ./test_watch.sh
+`)
+		require.NoError(t, err, "Failed to start job", jobId)
+		jobId = strings.TrimSpace(jobId)
+
+		time.Sleep(1 * time.Second) // Wait until the job sub-dag is created.
+		// Watch the body.
+		// TODO: Watch the root job, currently do not support notification for child-tasks.
+		output, err := runVeldaWithOutput("task", "watch", jobId+"/body")
+		require.NoError(t, err, "Failed to watch task", jobId)
+		// Should contain all status.
+		assert.True(t, strings.Contains(output, "TASK_STATUS_PENDING"), "Expect pending status, got %s", output)
+		// Currently no queueing because it is immediately scheduled.
+		//assert.True(t, strings.Contains(output, "TASK_STATUS_QUEUEING"), "Expect pending status, got %s", output)
+		assert.True(t, strings.Contains(output, "TASK_STATUS_RUNNING"), "Expect running status, got %s", output)
+		assert.True(t, strings.Contains(output, "TASK_STATUS_SUCCESS"), "Expect success status, got %s", output)
 	})
 }

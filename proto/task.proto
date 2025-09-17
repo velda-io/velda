@@ -120,5 +120,11 @@ service TaskService {
         };
   };
 
+  rpc WatchTask(GetTaskRequest) returns (stream Task) {
+    option (google.api.http) = {
+            get: "/rest/task/watch/{task_id=**}"
+        };
+  };
+
   rpc Logs(LogTaskRequest) returns (stream LogTaskResponse) {};
 }

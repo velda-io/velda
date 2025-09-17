@@ -26,12 +26,28 @@ type AccountingDb interface {
 	RecordExecution(data *proto.SessionExecutionRecord) error
 }
 
+type SessionWatcher interface {
+	NotifyStateChange(instanceId int64, sessionId string, state *proto.ExecutionStatus)
+	NotifyTaskChange(taskId string, state *proto.ExecutionStatus)
+}
+
+type SessionHelper interface {
+	AccountingDb
+	SessionWatcher
+}
+
+type NullAccountingDb struct{}
+
+func (db *NullAccountingDb) RecordExecution(data *proto.SessionExecutionRecord) error {
+	return nil
+}
+
 var AlreadyExistsError = errors.New("session already exists")
 
 type SessionDatabase struct {
 	mu           sync.Mutex
 	instances    map[int64]*Instance
-	accountingDb AccountingDb
+	accountingDb SessionHelper
 }
 
 type Instance struct {
@@ -42,7 +58,7 @@ type Instance struct {
 	services map[string]map[string]bool
 }
 
-func NewSessionDatabase(accountingDb AccountingDb) *SessionDatabase {
+func NewSessionDatabase(accountingDb SessionHelper) *SessionDatabase {
 	return &SessionDatabase{
 		instances:    make(map[int64]*Instance),
 		accountingDb: accountingDb,

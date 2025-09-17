@@ -54,6 +54,7 @@ type TaskQueueDb interface {
 type TaskTracker struct {
 	scheduler *SchedulerSet
 	sessions  *SessionDatabase
+	watcher   *Watcher
 
 	db       TaskQueueDb
 	identity string
@@ -66,12 +67,13 @@ type TaskTracker struct {
 	lastCleanup    time.Time
 }
 
-func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db TaskQueueDb, identity string) *TaskTracker {
+func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db TaskQueueDb, identity string, watcher *Watcher) *TaskTracker {
 	result := &TaskTracker{
 		scheduler:      schedulerSet,
 		sessions:       sessions,
 		db:             db,
 		identity:       identity,
+		watcher:        watcher,
 		gangs:          make(map[string]*GangCoordinator),
 		leasedSessions: make(map[string]map[string]*Session),
 		cancelled:      make(map[string]time.Time),
@@ -251,6 +253,16 @@ func (t *TaskTracker) GetTaskStatus(ctx context.Context, taskId string) (*proto.
 		return nil, fmt.Errorf("task %s not found in tracker", taskId)
 	}
 	return session.Status(), nil
+}
+
+func (t *TaskTracker) WatchTask(ctx context.Context, taskId string, callback func(*proto.ExecutionStatus) bool) {
+	t.watcher.SubscribeTask(ctx, taskId, callback, func() *proto.ExecutionStatus {
+		s, err := t.GetTaskStatus(ctx, taskId)
+		if err == nil {
+			return s
+		}
+		return nil
+	})
 }
 
 func (t *TaskTracker) CancelJob(ctx context.Context, jobId string) error {

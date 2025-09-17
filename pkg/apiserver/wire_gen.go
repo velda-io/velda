@@ -36,8 +36,10 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	if err != nil {
 		return nil, err
 	}
-	accountingDb := _wireAccountingDbValue
-	sessionDatabase := broker.NewSessionDatabase(accountingDb)
+	accountingDb := _wireNullAccountingDbValue
+	watcher := broker.NewWatcher()
+	sessionHelper := ProvideSessionHelper(accountingDb, watcher)
+	sessionDatabase := broker.NewSessionDatabase(sessionHelper)
 	permissions := ProvidePermission()
 	storage, err := ProvideStorage(config)
 	if err != nil {
@@ -51,7 +53,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	if err != nil {
 		return nil, err
 	}
-	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase, provisionRunner)
+	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase, provisionRunner, watcher)
 	localDiskProvider := ProvideLocalDiskStorage(storage)
 	nfsExportAuth, err := broker.NewNfsExportAuth(localDiskProvider)
 	if err != nil {
@@ -59,7 +61,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	}
 	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, nfsExportAuth, apiserverDatabase)
 	taskLogDb := ProvideTaskLogDb(storage)
-	taskServiceServer := ProvideTaskService(server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
+	taskServiceServer := ProvideTaskService(context, server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
 	poolManagerServiceServer := ProvidePoolService(server, runtimeServeMux, schedulerSet)
 	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storage, permissions)
 	registry := _wireRegistryValue
@@ -81,7 +83,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 
 var (
 	_wireServerAuthUnaryInterceptorValue = ServerAuthUnaryInterceptor(sessionInterceptor)
-	_wireAccountingDbValue               = broker.AccountingDb(nil)
+	_wireNullAccountingDbValue           = &broker.NullAccountingDb{}
 	_wireRegistryValue                   = AllMetrics
 )
 

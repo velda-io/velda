@@ -38,6 +38,7 @@ const (
 	TaskService_ListTasks_FullMethodName   = "/velda.TaskService/ListTasks"
 	TaskService_SearchTasks_FullMethodName = "/velda.TaskService/SearchTasks"
 	TaskService_CancelJob_FullMethodName   = "/velda.TaskService/CancelJob"
+	TaskService_WatchTask_FullMethodName   = "/velda.TaskService/WatchTask"
 	TaskService_Logs_FullMethodName        = "/velda.TaskService/Logs"
 )
 
@@ -49,6 +50,7 @@ type TaskServiceClient interface {
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskPageResult, error)
 	SearchTasks(ctx context.Context, in *SearchTasksRequest, opts ...grpc.CallOption) (*TaskPageResult, error)
 	CancelJob(ctx context.Context, in *CancelJobRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	WatchTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Task], error)
 	Logs(ctx context.Context, in *LogTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogTaskResponse], error)
 }
 
@@ -100,9 +102,28 @@ func (c *taskServiceClient) CancelJob(ctx context.Context, in *CancelJobRequest,
 	return out, nil
 }
 
+func (c *taskServiceClient) WatchTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Task], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[0], TaskService_WatchTask_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[GetTaskRequest, Task]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_WatchTaskClient = grpc.ServerStreamingClient[Task]
+
 func (c *taskServiceClient) Logs(ctx context.Context, in *LogTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogTaskResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[0], TaskService_Logs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &TaskService_ServiceDesc.Streams[1], TaskService_Logs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +148,7 @@ type TaskServiceServer interface {
 	ListTasks(context.Context, *ListTasksRequest) (*TaskPageResult, error)
 	SearchTasks(context.Context, *SearchTasksRequest) (*TaskPageResult, error)
 	CancelJob(context.Context, *CancelJobRequest) (*emptypb.Empty, error)
+	WatchTask(*GetTaskRequest, grpc.ServerStreamingServer[Task]) error
 	Logs(*LogTaskRequest, grpc.ServerStreamingServer[LogTaskResponse]) error
 	mustEmbedUnimplementedTaskServiceServer()
 }
@@ -149,6 +171,9 @@ func (UnimplementedTaskServiceServer) SearchTasks(context.Context, *SearchTasksR
 }
 func (UnimplementedTaskServiceServer) CancelJob(context.Context, *CancelJobRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelJob not implemented")
+}
+func (UnimplementedTaskServiceServer) WatchTask(*GetTaskRequest, grpc.ServerStreamingServer[Task]) error {
+	return status.Errorf(codes.Unimplemented, "method WatchTask not implemented")
 }
 func (UnimplementedTaskServiceServer) Logs(*LogTaskRequest, grpc.ServerStreamingServer[LogTaskResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Logs not implemented")
@@ -246,6 +271,17 @@ func _TaskService_CancelJob_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskService_WatchTask_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(GetTaskRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(TaskServiceServer).WatchTask(m, &grpc.GenericServerStream[GetTaskRequest, Task]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskService_WatchTaskServer = grpc.ServerStreamingServer[Task]
+
 func _TaskService_Logs_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(LogTaskRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -282,6 +318,11 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchTask",
+			Handler:       _TaskService_WatchTask_Handler,
+			ServerStreams: true,
+		},
 		{
 			StreamName:    "Logs",
 			Handler:       _TaskService_Logs_Handler,

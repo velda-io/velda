@@ -496,18 +496,17 @@ func (s *SqliteDatabase) addDownstreams(ctx context.Context, tx *sql.Tx, downstr
 		return 0, fmt.Errorf("shortUpstreamIds and triggerTypes must have the same length")
 	}
 
-	downstreamParentId, downstreamTaskId := path.Split(downstreamId)
+	parentId, downstreamTaskId := path.Split(downstreamId)
 	triggerMet := 0
 
 	for i, upstreamId := range shortUpstreamIds {
-		upstreamParentId, upstreamTaskId := path.Split(upstreamId)
 		triggerType := triggerTypes[i]
 
 		// Insert the dependency relationship
 		_, err := tx.ExecContext(ctx, `
 INSERT INTO task_dependencies (parent_id, downstream_task_id, upstream_parent_id, upstream_task_id, trigger_type)
 VALUES (?, ?, ?, ?, ?)`,
-			downstreamParentId, downstreamTaskId, upstreamParentId, upstreamTaskId, triggerType)
+			parentId, downstreamTaskId, parentId, upstreamId, triggerType)
 		if err != nil {
 			return 0, fmt.Errorf("failed to insert dependency: %w", err)
 		}
@@ -516,7 +515,7 @@ VALUES (?, ?, ?, ?, ?)`,
 		var status string
 		err = tx.QueryRowContext(ctx, `
 SELECT status FROM tasks WHERE parent_id = ? AND task_id = ?`,
-			upstreamParentId, upstreamTaskId).Scan(&status)
+			parentId, upstreamId).Scan(&status)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				// Upstream task doesn't exist yet, dependency not met
@@ -614,7 +613,7 @@ func (s *SqliteDatabase) updateTaskStatus(ctx context.Context, tx *sql.Tx, paren
 		log.Printf("updateTaskStatus: %s%s %s", parentId, taskId, outcome)
 
 		// Use recursive CTE to update downstream tasks
-		_, err := tx.ExecContext(ctx, `
+		rows, err := tx.QueryContext(ctx, `
 WITH RECURSIVE downstream_updates AS (
 	-- Base case: the task that just completed
 	SELECT ? AS task_id, ? AS parent_id, ? AS outcome
@@ -668,29 +667,29 @@ SET
 	END
 FROM downstream_counts
 WHERE tasks.parent_id = downstream_counts.parent_id AND tasks.task_id = downstream_counts.task_id
+RETURNING status, pending_upstreams
 `, taskId, parentId, outcome)
 
 		if err != nil {
 			return fmt.Errorf("failed to update downstream tasks: %w", err)
 		}
-
-		// Mark pools for polling for tasks that became ready (in-memory)
-		rows, err := tx.QueryContext(ctx, `
-SELECT DISTINCT pool
-FROM tasks
-WHERE status = 'QUEUEING' AND pending_upstreams = 0`)
-
-		if err != nil {
-			log.Printf("Warning: failed to query pools for polling: %v", err)
-		} else {
-			defer rows.Close()
-			for rows.Next() {
-				var pool string
-				if err := rows.Scan(&pool); err == nil {
-					s.notifyPollReady()
+		for rows.Next() {
+			var status string
+			var pendingUpstreams int
+			if err := rows.Scan(&status, &pendingUpstreams); err != nil {
+				rows.Close()
+				return fmt.Errorf("failed to scan downstream update result: %w", err)
+			}
+			if status == "QUEUEING" && pendingUpstreams == 0 {
+				// New task is ready to be polled
+				err = s.notifyPollReady()
+				if err != nil {
+					log.Printf("Warning: failed to mark pool for polling: %v", err)
 				}
+				break
 			}
 		}
+		rows.Close()
 
 		// Handle parent task completion if this task has a parent
 		if parentId == "" || parentId == "/" {

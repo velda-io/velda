@@ -88,10 +88,10 @@ type Session struct {
 	lastActiveTime time.Time
 
 	completions []func()
-	accounting  AccountingDb
+	helpers     SessionHelper
 }
 
-func NewSession(request *proto.SessionRequest, scheduler *Scheduler, accounting AccountingDb) *Session {
+func NewSession(request *proto.SessionRequest, scheduler *Scheduler, helpers SessionHelper) *Session {
 	return &Session{
 		id:        request.SessionId,
 		scheduler: scheduler,
@@ -106,7 +106,7 @@ func NewSession(request *proto.SessionRequest, scheduler *Scheduler, accounting 
 		cancelConfirm: make(chan struct{}, 1),
 		staleTimeout:  DefaultStaleTimeout,
 		createTime:    time.Now(),
-		accounting:    accounting,
+		helpers:       helpers,
 	}
 }
 
@@ -253,6 +253,7 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			s.updateFromAgentResponseLocked(response)
+			s.notifyChangeLocked()
 			return
 		case schedulingStateCancelling:
 			select {
@@ -329,6 +330,7 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 					// Reconnect to another agent, use a new execution Id.
 					s.status.Status = proto.ExecutionStatus_STATUS_QUEUEING
 					nextState = schedulingStateCreated
+					s.notifyChangeLocked()
 				}
 			}()
 		case schedulingStateTerminated:
@@ -366,6 +368,7 @@ func (s *Session) MarkStale(lastActiveTime time.Time) {
 		}
 		go s.scheduleLoop(schedulingStateCreated)
 	}
+	s.notifyChangeLocked()
 }
 
 func (s *Session) Reconnect() {
@@ -384,6 +387,7 @@ func (s *Session) Reconnect() {
 		log.Printf("Session %s: Reconnect called in state %v", s.id, s.state)
 	}
 	s.lastActiveTime = time.Now()
+	s.notifyChangeLocked()
 }
 
 func (s *Session) Checkpointed() {
@@ -392,6 +396,7 @@ func (s *Session) Checkpointed() {
 	s.status.Status = proto.ExecutionStatus_STATUS_CHECKPOINTED
 	log.Printf("Session %s: Checkpointed", s.id)
 	s.recordExecution(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_CHECKPOINTED)
+	s.notifyChangeLocked()
 }
 
 func (s *Session) Complete(finalStatus proto.SessionExecutionFinalState) {
@@ -422,6 +427,7 @@ func (s *Session) completeLocked(finalStatus proto.SessionExecutionFinalState) {
 		s.completions[i]()
 	}
 	s.recordExecution(finalStatus)
+	s.notifyChangeLocked()
 }
 
 func (s *Session) updateFromAgentResponseLocked(response AgentSessionResponse) {
@@ -460,7 +466,7 @@ func (s *Session) CancelConfirmChan() chan struct{} {
 }
 
 func (s *Session) recordExecution(finalState proto.SessionExecutionFinalState) error {
-	if s.accounting == nil {
+	if s.helpers == nil {
 		return fmt.Errorf("No accounting database configured for session %s", s.id)
 	}
 	data := &proto.SessionExecutionRecord{
@@ -479,9 +485,17 @@ func (s *Session) recordExecution(finalState proto.SessionExecutionFinalState) e
 	if s.agent != nil {
 		data.AgentId = s.agent.id
 	}
-	err := s.accounting.RecordExecution(data)
+	err := s.helpers.RecordExecution(data)
 	if err != nil {
 		log.Printf("Failed to record execution for session %s: %v", s.id, err)
 	}
 	return err
+}
+
+func (s *Session) notifyChangeLocked() {
+	status := pb.Clone(s.status).(*proto.ExecutionStatus)
+	s.helpers.NotifyStateChange(s.Request.InstanceId, s.id, status)
+	if s.Request.TaskId != "" {
+		s.helpers.NotifyTaskChange(s.Request.TaskId, status)
+	}
 }

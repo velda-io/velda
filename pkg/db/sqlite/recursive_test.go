@@ -64,7 +64,7 @@ func TestRecursiveTaskStatusUpdate(t *testing.T) {
 		Workload:   downstreamWorkload,
 		Dependencies: []*proto.Dependency{
 			{
-				UpstreamTaskId: "test-job/task1",
+				UpstreamTaskId: "task1",
 				Type:           proto.Dependency_DEPENDENCY_TYPE_SUCCESS,
 			},
 		},
@@ -144,7 +144,7 @@ func TestRecursiveTaskStatusUpdateFailure(t *testing.T) {
 		Workload:   &proto.Workload{Command: "echo downstream"},
 		Dependencies: []*proto.Dependency{
 			{
-				UpstreamTaskId: "test-job/task1",
+				UpstreamTaskId: "task1",
 				Type:           proto.Dependency_DEPENDENCY_TYPE_SUCCESS,
 			},
 		},
