@@ -107,9 +107,27 @@ chmod +x script-log-follow.sh
 		taskId, err := runCommandGetOutput("vbatch", "./script-log-follow.sh")
 		require.NoError(t, err)
 		taskId = strings.TrimSpace(taskId)
-		time.Sleep(1 * time.Second) // Wait a moment to ensure the task is started.
 		// Wait until the job is finished
 		output, err := runVeldaWithOutput("task", "log", "-f", taskId)
+		require.NoError(t, err, "Failed to get logs with err", output)
+		lines := strings.Split(strings.TrimSpace(output), "\n")
+		assert.GreaterOrEqual(t, len(lines), 5, "Expect at least 5 lines of output")
+	})
+
+	t.Run("RunWithFollow", func(t *testing.T) {
+		// Setup test scripts
+		require.NoError(t, runCommand("sh", "-c", `
+cat << EOF > script-log-follow.sh
+#!/bin/bash
+for ((i=0;i<5;i++)) do
+  echo \$i
+  sleep 1
+done
+EOF
+chmod +x script-log-follow.sh
+`))
+
+		output, err := runCommandGetOutput("vbatch", "-f", "./script-log-follow.sh")
 		require.NoError(t, err, "Failed to get logs with err", output)
 		lines := strings.Split(strings.TrimSpace(output), "\n")
 		assert.GreaterOrEqual(t, len(lines), 5, "Expect at least 5 lines of output")

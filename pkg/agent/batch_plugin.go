@@ -50,8 +50,22 @@ func (p *BatchPlugin) Run(ctx context.Context) error {
 	if sessionReq.Workload != nil {
 		completionChan := ctx.Value(p.completionSignal).(chan error)
 		waiter := ctx.Value(p.waiterPlugin).(*Waiter)
+		wait := waiter.AcquireLock()
+		cmd, err := p.start(sessionReq)
+		if err != nil {
+			wait <- nil
+			return err
+		}
+		processStateChan := make(chan *ProcessState)
+		wait <- &WaitRequest{
+			Pid:   cmd.Process.Pid,
+			State: processStateChan,
+		}
 		go func() {
-			err := p.run(waiter, sessionReq)
+			processState := <-processStateChan
+			// Release resources managed by exec.Cmd
+			cmd.Wait()
+			err := p.handleResult(processState)
 			if err != nil {
 				completionChan <- err
 			}
@@ -61,9 +75,8 @@ func (p *BatchPlugin) Run(ctx context.Context) error {
 	return p.RunNext(ctx)
 }
 
-func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) error {
+func (p *BatchPlugin) start(sessionReq *proto.SessionRequest) (*exec.Cmd, error) {
 	workload := sessionReq.Workload
-	wait := waiter.AcquireLock()
 	commandPath := workload.CommandPath
 	if commandPath == "" {
 		commandPath = workload.Command
@@ -74,24 +87,24 @@ func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) erro
 	}
 	commandPath, err := exec.LookPath(commandPath)
 	if err != nil {
-		return fmt.Errorf("Command not found in PATH: %w", err)
+		return nil, fmt.Errorf("Command not found in PATH: %w", err)
 	}
 	taskId := sessionReq.TaskId
 	err = os.MkdirAll(fmt.Sprintf("/.velda_tasks/%s", filepath.Dir(taskId)), 0755)
 	if err != nil {
-		return fmt.Errorf("Failed to create task directories %s: %w", taskId, err)
+		return nil, fmt.Errorf("Failed to create task directories %s: %w", taskId, err)
 	}
 	stdin, err := os.Open("/dev/null")
 	if err != nil {
-		return fmt.Errorf("Failed to open /dev/null: %w", err)
+		return nil, fmt.Errorf("Failed to open /dev/null: %w", err)
 	}
 	stdout, err := os.Create(fmt.Sprintf("/.velda_tasks/%s.stdout", taskId))
 	if err != nil {
-		return fmt.Errorf("Failed to open stdout file %s: %w", taskId, err)
+		return nil, fmt.Errorf("Failed to open stdout file %s: %w", taskId, err)
 	}
 	stderr, err := os.Create(fmt.Sprintf("/.velda_tasks/%s.stderr", taskId))
 	if err != nil {
-		return fmt.Errorf("Failed to open stderr file %s: %w", taskId, err)
+		return nil, fmt.Errorf("Failed to open stderr file %s: %w", taskId, err)
 	}
 	cmd := exec.Command(commandPath, workload.Args...)
 	cmd.Dir = workload.WorkingDir
@@ -114,17 +127,13 @@ func (p *BatchPlugin) run(waiter *Waiter, sessionReq *proto.SessionRequest) erro
 	stdout.Close()
 	stderr.Close()
 	if err != nil {
-		return fmt.Errorf("Failed to start process: %w", err)
+		return nil, fmt.Errorf("Failed to start process: %w", err)
 	}
-	// TODO: Return result.
-	processStateChan := make(chan *ProcessState)
-	wait <- &WaitRequest{
-		Pid:   cmd.Process.Pid,
-		State: processStateChan,
-	}
-	processState := <-processStateChan
-	// Release resources managed by exec.Cmd
-	cmd.Wait()
+	log.Printf("Started batch task %s with PID %d", taskId, cmd.Process.Pid)
+	return cmd, nil
+}
+
+func (p *BatchPlugin) handleResult(processState *ProcessState) error {
 	resultPb := &proto.BatchTaskResult{}
 	sysState := processState.WaitStatus
 	if sysState.Exited() {
