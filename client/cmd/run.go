@@ -14,13 +14,16 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
@@ -174,10 +177,20 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	}
 	DebugLog("Got response: %s. Connecting ", resp.String())
 	if batch {
-		fmt.Printf("%s\n", resp.GetTaskId())
+		taskId := resp.GetTaskId()
+		fmt.Printf("%s\n", taskId)
+
+		followFlag, _ := cmd.Flags().GetBool("follow")
+		if followFlag {
+			// follow mode: extracted to helper
+			if err := followTask(taskId); err != nil {
+				return err
+			}
+		}
+
 		if !quiet && clientlib.GetAgentConfig().TaskId == "" && clientlib.GetAgentConfig().GetBroker().GetPublicAddress() != "" {
 			publicAddr := clientlib.GetAgentConfig().GetBroker().GetPublicAddress()
-			taskUrl := fmt.Sprintf("%s/tasks/%s", publicAddr, resp.GetTaskId())
+			taskUrl := fmt.Sprintf("%s/tasks/%s", publicAddr, taskId)
 			cmd.PrintErrf("Track task at %s\n", taskUrl)
 		}
 		return nil
@@ -430,6 +443,7 @@ func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Suppress all non-error loggings.")
 	runCmd.Flags().Bool("checkpoint-on-idle", false, "If all connections are closed, check-point the session. Imply keep-alive.")
 	runCmd.Flags().StringP("service-name", "s", "", "Service name, which can be used to identify session later. Default is ssh if connected externally, or empty.")
+	runCmd.Flags().BoolP("follow", "f", false, "Follow the execution of the command. Only valid for batch mode.")
 	runCmd.Flags().String("session-id", "", "Reconnect to specific session. If not provided, it will try to find a session with the service name or create a new session.")
 	runCmd.Flags().StringP("directory", "C", "", "Working directory. Default to current directory if running in Velda and a command is provided, otherwise home directory.")
 	runCmd.Flags().StringP("user", "u", "user", "User to run the command as. Ignored if running in a Velda session with a command provided, where it will always use the current user.")
@@ -483,5 +497,127 @@ func attachAllForwardedPorts(cmd *cobra.Command, client *clientlib.SshClient) {
 		})
 
 		go client.PortForward(cmd.Context(), lis, remotePortInt)
+	}
+}
+
+// followTask will stream task status and logs until completion or cancellation.
+// On first Ctrl-C it prompts the user to cancel the task; if the user declines,
+// observation continues; a second Ctrl-C will exit immediately.
+func followTask(taskId string) error {
+	conn, err := clientlib.GetApiConnection()
+	if err != nil {
+		return fmt.Errorf("Error getting API connection for follow: %w", err)
+	}
+	defer conn.Close()
+	taskClient := proto.NewTaskServiceClient(conn)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	statusCh := make(chan *proto.Task)
+	errorCh := make(chan error, 2)
+
+	// watch status
+	go func() {
+		stream, err := taskClient.WatchTask(ctx, &proto.GetTaskRequest{TaskId: taskId})
+		if err != nil {
+			errorCh <- fmt.Errorf("Error opening watch stream: %w", err)
+			return
+		}
+		for {
+			task, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF {
+					close(statusCh)
+					return
+				}
+				errorCh <- fmt.Errorf("Error receiving status update: %w", err)
+				return
+			}
+			statusCh <- task
+			status := task.GetStatus()
+			if status == proto.TaskStatus_TASK_STATUS_SUCCESS || status == proto.TaskStatus_TASK_STATUS_FAILURE || status == proto.TaskStatus_TASK_STATUS_FAILED_UPSTREAM || status == proto.TaskStatus_TASK_STATUS_CANCELLED {
+				// terminal state: close status channel and exit
+				close(statusCh)
+				return
+			}
+		}
+	}()
+
+	// logs will be started once the task is running
+
+	// handle Ctrl-C: detach first (stop streaming), then prompt to cancel
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Reset(os.Interrupt)
+
+	var lastState proto.TaskStatus = proto.TaskStatus_TASK_STATUS_UNSPECIFIED
+	logsStarted := false
+	for {
+		select {
+		case task, ok := <-statusCh:
+			if !ok {
+				return nil
+			}
+			state := task.GetStatus()
+			if state != lastState {
+				lastState = state
+				fmt.Fprintf(os.Stderr, "Task %s status: %s\n", taskId, state.String())
+				// start logs when task transitions to RUNNING-like state
+				if !logsStarted && (state == proto.TaskStatus_TASK_STATUS_RUNNING) {
+					logsStarted = true
+					go streamTaskLogs(ctx, taskClient, taskId, errorCh)
+				}
+			}
+		case err := <-errorCh:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-sigCh:
+			// Detach immediately by cancelling the context to stop streaming goroutines.
+			cancel()
+			// Prompt the user whether they want to cancel the job. Regardless of answer,
+			// we return (detached).
+			fmt.Fprint(os.Stderr, "\nDetached. Cancel the task? [y/N]: ")
+			reader := bufio.NewReader(os.Stdin)
+			line, _ := reader.ReadString('\n')
+			line = strings.TrimSpace(line)
+			if strings.EqualFold(line, "y") || strings.EqualFold(line, "yes") {
+				if _, err := taskClient.CancelJob(context.Background(), &proto.CancelJobRequest{JobId: taskId}); err != nil {
+					fmt.Fprintf(os.Stderr, "Error cancelling job: %v\n", err)
+				} else {
+					fmt.Fprintf(os.Stderr, "Job %s cancelled\n", taskId)
+				}
+			}
+			return nil
+		}
+	}
+}
+
+// streamTaskLogs streams logs for the given taskId and reports errors on errorCh.
+func streamTaskLogs(ctx context.Context, taskClient proto.TaskServiceClient, taskId string, errorCh chan<- error) {
+	stream, err := taskClient.Logs(ctx, &proto.LogTaskRequest{TaskId: taskId, Follow: true})
+	if err != nil {
+		errorCh <- fmt.Errorf("Error opening log stream: %w", err)
+		return
+	}
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				return
+			}
+			errorCh <- fmt.Errorf("Error receiving log data: %w", err)
+			return
+		}
+		data := resp.GetData()
+		outputStream := os.Stdout
+		if resp.GetStream() == proto.LogTaskResponse_STREAM_STDERR {
+			outputStream = os.Stderr
+		}
+		if _, err := outputStream.Write(data); err != nil {
+			errorCh <- err
+			return
+		}
 	}
 }
