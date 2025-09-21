@@ -68,7 +68,6 @@ func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, se
 
 // exportNFS is a helper function to handle NFS export logic using exportfs command
 func exportNFS(path, host string, session *Session) error {
-	log.Printf("Exporting NFS path %s to host %s", path, host)
 	cmd := exec.Command("sudo", "exportfs", "-o", "rw,async,no_root_squash,subtree_check", host+":"+path)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -104,7 +103,6 @@ func exportFile(s *Session) string {
 
 // unexportNFS is a helper function to handle NFS unexport logic using exportfs command
 func unexportNFS(path, host string, session *Session) error {
-	log.Printf("Unexporting NFS path %s for host %s", path, host)
 	cmd := exec.Command("sudo", "exportfs", "-u", host+":"+path)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

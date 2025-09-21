@@ -121,7 +121,7 @@ cat << EOF > script-log-follow.sh
 #!/bin/bash
 for ((i=0;i<5;i++)) do
   echo \$i
-  sleep 1
+  sleep 0.5
 done
 EOF
 chmod +x script-log-follow.sh
@@ -133,31 +133,33 @@ chmod +x script-log-follow.sh
 		assert.GreaterOrEqual(t, len(lines), 5, "Expect at least 5 lines of output")
 	})
 
-	t.Run("Recursive", func(t *testing.T) {
+	t.Run("WatchRecursive", func(t *testing.T) {
 		// Setup test scripts
-		require.NoError(t, runCommand("sh", "-c", `
+		jobId, err := runCommandGetOutput("sh", "-c", `
 cat << EOF > script.sh
 #!/bin/sh
+sleep 0.5
 echo COMPLETED > \$1
 EOF
 chmod +x script.sh
 cat << EOF > script_rec.sh
 #!/bin/sh
+sleep 0.5
 vbatch --name actual_task ./script.sh \$1
 EOF
 chmod +x script_rec.sh
 vbatch ./script_rec.sh testfile_rec
-`))
+`)
+		require.NoError(t, err, "Failed to start job", jobId)
+		jobId = strings.TrimSpace(jobId)
 
-		// Wait until the job is finished
-		assert.Eventually(t, func() bool {
-			output, err := runCommandGetOutput("cat", "testfile_rec")
-			if err != nil {
-				return false
-			}
-			assert.Equal(t, "COMPLETED\n", output)
-			return true
-		}, 30*time.Second, 1000*time.Millisecond)
+		output, err := runVeldaWithOutput("task", "watch", jobId)
+		assert.NoError(t, err, "Failed to watch task %s", jobId)
+		// Should contain all status.
+		assert.True(t, strings.Contains(output, "TASK_STATUS_RUNNING"), "Expect running status, got %s", output)
+		assert.True(t, strings.Contains(output, "TASK_STATUS_RUNNING_SUBTASKS"), "Expect running_subtasks status, got %s", output)
+		assert.True(t, strings.Contains(output, "TASK_STATUS_SUCCESS"), "Expect success status, got %s", output)
+
 	})
 	t.Run("Sharded", func(t *testing.T) {
 		// Setup test scripts
@@ -328,7 +330,7 @@ vbatch ./test_watch.sh
 		// Watch the body.
 		// TODO: Watch the root job, currently do not support notification for child-tasks.
 		output, err := runVeldaWithOutput("task", "watch", jobId+"/body")
-		require.NoError(t, err, "Failed to watch task %s", jobId)
+		assert.NoError(t, err, "Failed to watch task %s", jobId)
 		// Should contain all status.
 		assert.True(t, strings.Contains(output, "TASK_STATUS_PENDING"), "Expect pending status, got %s", output)
 		// Currently no queueing because it is immediately scheduled.

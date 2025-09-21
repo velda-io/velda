@@ -42,6 +42,39 @@ type columnOptions struct {
 	hasResult  bool
 }
 
+type statusChanges struct {
+	taskId string
+	status proto.TaskStatus
+}
+
+type tx struct {
+	*sql.Tx
+	notifs   []statusChanges
+	ctx      context.Context
+	callback func(ctx context.Context, taskId string, status proto.TaskStatus)
+}
+
+func (t *tx) notifyStatusChange(taskId string, status proto.TaskStatus) {
+	t.notifs = append(t.notifs, statusChanges{
+		taskId: taskId,
+		status: status,
+	})
+}
+
+func (t *tx) Commit() error {
+	err := t.Tx.Commit()
+	if err != nil {
+		return err
+	}
+	for _, notif := range t.notifs {
+		log.Printf("Task %s changed status to %s", notif.taskId, notif.status.String())
+		if t.callback != nil {
+			t.callback(t.ctx, notif.taskId, notif.status)
+		}
+	}
+	return nil
+}
+
 func taskColumns(options columnOptions) string {
 	columns := taskColumnsBase
 	if options.hasPayload {
@@ -570,7 +603,7 @@ func (s *SqliteDatabase) notifyPollReady() error {
 // SetTaskCompletionCallback sets a callback that will be invoked when tasks
 // transition to a final state (COMPLETED, FAILED, FAILED_UPSTREAM, CANCELLED).
 // It must be set at most once.
-func (s *SqliteDatabase) SetTaskCompletionCallback(callback func(ctx context.Context, taskId string, status proto.TaskStatus)) {
+func (s *SqliteDatabase) SetTaskStatusCallback(callback func(ctx context.Context, taskId string, status proto.TaskStatus)) {
 	if s.taskUpdateCallback != nil {
 		panic("TaskCompletionCallback already set")
 	}
@@ -604,7 +637,7 @@ func (s *SqliteDatabase) UpdateTaskFinalResult(ctx context.Context, taskId strin
 	fullTaskId := taskId
 	parentId, taskId := path.Split(taskId)
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -647,11 +680,8 @@ RETURNING COALESCE(total_children, 0), completed_children`,
 	}
 
 	if totalChildren > completedChildren {
-		if s.taskUpdateCallback != nil {
-			// Notify that the task is now running subtasks
-			s.taskUpdateCallback(ctx, fullTaskId, proto.TaskStatus_TASK_STATUS_RUNNING_SUBTASKS)
-		}
 		// Not all children are completed. Already updated to RUNNING_SUBTASKS.
+		tx.notifyStatusChange(fullTaskId, proto.TaskStatus_TASK_STATUS_RUNNING_SUBTASKS)
 		return tx.Commit()
 	}
 
@@ -662,7 +692,7 @@ RETURNING COALESCE(total_children, 0), completed_children`,
 	return tx.Commit()
 }
 
-func (s *SqliteDatabase) updateTaskStatus(ctx context.Context, tx *sql.Tx, parentId string, taskId string, outcome string) error {
+func (s *SqliteDatabase) updateTaskStatus(ctx context.Context, tx *tx, parentId string, taskId string, outcome string) error {
 	for {
 		now := time.Now().UTC().Truncate(time.Microsecond)
 		nowStr := now.Format(time.RFC3339Nano)
@@ -747,11 +777,8 @@ RETURNING tasks.task_id, tasks.parent_id, tasks.status, tasks.resolve_time, pend
 			}
 			if resolveTime.Valid && resolveTime.String == nowStr {
 				resolved += 1
-				log.Printf("Task %s resolved with status %s", path.Join(returnedParentId, returnedTaskId), status)
-				if s.taskUpdateCallback != nil {
-					fullTaskId := path.Join(returnedParentId, returnedTaskId)
-					s.taskUpdateCallback(ctx, fullTaskId, statusStrToProto(status, 0))
-				}
+				fullTaskId := path.Join(returnedParentId, returnedTaskId)
+				tx.notifyStatusChange(fullTaskId, statusStrToProto(status, pendingUpstreams))
 			}
 		}
 		rows.Close()
@@ -1033,10 +1060,30 @@ RETURNING task_id, parent_id, status`, nowStr, jobId)
 				return err
 			}
 			fullTaskId := path.Join(parentId, taskId)
-			s.taskUpdateCallback(ctx, fullTaskId, statusStrToProto(status, 0))
+			s.notifyStatusChange(ctx, fullTaskId, statusStrToProto(status, 0))
 		}
 	}
 	return nil
+}
+
+func (s *SqliteDatabase) BeginTx(ctx context.Context) (*tx, error) {
+	t, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &tx{
+		Tx:       t,
+		notifs:   make([]statusChanges, 0),
+		ctx:      ctx,
+		callback: s.taskUpdateCallback,
+	}, nil
+}
+
+func (s *SqliteDatabase) notifyStatusChange(ctx context.Context, taskId string, status proto.TaskStatus) {
+	log.Printf("Task %s changed status to %s", taskId, status.String())
+	if s.taskUpdateCallback != nil {
+		s.taskUpdateCallback(ctx, taskId, status)
+	}
 }
 
 func (s *SqliteDatabase) RunMaintenances(ctx context.Context) {
