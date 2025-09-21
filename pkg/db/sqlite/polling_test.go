@@ -29,6 +29,7 @@ func TestPollTasks(t *testing.T) {
 	// Create temporary database file
 	dbPath := ":memory:" // Use in-memory database for testing
 	database, err := NewSqliteDatabase(dbPath)
+	database.db.SetMaxOpenConns(1) // memory db only supports one connection
 	assert.NoError(t, err, "Failed to create database")
 	defer database.Close()
 
@@ -106,6 +107,8 @@ func TestPollTasksWithDependencies(t *testing.T) {
 	// Create temporary database file
 	dbPath := ":memory:"
 	database, err := NewSqliteDatabase(dbPath)
+	database.db.SetMaxOpenConns(1) // memory db only supports one connection
+
 	assert.NoError(t, err, "Failed to create database")
 	defer database.Close()
 
