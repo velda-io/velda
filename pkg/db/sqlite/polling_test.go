@@ -58,6 +58,7 @@ func TestPollTasks(t *testing.T) {
 	var polledTasks []*db.TaskWithUser
 	var mu sync.Mutex
 
+	taskPolled := make(chan bool)
 	callback := func(leaserIdentity string, task *db.TaskWithUser) error {
 		mu.Lock()
 		defer mu.Unlock()
@@ -65,6 +66,7 @@ func TestPollTasks(t *testing.T) {
 		assert.Equal(t, "test-leaser", leaserIdentity)
 		assert.Equal(t, "test-job/task1", task.Task.Id)
 		assert.Equal(t, proto.TaskStatus_TASK_STATUS_QUEUEING, task.Task.Status)
+		taskPolled <- true
 		return nil
 	}
 
@@ -78,8 +80,7 @@ func TestPollTasks(t *testing.T) {
 		database.PollTasks(pollCtx, "test-leaser", callback)
 	}()
 
-	// Wait a moment for polling to start and process the task
-	time.Sleep(1 * time.Second)
+	<-taskPolled // Wait until a task is polled
 
 	// Cancel polling
 	pollCancel()

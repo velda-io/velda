@@ -59,15 +59,32 @@ WHERE parent_id = ? AND task_id > ?
 ORDER BY create_time
 LIMIT ?`
 
-var searchTaskQuery = `SELECT ` + taskColumns(columnOptions{}) + `
+var searchTaskQuery = `
+WITH
+matchers AS (
+  SELECT DISTINCT trim(value) as LABEL FROM json_each(?)
+),
+needed AS (
+	SELECT COUNT(*) AS needed FROM matchers
+),
+hits AS (
+  SELECT task_id AS tid, parent_id as pid, COUNT(label) as matched, needed.needed as needed FROM tasks t, matchers m, needed
+  WHERE instr(',' || labels || ',', ',' || LABEL || ',') > 0
+  GROUP BY task_id, parent_id
+  HAVING matched = needed.needed
+)
+SELECT ` + taskColumns(columnOptions{}) + `
 FROM tasks
-WHERE labels LIKE ? AND create_time < ?
+JOIN hits ON hits.tid = tasks.task_id AND hits.pid = tasks.parent_id
+WHERE create_time < ?
 ORDER BY create_time DESC
 LIMIT ?`
 
 type SqliteDatabase struct {
 	db     *sql.DB
 	notifs chan struct{}
+	// taskUpdateCallback is invoked when a task transitions to a final state.
+	taskUpdateCallback func(ctx context.Context, taskId string, status proto.TaskStatus)
 }
 
 func NewSqliteDatabase(dbPath string) (*SqliteDatabase, error) {
@@ -109,8 +126,8 @@ CREATE TABLE IF NOT EXISTS tasks(
 	parent_id TEXT,
 	task_id TEXT NOT NULL,
 	instance_id INTEGER,
-	create_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	labels TEXT, -- JSON array of labels
+	create_time TEXT NOT NULL,
+	labels TEXT, -- comma separated array of labels
 	pool TEXT NOT NULL,
 	priority INTEGER NOT NULL,
 	payload BLOB NOT NULL,
@@ -149,7 +166,7 @@ CREATE TABLE IF NOT EXISTS tasks(
 	_, err = s.db.Exec(`
 CREATE TABLE IF NOT EXISTS leasers(
 	id TEXT PRIMARY KEY,
-	last_heartbeat TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	last_heartbeat TEXT NOT NULL
 )`)
 	if err != nil {
 		return fmt.Errorf("failed to create leasers table: %w", err)
@@ -364,13 +381,14 @@ func (s *SqliteDatabase) CreateTask(ctx context.Context, session *proto.SessionR
 	taskIdPrefix := taskId
 	nextIndex := int32(2)
 	done := false
+	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
 
 	for !done {
 		result, err := tx.ExecContext(ctx, `
 INSERT INTO tasks (parent_id, task_id, pool, instance_id, priority, payload, labels, status, pending_upstreams, create_time)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(parent_id, task_id) DO NOTHING
-`, parentId, taskId, session.Pool, session.InstanceId, session.Priority, payload, labelsStr, status, upstreamCnt)
+`, parentId, taskId, session.Pool, session.InstanceId, session.Priority, payload, labelsStr, status, upstreamCnt, nowStr)
 
 		if err != nil {
 			return "", 0, err
@@ -455,10 +473,9 @@ func (s *SqliteDatabase) SearchTasks(ctx context.Context, request *proto.SearchT
 		pageSize = 50
 	}
 
-	labelFilter := ""
+	labelFilter := "[]"
 	if len(request.GetLabelFilters()) > 0 {
-		// Simple label filtering - in production you might want more sophisticated matching
-		labelFilter = "%" + request.GetLabelFilters()[0] + "%"
+		labelFilter = "[\"" + strings.Join(request.GetLabelFilters(), "\",\"") + "\"]"
 	}
 
 	var startTime time.Time
@@ -550,6 +567,39 @@ func (s *SqliteDatabase) notifyPollReady() error {
 	return nil
 }
 
+// SetTaskCompletionCallback sets a callback that will be invoked when tasks
+// transition to a final state (COMPLETED, FAILED, FAILED_UPSTREAM, CANCELLED).
+// It must be set at most once.
+func (s *SqliteDatabase) SetTaskCompletionCallback(callback func(ctx context.Context, taskId string, status proto.TaskStatus)) {
+	if s.taskUpdateCallback != nil {
+		panic("TaskCompletionCallback already set")
+	}
+	s.taskUpdateCallback = callback
+}
+
+func statusStrToProto(statusStr string, pendingUpstreams int) proto.TaskStatus {
+	switch statusStr {
+	case "QUEUEING":
+		if pendingUpstreams > 0 {
+			return proto.TaskStatus_TASK_STATUS_PENDING
+		}
+		return proto.TaskStatus_TASK_STATUS_QUEUEING
+	case "LEASED":
+		return proto.TaskStatus_TASK_STATUS_QUEUEING
+	case "RUNNING_SUBTASKS":
+		return proto.TaskStatus_TASK_STATUS_RUNNING_SUBTASKS
+	case "COMPLETED":
+		return proto.TaskStatus_TASK_STATUS_SUCCESS
+	case "FAILED":
+		return proto.TaskStatus_TASK_STATUS_FAILURE
+	case "FAILED_UPSTREAM":
+		return proto.TaskStatus_TASK_STATUS_FAILED_UPSTREAM
+	case "CANCELLED":
+		return proto.TaskStatus_TASK_STATUS_CANCELLED
+	}
+	return proto.TaskStatus_TASK_STATUS_UNSPECIFIED
+}
+
 func (s *SqliteDatabase) UpdateTaskFinalResult(ctx context.Context, taskId string, result *BatchTaskResult) error {
 	fullTaskId := taskId
 	parentId, taskId := path.Split(taskId)
@@ -597,6 +647,10 @@ RETURNING COALESCE(total_children, 0), completed_children`,
 	}
 
 	if totalChildren > completedChildren {
+		if s.taskUpdateCallback != nil {
+			// Notify that the task is now running subtasks
+			s.taskUpdateCallback(ctx, fullTaskId, proto.TaskStatus_TASK_STATUS_RUNNING_SUBTASKS)
+		}
 		// Not all children are completed. Already updated to RUNNING_SUBTASKS.
 		return tx.Commit()
 	}
@@ -610,8 +664,8 @@ RETURNING COALESCE(total_children, 0), completed_children`,
 
 func (s *SqliteDatabase) updateTaskStatus(ctx context.Context, tx *sql.Tx, parentId string, taskId string, outcome string) error {
 	for {
-		log.Printf("updateTaskStatus: %s%s %s", parentId, taskId, outcome)
-
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		nowStr := now.Format(time.RFC3339Nano)
 		// Use recursive CTE to update downstream tasks
 		rows, err := tx.QueryContext(ctx, `
 WITH RECURSIVE downstream_updates AS (
@@ -662,21 +716,25 @@ SET
 	pending_upstreams = pending_upstreams - COALESCE(downstream_counts.upstream_met, 0),
 	resolve_time = CASE
 		WHEN downstream_counts.outcome IN ('success', 'fail', 'fail_upstream')
-		THEN COALESCE(resolve_time, datetime('now'))
+		THEN COALESCE(resolve_time, ?)
 		ELSE resolve_time
 	END
 FROM downstream_counts
 WHERE tasks.parent_id = downstream_counts.parent_id AND tasks.task_id = downstream_counts.task_id
-RETURNING status, pending_upstreams
-`, taskId, parentId, outcome)
+RETURNING tasks.task_id, tasks.parent_id, tasks.status, tasks.resolve_time, pending_upstreams
+`, taskId, parentId, outcome, nowStr)
 
 		if err != nil {
 			return fmt.Errorf("failed to update downstream tasks: %w", err)
 		}
+		resolved := 0
 		for rows.Next() {
+			var returnedTaskId string
+			var returnedParentId string
 			var status string
+			var resolveTime sql.NullString
 			var pendingUpstreams int
-			if err := rows.Scan(&status, &pendingUpstreams); err != nil {
+			if err := rows.Scan(&returnedTaskId, &returnedParentId, &status, &resolveTime, &pendingUpstreams); err != nil {
 				rows.Close()
 				return fmt.Errorf("failed to scan downstream update result: %w", err)
 			}
@@ -686,7 +744,14 @@ RETURNING status, pending_upstreams
 				if err != nil {
 					log.Printf("Warning: failed to mark pool for polling: %v", err)
 				}
-				break
+			}
+			if resolveTime.Valid && resolveTime.String == nowStr {
+				resolved += 1
+				log.Printf("Task %s resolved with status %s", path.Join(returnedParentId, returnedTaskId), status)
+				if s.taskUpdateCallback != nil {
+					fullTaskId := path.Join(returnedParentId, returnedTaskId)
+					s.taskUpdateCallback(ctx, fullTaskId, statusStrToProto(status, 0))
+				}
 			}
 		}
 		rows.Close()
@@ -706,11 +771,12 @@ RETURNING status, pending_upstreams
 
 		// Update parent task's completed children count
 		var completed sql.NullBool
+		status := ""
 		err = tx.QueryRowContext(ctx, `
 UPDATE tasks
-SET completed_children = completed_children + 1
+SET completed_children = completed_children + ?
 WHERE parent_id = ? AND task_id = ?
-RETURNING completed_children >= total_children`, grandParentId, parentTaskId).Scan(&completed)
+RETURNING completed_children >= total_children, status`, resolved, grandParentId, parentTaskId).Scan(&completed, &status)
 
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -720,7 +786,7 @@ RETURNING completed_children >= total_children`, grandParentId, parentTaskId).Sc
 			return fmt.Errorf("failed to update parent task %s: %w", cleanParentId, err)
 		}
 
-		if !completed.Valid || !completed.Bool {
+		if status != "RUNNING_SUBTASKS" || !completed.Valid || !completed.Bool {
 			// Parent task is not complete yet
 			break
 		}
@@ -787,6 +853,26 @@ RETURNING `+taskColumns(options), leaserIdentity)
 	return tasks, nil
 }
 
+func (s *SqliteDatabase) GetUpstreamCount(ctx context.Context, taskId string) (int, error) {
+	parentId, taskId := path.Split(taskId)
+	var pendingUpstreams int
+	err := s.db.QueryRowContext(ctx, `
+SELECT pending_upstreams
+FROM tasks
+WHERE parent_id = ? AND task_id = ?`, parentId, taskId).Scan(&pendingUpstreams)
+	return pendingUpstreams, err
+}
+
+func (s *SqliteDatabase) GetTaskStatus(ctx context.Context, taskId string) (string, error) {
+	parentId, taskId := path.Split(taskId)
+	var status string
+	err := s.db.QueryRowContext(ctx, `
+SELECT status
+FROM tasks
+WHERE parent_id = ? AND task_id = ?`, parentId, taskId).Scan(&status)
+	return status, err
+}
+
 // Task polling with trigger-based and interval-based mechanisms
 func (s *SqliteDatabase) PollTasks(
 	ctx context.Context,
@@ -845,7 +931,7 @@ func (s *SqliteDatabase) PollTasks(
 }
 
 func (s *SqliteDatabase) RenewLeaser(ctx context.Context, leaserIdentity string, now time.Time) error {
-	nowStr := now.Format(time.RFC3339Nano)
+	nowStr := now.UTC().Format(time.RFC3339Nano)
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO leasers(id, last_heartbeat)
 VALUES(?, ?)
@@ -922,9 +1008,10 @@ DELETE FROM leasers WHERE last_heartbeat < ?`, cutoffTime)
 }
 
 func (s *SqliteDatabase) CancelJob(ctx context.Context, jobId string) error {
-	_, err := s.db.ExecContext(ctx, `
+	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
+	rows, err := s.db.QueryContext(ctx, `
 UPDATE tasks
-SET status = 'CANCELLED'
+SET status = 'CANCELLED', resolve_time = ?
 WHERE
 	(
 		CASE
@@ -932,8 +1019,24 @@ WHERE
 			ELSE substr(parent_id, 1, instr(parent_id || '/', '/') - 1)
 		END
 	) = ?
-	AND status != 'LEASED'`, jobId)
-	return err
+	AND status NOT IN ('COMPLETED', 'FAILED', 'FAILED_UPSTREAM', 'CANCELLED', 'LEASED')
+RETURNING task_id, parent_id, status`, nowStr, jobId)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if s.taskUpdateCallback != nil {
+		for rows.Next() {
+			var taskId, parentId string
+			var status string
+			if err := rows.Scan(&taskId, &parentId, &status); err != nil {
+				return err
+			}
+			fullTaskId := path.Join(parentId, taskId)
+			s.taskUpdateCallback(ctx, fullTaskId, statusStrToProto(status, 0))
+		}
+	}
+	return nil
 }
 
 func (s *SqliteDatabase) RunMaintenances(ctx context.Context) {

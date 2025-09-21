@@ -256,4 +256,5 @@ message Config {
   bool allow_new_pool = 6;
 
   reserved 2, 3, 7, 8, 10;
+  reserved 50 to 99;
 }

@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/simonfxr/pubsub"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"velda.io/velda/pkg/proto"
 	"velda.io/velda/pkg/rbac"
@@ -58,6 +59,7 @@ type TaskServiceServer struct {
 	logDb       TaskLogDb
 	taskTracker TaskTracker
 	permission  rbac.Permissions
+	bus         *pubsub.Bus
 }
 
 func NewTaskServiceServer(ctx context.Context, db TaskDb, logDb TaskLogDb, taskTracker TaskTracker, permissions rbac.Permissions) *TaskServiceServer {
@@ -67,6 +69,7 @@ func NewTaskServiceServer(ctx context.Context, db TaskDb, logDb TaskLogDb, taskT
 		logDb:       logDb,
 		taskTracker: taskTracker,
 		permission:  permissions,
+		bus:         pubsub.NewBus(),
 	}
 }
 
@@ -141,6 +144,10 @@ func (s *TaskServiceServer) CancelJob(ctx context.Context, in *proto.CancelJobRe
 
 func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.TaskService_WatchTaskServer) error {
 	ctx := stream.Context()
+	statusChan := make(chan proto.TaskStatus, 1)
+	// Subscribe before checking initial status.
+	subscriber := s.bus.SubscribeChan(in.TaskId, statusChan, pubsub.CloseOnUnsubscribe)
+	defer s.bus.Unsubscribe(subscriber)
 	task, err := s.db.GetTask(ctx, in.TaskId)
 	if err != nil {
 		return err
@@ -148,8 +155,9 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 	if err := s.permission.Check(ctx, ActionGetTask, fmt.Sprintf("tasks/%d/%s", task.InstanceId, task.Id)); err != nil {
 		return err
 	}
+	var sendErr chan error
 	if task.Status == proto.TaskStatus_TASK_STATUS_QUEUEING || task.Status == proto.TaskStatus_TASK_STATUS_PENDING {
-		sendErr := make(chan error, 1)
+		sendErr = make(chan error, 1)
 		s.taskTracker.WatchTask(ctx, in.TaskId, func(status *proto.ExecutionStatus) bool {
 			if status == nil {
 				// Not leased yet. Send the initial task status.
@@ -181,36 +189,48 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 			}
 			return true
 		})
+	}
+
+	for {
+		err = stream.Send(task)
+		if err != nil {
+			return err
+		}
+		if isTaskStatusFinal(task.Status) {
+			// Final status, no more update.
+			return nil
+		}
 		select {
 		case err := <-sendErr:
 			if !errors.Is(err, io.EOF) {
 				return err
 			}
+			sendErr = nil
+			// Perform update from status db update
 		case <-s.ctx.Done():
+			// Server exit
 			return s.ctx.Err()
 		case <-ctx.Done():
+			// Client cancel
 			return ctx.Err()
-		}
-		// Get final status from db
-		finalTask, err := s.db.GetTask(ctx, in.TaskId)
-		if err != nil {
-			return err
-		}
-		if finalTask.Status == proto.TaskStatus_TASK_STATUS_QUEUEING {
-			log.Printf("Unexpected: Task %s is still queueing after session terminated", in.TaskId)
-		}
-		err = stream.Send(finalTask)
-		if err != nil {
-			return err
-		}
-		return nil
-	} else {
-		err := stream.Send(task)
-		if err != nil {
-			return err
+		case status := <-statusChan:
+			// Get final status from db
+			if isTaskStatusFinal(status) {
+				newTask, err := s.db.GetTask(ctx, in.TaskId)
+				if err != nil {
+					return err
+				}
+				task = newTask
+			} else {
+				task.Status = status
+			}
+			// Send in next loop
 		}
 	}
-	return nil
+}
+
+func (s *TaskServiceServer) NotifyTaskFinalStatus(ctx context.Context, taskId string, status proto.TaskStatus) {
+	s.bus.Publish(taskId, status)
 }
 
 func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskService_LogsServer) error {
@@ -300,4 +320,8 @@ func (s *TaskServiceServer) patchTaskStatus(ctx context.Context, tasks ...*proto
 		}
 	}
 	return nil
+}
+
+func isTaskStatusFinal(status proto.TaskStatus) bool {
+	return status == proto.TaskStatus_TASK_STATUS_SUCCESS || status == proto.TaskStatus_TASK_STATUS_FAILURE || status == proto.TaskStatus_TASK_STATUS_CANCELLED || status == proto.TaskStatus_TASK_STATUS_FAILED_UPSTREAM
 }
