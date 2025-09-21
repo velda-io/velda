@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/simonfxr/pubsub"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"velda.io/velda/pkg/proto"
 	"velda.io/velda/pkg/rbac"
@@ -39,6 +40,7 @@ type TaskDb interface {
 	ListTasks(ctx context.Context, request *proto.ListTasksRequest) ([]*proto.Task, string, error)
 	SearchTasks(ctx context.Context, request *proto.SearchTasksRequest) ([]*proto.Task, string, error)
 	CancelJob(ctx context.Context, jobId string) error
+	SetTaskStatusCallback(func(ctx context.Context, taskId string, status proto.TaskStatus))
 }
 
 type TaskTracker interface {
@@ -58,6 +60,7 @@ type TaskServiceServer struct {
 	logDb       TaskLogDb
 	taskTracker TaskTracker
 	permission  rbac.Permissions
+	bus         *pubsub.Bus
 }
 
 func NewTaskServiceServer(ctx context.Context, db TaskDb, logDb TaskLogDb, taskTracker TaskTracker, permissions rbac.Permissions) *TaskServiceServer {
@@ -67,6 +70,7 @@ func NewTaskServiceServer(ctx context.Context, db TaskDb, logDb TaskLogDb, taskT
 		logDb:       logDb,
 		taskTracker: taskTracker,
 		permission:  permissions,
+		bus:         pubsub.NewBus(),
 	}
 }
 
@@ -141,6 +145,10 @@ func (s *TaskServiceServer) CancelJob(ctx context.Context, in *proto.CancelJobRe
 
 func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.TaskService_WatchTaskServer) error {
 	ctx := stream.Context()
+	statusChan := make(chan proto.TaskStatus, 1)
+	// Subscribe before checking initial status.
+	subscriber := s.bus.SubscribeChan(in.TaskId, statusChan, pubsub.CloseOnUnsubscribe)
+	defer s.bus.Unsubscribe(subscriber)
 	task, err := s.db.GetTask(ctx, in.TaskId)
 	if err != nil {
 		return err
@@ -148,9 +156,18 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 	if err := s.permission.Check(ctx, ActionGetTask, fmt.Sprintf("tasks/%d/%s", task.InstanceId, task.Id)); err != nil {
 		return err
 	}
+	var sendErr chan error
+	leased := false
+	initialWatchedStatusReceived := false
+	var initialWatchedStatus chan struct{}
 	if task.Status == proto.TaskStatus_TASK_STATUS_QUEUEING || task.Status == proto.TaskStatus_TASK_STATUS_PENDING {
-		sendErr := make(chan error, 1)
+		sendErr = make(chan error, 1)
+		initialWatchedStatus = make(chan struct{})
 		s.taskTracker.WatchTask(ctx, in.TaskId, func(status *proto.ExecutionStatus) bool {
+			if !initialWatchedStatusReceived {
+				initialWatchedStatusReceived = true
+				defer close(initialWatchedStatus)
+			}
 			if status == nil {
 				// Not leased yet. Send the initial task status.
 				err := stream.Send(task)
@@ -160,6 +177,7 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 				}
 				return true
 			}
+			leased = true
 			switch status.Status {
 			case proto.ExecutionStatus_STATUS_RUNNING:
 				task.Status = proto.TaskStatus_TASK_STATUS_RUNNING
@@ -181,36 +199,65 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 			}
 			return true
 		})
+	}
+
+	err = stream.Send(task)
+	if err != nil {
+		return err
+	}
+	if isTaskStatusFinal(task.Status) {
+		return nil
+	}
+
+	for {
 		select {
 		case err := <-sendErr:
 			if !errors.Is(err, io.EOF) {
 				return err
 			}
+			sendErr = nil
+			// Perform update from status db update
 		case <-s.ctx.Done():
+			// Server exit
 			return s.ctx.Err()
 		case <-ctx.Done():
+			// Client cancel
 			return ctx.Err()
-		}
-		// Get final status from db
-		finalTask, err := s.db.GetTask(ctx, in.TaskId)
-		if err != nil {
-			return err
-		}
-		if finalTask.Status == proto.TaskStatus_TASK_STATUS_QUEUEING {
-			log.Printf("Unexpected: Task %s is still queueing after session terminated", in.TaskId)
-		}
-		err = stream.Send(finalTask)
-		if err != nil {
-			return err
-		}
-		return nil
-	} else {
-		err := stream.Send(task)
-		if err != nil {
-			return err
+		case status := <-statusChan:
+			if (isTaskStatusFinal(status) || status == proto.TaskStatus_TASK_STATUS_RUNNING_SUBTASKS) && sendErr != nil && leased {
+				// Task execution finished, stop watching live status, ensure updates are processed.
+				err := <-sendErr
+				if err != nil && !errors.Is(err, io.EOF) {
+					return err
+				}
+				sendErr = nil
+			}
+			if isTaskStatusFinal(status) {
+				// Get full task from db
+				task, err := s.db.GetTask(ctx, in.TaskId)
+				if err != nil {
+					return err
+				}
+				err = stream.Send(task)
+				if err != nil {
+					return err
+				}
+				return nil
+			} else {
+				if task.Status != status {
+					task.Status = status
+					err = stream.Send(task)
+					if err != nil {
+						return err
+					}
+				}
+			}
 		}
 	}
-	return nil
+}
+
+func (s *TaskServiceServer) NotifyTaskStatusFromDb(ctx context.Context, taskId string, status proto.TaskStatus) {
+	s.bus.Publish(taskId, status)
 }
 
 func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskService_LogsServer) error {
@@ -236,7 +283,6 @@ func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskServ
 			}
 			switch status.Status {
 			case proto.ExecutionStatus_STATUS_RUNNING:
-				// TODO: Currently there's a chance of race if the file is not created yet.
 				close(taskStarted)
 			case proto.ExecutionStatus_STATUS_TERMINATED:
 				cancel()
@@ -300,4 +346,8 @@ func (s *TaskServiceServer) patchTaskStatus(ctx context.Context, tasks ...*proto
 		}
 	}
 	return nil
+}
+
+func isTaskStatusFinal(status proto.TaskStatus) bool {
+	return status == proto.TaskStatus_TASK_STATUS_SUCCESS || status == proto.TaskStatus_TASK_STATUS_FAILURE || status == proto.TaskStatus_TASK_STATUS_CANCELLED || status == proto.TaskStatus_TASK_STATUS_FAILED_UPSTREAM
 }

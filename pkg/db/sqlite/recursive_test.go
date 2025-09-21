@@ -27,6 +27,7 @@ func TestRecursiveTaskStatusUpdate(t *testing.T) {
 	// Create temporary database file
 	dbPath := ":memory:" // Use in-memory database for testing
 	db, err := NewSqliteDatabase(dbPath)
+	db.db.SetMaxOpenConns(1) // memory db only supports one connection
 	assert.NoError(t, err, "Failed to create database")
 	defer db.Close()
 
@@ -112,6 +113,7 @@ func TestRecursiveTaskStatusUpdateFailure(t *testing.T) {
 	// Create temporary database file
 	dbPath := ":memory:" // Use in-memory database for testing
 	db, err := NewSqliteDatabase(dbPath)
+	db.db.SetMaxOpenConns(1) // memory db only supports one connection
 	assert.NoError(t, err, "Failed to create database")
 	defer db.Close()
 

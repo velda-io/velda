@@ -211,6 +211,7 @@ func ProvideBrokerServer(grpcServer *grpc.Server, mux *runtime.ServeMux, schedul
 
 func ProvideTaskService(ctx context.Context, grpcServer *grpc.Server, mux *runtime.ServeMux, db tasks.TaskDb, logdb tasks.TaskLogDb, taskTracker tasks.TaskTracker, perm rbac.Permissions) proto.TaskServiceServer {
 	s := tasks.NewTaskServiceServer(ctx, db, logdb, taskTracker, perm)
+	db.SetTaskStatusCallback(s.NotifyTaskStatusFromDb)
 	proto.RegisterTaskServiceServer(grpcServer, s)
 	proto.RegisterTaskServiceHandlerServer(context.Background(), mux, s)
 	return s
