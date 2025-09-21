@@ -17,6 +17,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"path"
@@ -462,6 +463,12 @@ func (s *SqliteDatabase) GetTask(ctx context.Context, taskId string) (*proto.Tas
 SELECT `+taskColumns(option)+`
 FROM tasks
 WHERE parent_id = ? AND task_id = ?`, parentId, taskId)
+	if row.Err() != nil {
+		if errors.Is(row.Err(), sql.ErrNoRows) {
+			return nil, db.ErrNotFound
+		}
+		return nil, row.Err()
+	}
 	return rowToTask(row, option)
 }
 
