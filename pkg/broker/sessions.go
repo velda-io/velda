@@ -26,6 +26,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/rbac"
 )
 
 type schedulingState int
@@ -62,6 +63,7 @@ type Session struct {
 	agent     *Agent
 	status    *proto.ExecutionStatus
 	state     schedulingState
+	user      rbac.User
 
 	priority int64
 	// Contexts that are waiting for session to be scheduled.

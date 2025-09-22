@@ -28,12 +28,13 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/rbac"
 )
 
 type AgentDelegate struct{}
 
-func (d *AgentDelegate) GrantAccessToAgent(context.Context, *Agent, *Session) error {
-	return nil
+func (d *AgentDelegate) GrantAccessToAgent(context.Context, *Agent, *Session) (rbac.User, error) {
+	return &rbac.EmptyUser{}, nil
 }
 
 func (d *AgentDelegate) RevokeAccessToAgent(context.Context, *Agent, *Session) error {

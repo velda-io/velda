@@ -41,8 +41,8 @@ type TaskDb interface {
 
 type AuthHelper interface {
 	UpdateServerInfo(context.Context, *proto.ServerInfo) error
-	GrantAccessToAgent(context.Context, *Agent, *Session) error
-	RevokeAccessToAgent(context.Context, *Agent, *Session) error
+	GrantAccessToAgent(context.Context, *Agent, *Session) (rbac.User, error)
+	RevokeAccessToAgent(ctx context.Context, agent *Agent, session *Session) error
 	GrantAccessToClient(context.Context, *Session, *proto.ExecutionStatus) error
 }
 

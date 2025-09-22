@@ -608,13 +608,18 @@ func (s *SqliteDatabase) notifyPollReady() error {
 }
 
 // SetTaskCompletionCallback sets a callback that will be invoked when tasks
-// transition to a final state (COMPLETED, FAILED, FAILED_UPSTREAM, CANCELLED).
-// It must be set at most once.
+// transition to a new status except for QUEUEING and RUNNING(handled internally by task tracker).
 func (s *SqliteDatabase) SetTaskStatusCallback(callback func(ctx context.Context, taskId string, status proto.TaskStatus)) {
 	if s.taskUpdateCallback != nil {
-		panic("TaskCompletionCallback already set")
+		oldCallback := s.taskUpdateCallback
+		newCallback := func(ctx context.Context, taskId string, status proto.TaskStatus) {
+			oldCallback(ctx, taskId, status)
+			callback(ctx, taskId, status)
+		}
+		s.taskUpdateCallback = newCallback
+	} else {
+		s.taskUpdateCallback = callback
 	}
-	s.taskUpdateCallback = callback
 }
 
 func statusStrToProto(statusStr string, pendingUpstreams int) proto.TaskStatus {

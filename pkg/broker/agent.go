@@ -25,10 +25,11 @@ import (
 	"google.golang.org/grpc/peer"
 
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/rbac"
 )
 
 type agentDelegate interface {
-	GrantAccessToAgent(context.Context, *Agent, *Session) error
+	GrantAccessToAgent(context.Context, *Agent, *Session) (rbac.User, error)
 	RevokeAccessToAgent(context.Context, *Agent, *Session) error
 	UpdateTaskResult(context.Context, *Session, *proto.BatchTaskResult) error
 }
@@ -272,7 +273,7 @@ func (a *Agent) Run(
 			resChan <- func() {
 				var err error
 				response := &proto.AgentUpdateResponse{}
-				err = a.delegate.GrantAccessToAgent(reqData.ctx, a, req)
+				req.user, err = a.delegate.GrantAccessToAgent(reqData.ctx, a, req)
 				if err != nil {
 					log.Printf("Failed to grant access for session %s to agent %s: %v", req.Request.SessionId, a.id, err)
 					req.agentResponse <- AgentSessionResponse{
@@ -372,7 +373,10 @@ func (a *Agent) handleSessionCompletion(ctx context.Context, resp *proto.Session
 	session, ok := a.mySessions[sessionKey]
 	if !ok {
 		log.Printf("Session %s not found", sessionKey)
-	} else if resp.Checkpointed {
+		return nil
+	}
+	ctx = rbac.ContextWithUser(ctx, session.user)
+	if resp.Checkpointed {
 		delete(a.mySessions, sessionKey)
 		session.Checkpointed()
 		a.scheduler.AddAgent(a)
