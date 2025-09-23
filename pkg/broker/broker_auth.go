@@ -69,17 +69,17 @@ func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, se
 
 // exportNFS is a helper function to handle NFS export logic using exportfs command
 func exportNFS(path, host string, session *Session) error {
-	cmd := exec.Command("sudo", "exportfs", "-o", "rw,async,no_root_squash,subtree_check", host+":"+path)
+	cmd := exec.Command("sudo", "sh", "-c", "echo '"+path+" "+host+"(rw,async,no_root_squash,subtree_check)' > "+exportFile(session))
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Failed to export NFS %s for host %s: %s", path, host, out)
-		return fmt.Errorf("failed to export NFS: %w", err)
-	}
-	cmd = exec.Command("sudo", "sh", "-c", "echo '"+path+" "+host+"(rw,async,no_root_squash)' > "+exportFile(session))
-	out, err = cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to write NFS export file for %s: %s", host, out)
 		return fmt.Errorf("failed to write NFS export file: %w", err)
+	}
+	cmd = exec.Command("sudo", "exportfs", "-a")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to export NFS %s for host %s: %s", path, host, out)
+		return fmt.Errorf("failed to export NFS: %w", err)
 	}
 	return nil
 }
@@ -104,17 +104,17 @@ func exportFile(s *Session) string {
 
 // unexportNFS is a helper function to handle NFS unexport logic using exportfs command
 func unexportNFS(path, host string, session *Session) error {
-	cmd := exec.Command("sudo", "exportfs", "-u", host+":"+path)
+	cmd := exec.Command("sudo", "rm", exportFile(session))
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Failed to unexport NFS %s for host %s: %s", path, host, out)
-		return fmt.Errorf("failed to unexport NFS: %w", err)
-	}
-	cmd = exec.Command("sudo", "rm", exportFile(session))
-	out, err = cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to remove NFS export file for %s: %s", host, out)
 		// Ignore error for now.
+	}
+	cmd = exec.Command("sudo", "exportfs", "-a")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to export NFS %s for host %s: %s", path, host, out)
+		return fmt.Errorf("failed to export NFS: %w", err)
 	}
 	return nil
 }
