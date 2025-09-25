@@ -144,7 +144,6 @@ func (s *SSHD) Start() (net.Addr, error) {
 	}
 
 	s.listener = listener
-	go s.waiter.Run()
 	go func() {
 		for {
 			conn, err := listener.Accept()

@@ -93,7 +93,7 @@ func (s *server) AgentUpdate(stream proto.BrokerService_AgentUpdateServer) error
 		}
 		update := func(sess *Session) error {
 			agent.mySessions[key] = sess
-			agent.handleSessionInitResponse(session.Response)
+			agent.handleSessionInitResponse(stream.Context(), session.Response)
 			sess.Reconnect()
 			return nil
 		}
