@@ -205,7 +205,7 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 	if err != nil {
 		return err
 	}
-	if isTaskStatusFinal(task.Status) {
+	if IsTaskStatusFinal(task.Status) {
 		return nil
 	}
 
@@ -224,7 +224,7 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 			// Client cancel
 			return ctx.Err()
 		case status := <-statusChan:
-			if (isTaskStatusFinal(status) || status == proto.TaskStatus_TASK_STATUS_RUNNING_SUBTASKS) && sendErr != nil && leased {
+			if (IsTaskStatusFinal(status) || status == proto.TaskStatus_TASK_STATUS_RUNNING_SUBTASKS) && sendErr != nil && leased {
 				// Task execution finished, stop watching live status, ensure updates are processed.
 				err := <-sendErr
 				if err != nil && !errors.Is(err, io.EOF) {
@@ -232,7 +232,7 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 				}
 				sendErr = nil
 			}
-			if isTaskStatusFinal(status) {
+			if IsTaskStatusFinal(status) {
 				// Get full task from db
 				task, err := s.db.GetTask(ctx, in.TaskId)
 				if err != nil {
@@ -348,6 +348,6 @@ func (s *TaskServiceServer) patchTaskStatus(ctx context.Context, tasks ...*proto
 	return nil
 }
 
-func isTaskStatusFinal(status proto.TaskStatus) bool {
+func IsTaskStatusFinal(status proto.TaskStatus) bool {
 	return status == proto.TaskStatus_TASK_STATUS_SUCCESS || status == proto.TaskStatus_TASK_STATUS_FAILURE || status == proto.TaskStatus_TASK_STATUS_CANCELLED || status == proto.TaskStatus_TASK_STATUS_FAILED_UPSTREAM
 }

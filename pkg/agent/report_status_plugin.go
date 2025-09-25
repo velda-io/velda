@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -39,22 +39,28 @@ func NewReportStatusPlugin(sshdPlugin any) *ReportStatusPlugin {
 
 func (p *ReportStatusPlugin) Run(ctx context.Context) error {
 	sshd := ctx.Value(p.sshdPlugin).(*SSHD)
+	send := func() {
+		addr := sshd.listener.Addr()
+		port := addr.(*net.TCPAddr).Port
+		sandboxConnection := agentd.SandboxConnection{
+			Port:    port,
+			HostKey: sshd.HostPublicKey.Marshal(),
+		}
+		err := gob.NewEncoder(os.Stdout).Encode(sandboxConnection)
+		log.Printf("Sent sandbox connection info")
+		if err != nil {
+			log.Fatal("Failed to encode sandbox connection:", err)
+		}
+	}
+	// Handle future CHECK_POINT recovers.
 	go func() {
 		for {
-			addr := sshd.listener.Addr()
-			port := addr.(*net.TCPAddr).Port
-			sandboxConnection := agentd.SandboxConnection{
-				Port:    port,
-				HostKey: sshd.HostPublicKey.Marshal(),
-			}
-			err := gob.NewEncoder(os.Stdout).Encode(sandboxConnection)
-			if err != nil {
-				log.Fatal("Failed to encode sandbox connection:", err)
-			}
 			sig := make(chan os.Signal, 1)
 			signal.Notify(sig, syscall.SIGCONT)
 			<-sig
+			send()
 		}
 	}()
+	send()
 	return p.RunNext(ctx)
 }

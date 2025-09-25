@@ -283,6 +283,9 @@ func (a *Agent) Run(
 				response.SessionRequest = req.Request
 				if err := stream.Send(response); err != nil {
 					log.Printf("Failed to send session request %s to agent %s", req.Request.SessionId, a.id)
+					a.delegate.RevokeAccessToAgent(stream.Context(), a, req)
+					delete(a.mySessions, req.Key())
+					// If this error happens, the stream will likely be broken. Not registering back.
 					req.agentResponse <- AgentSessionResponse{
 						Error: err,
 					}
@@ -314,7 +317,7 @@ func (a *Agent) RequestKill(ctx context.Context, instanceId int64, sessionId str
 func (a *Agent) handleSessionUpdate(ctx context.Context, resp *proto.AgentUpdateRequest) error {
 	// TODO: Handle multi-error.
 	if resp.SessionInitResponse != nil {
-		if err := a.handleSessionInitResponse(resp.SessionInitResponse); err != nil {
+		if err := a.handleSessionInitResponse(ctx, resp.SessionInitResponse); err != nil {
 			return err
 		}
 	}
@@ -326,7 +329,7 @@ func (a *Agent) handleSessionUpdate(ctx context.Context, resp *proto.AgentUpdate
 	return nil
 }
 
-func (a *Agent) handleSessionInitResponse(resp *proto.SessionInitResponse) error {
+func (a *Agent) handleSessionInitResponse(ctx context.Context, resp *proto.SessionInitResponse) error {
 	sessionKey := SessionKey{
 		InstanceId: resp.InstanceId,
 		SessionId:  resp.SessionId,
@@ -342,6 +345,7 @@ func (a *Agent) handleSessionInitResponse(resp *proto.SessionInitResponse) error
 			Error: fmt.Errorf("%w: %s", ErrorFailedToStartSession, a.id),
 		}
 		session.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_STARTUP_FAILURE)
+		a.delegate.RevokeAccessToAgent(ctx, a, session)
 		a.scheduler.AddAgent(a)
 		a.scheduler.PoolManager.MarkIdle(a.id, a.slots-len(a.mySessions))
 		a.receiving = true
