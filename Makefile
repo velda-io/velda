@@ -34,7 +34,7 @@ gen:
 unittest:
 	go test ./pkg/... ./client/...
 
-e2etest:
+e2etest: velda
 	go test ./tests --tags local -v
 
 test: unittest e2etest

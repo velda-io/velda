@@ -22,6 +22,7 @@ import (
 
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
+	agentpb "velda.io/velda/pkg/proto/agent"
 	proto "velda.io/velda/pkg/proto/config"
 )
 
@@ -104,8 +105,8 @@ func (f *cmdPoolFactory) CanHandle(pb *proto.AutoscalerBackend) bool {
 	return false
 }
 
-func (f *cmdPoolFactory) NewBackend(pb *proto.AutoscalerBackend) (broker.ResourcePoolBackend, error) {
-	cmd := pb.GetCommand()
+func (f *cmdPoolFactory) NewBackend(pool *proto.AgentPool, brokerInfo *agentpb.BrokerInfo) (broker.ResourcePoolBackend, error) {
+	cmd := pool.GetAutoScaler().GetBackend().GetCommand()
 	return NewCmdPoolBackend(cmd.Start, cmd.Stop, cmd.List, cmd.BatchStart), nil
 }
 

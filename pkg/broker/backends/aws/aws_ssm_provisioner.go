@@ -29,6 +29,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
+	agentpb "velda.io/velda/pkg/proto/agent"
 	configpb "velda.io/velda/pkg/proto/config"
 )
 
@@ -38,6 +39,7 @@ type AwsSmmPoolProvisioner struct {
 	lastSeenTime    map[string]time.Time
 	cfg             *configpb.AWSProvisioner
 	awsConfig       aws.Config
+	brokerInfo      *agentpb.BrokerInfo
 }
 
 func (p *AwsSmmPoolProvisioner) Run(ctx context.Context) {
@@ -127,7 +129,7 @@ func (p *AwsSmmPoolProvisioner) update(ctx context.Context, param *ssmtypes.Para
 	if err != nil {
 		return err
 	}
-	autoscalerConfig, err := backends.AutoScaledConfigFromConfig(ctx, obj)
+	autoscalerConfig, err := backends.AutoScaledConfigFromConfig(ctx, obj, p.brokerInfo)
 	if err != nil {
 		return err
 	}
@@ -141,7 +143,7 @@ func (p *AwsSmmPoolProvisioner) update(ctx context.Context, param *ssmtypes.Para
 
 type AwsPoolProvisionerFactory struct{}
 
-func (*AwsPoolProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedulers *broker.SchedulerSet) (backends.Provisioner, error) {
+func (*AwsPoolProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedulers *broker.SchedulerSet, brokerInfo *agentpb.BrokerInfo) (backends.Provisioner, error) {
 	cfgAws := cfg.GetAws()
 	awsCfg, err := config.LoadDefaultConfig(context.TODO())
 
@@ -152,6 +154,7 @@ func (*AwsPoolProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, sche
 		schedulerSet: schedulers,
 		awsConfig:    awsCfg,
 		cfg:          cfgAws,
+		brokerInfo:   brokerInfo,
 	}, nil
 }
 

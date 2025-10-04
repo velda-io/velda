@@ -38,9 +38,10 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
-
+	agentpb "velda.io/velda/pkg/proto/agent"
 	configpb "velda.io/velda/pkg/proto/config"
 )
 
@@ -243,7 +244,7 @@ func getClusterConfig(cfg *configpb.KubernetesProvisioner) (*rest.Config, error)
 	}
 }
 
-func (*K8sProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedulers *broker.SchedulerSet) (backends.Provisioner, error) {
+func (*K8sProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedulers *broker.SchedulerSet, brokerInfo *agentpb.BrokerInfo) (backends.Provisioner, error) {
 	config, err := getClusterConfig(cfg.GetKubernetes())
 	if err != nil {
 		return nil, err

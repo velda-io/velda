@@ -27,6 +27,7 @@ import (
 
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
+	agentpb "velda.io/velda/pkg/proto/agent"
 	configpb "velda.io/velda/pkg/proto/config"
 )
 
@@ -36,6 +37,7 @@ type GcsPoolProvisioner struct {
 	lastSeenVersion map[string]time.Time
 	lastSeenTime    map[string]time.Time
 	cfg             *configpb.GCSProvisioner
+	brokerInfo      *agentpb.BrokerInfo
 }
 
 func (p *GcsPoolProvisioner) Run(ctx context.Context) {
@@ -123,7 +125,7 @@ func (p *GcsPoolProvisioner) update(ctx context.Context, attr *storage.ObjectAtt
 	if err != nil {
 		return err
 	}
-	autoscalerConfig, err := backends.AutoScaledConfigFromConfig(ctx, obj)
+	autoscalerConfig, err := backends.AutoScaledConfigFromConfig(ctx, obj, p.brokerInfo)
 	if err != nil {
 		return err
 	}
@@ -137,7 +139,7 @@ func (p *GcsPoolProvisioner) update(ctx context.Context, attr *storage.ObjectAtt
 
 type GcsPoolProvisionerFactory struct{}
 
-func (*GcsPoolProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedulers *broker.SchedulerSet) (backends.Provisioner, error) {
+func (*GcsPoolProvisionerFactory) NewProvisioner(cfg *configpb.Provisioner, schedulers *broker.SchedulerSet, brokerInfo *agentpb.BrokerInfo) (backends.Provisioner, error) {
 	cfgGcs := cfg.GetGcs()
 	client, err := storage.NewClient(context.Background())
 	if err != nil {

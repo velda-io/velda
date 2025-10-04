@@ -15,6 +15,7 @@ syntax = "proto3";
 
 package velda.config;
 
+import "agent/config.proto";
 import "google/protobuf/duration.proto";
 
 option go_package = "velda.io/velda/pkg/proto/config";
@@ -121,6 +122,11 @@ message AutoscalerBackendAWSLaunchTemplate {
 
   // Inject setup script to the instance to configure the agent.
   string agent_config_content = 6;
+  // Structured version of the agent config.
+  // If both agent_config and agent_config_content are set,
+  // agent_config will be used.
+  // Pool & broker info will be automatically set.
+  velda.agent.AgentConfig agent_config = 12;
 
   // Restrict to a specific availability zone.
   string zone = 7;
@@ -254,6 +260,9 @@ message Config {
   // Whether to allow pools to be dynamically created(e.g. through
   // custom method to create an agent).
   bool allow_new_pool = 6;
+
+  // The default broker info to use if not set in the agent config.
+  velda.agent.BrokerInfo default_broker_info = 11;
 
   reserved 2, 3, 7, 8, 10;
   reserved 50 to 99;

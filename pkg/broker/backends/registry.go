@@ -19,12 +19,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"velda.io/velda/pkg/broker"
+	agentpb "velda.io/velda/pkg/proto/agent"
 	proto "velda.io/velda/pkg/proto/config"
 )
 
 type factory interface {
 	CanHandle(pb *proto.AutoscalerBackend) bool
-	NewBackend(pb *proto.AutoscalerBackend) (broker.ResourcePoolBackend, error)
+	NewBackend(pool *proto.AgentPool, defaultBrokerInfo *agentpb.BrokerInfo) (broker.ResourcePoolBackend, error)
 }
 
 type Provisioner interface {
@@ -33,7 +34,7 @@ type Provisioner interface {
 
 type provisionerFactory interface {
 	CanHandle(pb *proto.Provisioner) bool
-	NewProvisioner(pb *proto.Provisioner, schedulers *broker.SchedulerSet) (Provisioner, error)
+	NewProvisioner(pb *proto.Provisioner, schedulers *broker.SchedulerSet, brokerInfo *agentpb.BrokerInfo) (Provisioner, error)
 }
 
 var handlers []factory
@@ -47,27 +48,26 @@ func Register(f factory) {
 func RegisterProvisioner(f provisionerFactory) {
 	provisioners = append(provisioners, f)
 }
-
-func NewBackend(pb *proto.AutoscalerBackend) (broker.ResourcePoolBackend, error) {
+func NewBackend(pool *proto.AgentPool, defaultBrokerInfo *agentpb.BrokerInfo) (broker.ResourcePoolBackend, error) {
 	for _, h := range handlers {
-		if h.CanHandle(pb) {
-			return h.NewBackend(pb)
+		if h.CanHandle(pool.GetAutoScaler().GetBackend()) {
+			return h.NewBackend(pool, defaultBrokerInfo)
 		}
 	}
-	return nil, fmt.Errorf("no backend found for %v", pb)
+	return nil, fmt.Errorf("no backend found for %v", pool.GetAutoScaler().GetBackend())
 }
 
-func NewProvisioner(pb *proto.Provisioner, schedulerSet *broker.SchedulerSet) (Provisioner, error) {
+func NewProvisioner(pb *proto.Provisioner, schedulerSet *broker.SchedulerSet, brokerInfo *agentpb.BrokerInfo) (Provisioner, error) {
 	for _, p := range provisioners {
 		if p.CanHandle(pb) {
-			return p.NewProvisioner(pb, schedulerSet)
+			return p.NewProvisioner(pb, schedulerSet, brokerInfo)
 		}
 	}
 	return nil, fmt.Errorf("no provisioner found for %v", pb)
 }
 
-func AutoScaledConfigFromConfig(ctx context.Context, cfg *proto.AgentPool) (*broker.AutoScaledPoolConfig, error) {
-	backend, err := NewBackend(cfg.AutoScaler.Backend)
+func AutoScaledConfigFromConfig(ctx context.Context, cfg *proto.AgentPool, defaultBrokerInfo *agentpb.BrokerInfo) (*broker.AutoScaledPoolConfig, error) {
+	backend, err := NewBackend(cfg, defaultBrokerInfo)
 	if err != nil {
 		return nil, err
 	}

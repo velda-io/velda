@@ -8,7 +8,6 @@ package agent_runner
 
 import (
 	"context"
-
 	"github.com/spf13/cobra"
 	agent2 "velda.io/velda/pkg/agent"
 	"velda.io/velda/pkg/proto/agent"
