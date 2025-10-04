@@ -120,12 +120,29 @@ func PrintProtoYaml(msg proto.Message, w io.Writer) error {
 	if err := json.Unmarshal(b, &obj); err != nil {
 		return err
 	}
-	y, err := yaml.Marshal(obj)
+	e := yaml.NewEncoder(w)
+	defer e.Close()
+	err = e.Encode(obj)
 	if err != nil {
 		return err
 	}
-	_, _ = w.Write(y)
 	return nil
+}
+
+func ProtoToYaml(msg proto.Message) (string, error) {
+	b, err := protojson.Marshal(msg)
+	if err != nil {
+		return "", err
+	}
+	var obj interface{}
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return "", err
+	}
+	y, err := yaml.Marshal(obj)
+	if err != nil {
+		return "", err
+	}
+	return string(y), nil
 }
 
 func pathBase(p string) string {

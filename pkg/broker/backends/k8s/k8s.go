@@ -28,6 +28,7 @@ import (
 
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
+	agentpb "velda.io/velda/pkg/proto/agent"
 	proto "velda.io/velda/pkg/proto/config"
 	"velda.io/velda/pkg/utils"
 )
@@ -96,8 +97,8 @@ func (f *k8sPoolFactory) CanHandle(pb *proto.AutoscalerBackend) bool {
 	return false
 }
 
-func (f *k8sPoolFactory) NewBackend(pb *proto.AutoscalerBackend) (broker.ResourcePoolBackend, error) {
-	cfg := pb.GetKubernetes()
+func (f *k8sPoolFactory) NewBackend(pool *proto.AgentPool, brokerInfo *agentpb.BrokerInfo) (broker.ResourcePoolBackend, error) {
+	cfg := pool.GetAutoScaler().GetBackend().GetKubernetes()
 	kubeconfig := cfg.GetKubeconfig()
 	if kubeconfig == "" {
 		// TODO: Get in-cluster config

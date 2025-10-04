@@ -39,6 +39,7 @@ import (
 	"velda.io/velda/pkg/broker/backends"
 	"velda.io/velda/pkg/instances"
 	"velda.io/velda/pkg/proto"
+	agentpb "velda.io/velda/pkg/proto/agent"
 	configpb "velda.io/velda/pkg/proto/config"
 	"velda.io/velda/pkg/rbac"
 	"velda.io/velda/pkg/storage"
@@ -134,7 +135,7 @@ func ProvideDb(s storage.Storage, ctx context.Context) (database, error) {
 		return nil, fmt.Errorf("Unsupported storage type: %T", s)
 	}
 	if err := db.Init(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to init DB: %w", err)
 	}
 	go db.RunMaintenances(ctx)
 	return db, nil
@@ -147,13 +148,22 @@ func ProvideInstanceService(grpcServer *grpc.Server, mux *runtime.ServeMux, db i
 	return s
 }
 
-func ProvideSchedulers(ctx context.Context, cfg *configpb.Config) (*broker.SchedulerSet, error) {
+// Optional dependency: can fail to resolve if no backend use it.
+func ProvideBrokerInfo(ctx context.Context, cfg *configpb.Config) *agentpb.BrokerInfo {
+	brokerInfo, err := utils.GetDefaultBrokerInfo(ctx, cfg)
+	if err != nil {
+		log.Printf("Failed to get default broker info: %v", err)
+	}
+	return brokerInfo
+}
+
+func ProvideSchedulers(ctx context.Context, cfg *configpb.Config, brokerInfo *agentpb.BrokerInfo) (*broker.SchedulerSet, error) {
 	pools := cfg.AgentPools
 	scheduler := broker.NewSchedulerSet(ctx)
 	for _, poolConfig := range pools {
 		pool, _ := scheduler.GetPool(poolConfig.Name)
 		if poolConfig.AutoScaler != nil {
-			config, err := backends.AutoScaledConfigFromConfig(ctx, poolConfig)
+			config, err := backends.AutoScaledConfigFromConfig(ctx, poolConfig, brokerInfo)
 			if err != nil {
 				return nil, fmt.Errorf("Failed to create autoscaler backend: %v", err)
 			}
@@ -278,10 +288,10 @@ func ProvideHttpHandler() *http.ServeMux {
 
 type ProvisionRunner Runner
 
-func ProvideProvisioners(ctx context.Context, config *configpb.Config, schedulers *broker.SchedulerSet) (ProvisionRunner, error) {
+func ProvideProvisioners(ctx context.Context, config *configpb.Config, schedulers *broker.SchedulerSet, brokerInfo *agentpb.BrokerInfo) (ProvisionRunner, error) {
 	// Initialize provisioners
 	for _, provisionerCfg := range config.Provisioners {
-		provisioner, err := backends.NewProvisioner(provisionerCfg, schedulers)
+		provisioner, err := backends.NewProvisioner(provisionerCfg, schedulers, brokerInfo)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to create provisioner: %v", err)
 		}

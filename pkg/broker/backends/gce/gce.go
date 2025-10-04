@@ -21,6 +21,7 @@ import (
 
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
+	agentpb "velda.io/velda/pkg/proto/agent"
 	proto "velda.io/velda/pkg/proto/config"
 	"velda.io/velda/pkg/utils"
 )
@@ -120,8 +121,8 @@ func (f *gcePoolFactory) CanHandle(pb *proto.AutoscalerBackend) bool {
 	return false
 }
 
-func (f *gcePoolFactory) NewBackend(pb *proto.AutoscalerBackend) (broker.ResourcePoolBackend, error) {
-	gce := pb.GetGceInstanceGroup()
+func (f *gcePoolFactory) NewBackend(pool *proto.AgentPool, brokerInfo *agentpb.BrokerInfo) (broker.ResourcePoolBackend, error) {
+	gce := pool.GetAutoScaler().GetBackend().GetGceInstanceGroup()
 	prefix := gce.InstanceNamePrefix
 	if prefix == "" {
 		prefix = gce.InstanceGroup

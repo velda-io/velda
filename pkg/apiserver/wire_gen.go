@@ -33,7 +33,8 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	if err != nil {
 		return nil, err
 	}
-	schedulerSet, err := ProvideSchedulers(context, config)
+	brokerInfo := ProvideBrokerInfo(context, config)
+	schedulerSet, err := ProvideSchedulers(context, config, brokerInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +51,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	if err != nil {
 		return nil, err
 	}
-	provisionRunner, err := ProvideProvisioners(context, config, schedulerSet)
+	provisionRunner, err := ProvideProvisioners(context, config, schedulerSet, brokerInfo)
 	if err != nil {
 		return nil, err
 	}

@@ -25,10 +25,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	pb "github.com/golang/protobuf/proto"
 	"gopkg.in/yaml.v3"
 
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
+	agentpb "velda.io/velda/pkg/proto/agent"
 	proto "velda.io/velda/pkg/proto/config"
 	"velda.io/velda/pkg/utils"
 )
@@ -162,11 +164,12 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	if a.cfg.InstanceType != "" {
 		input.InstanceType = ec2types.InstanceType(a.cfg.InstanceType)
 	}
-	if a.cfg.AgentConfigContent != "" {
+	agentConfig := a.cfg.AgentConfigContent
+	if agentConfig != "" {
 		cloudInitData, err := yaml.Marshal(map[string]interface{}{
 			"bootcmd": []string{
 				"mkdir -p /run/velda",
-				fmt.Sprintf("cat << EOF > /run/velda/velda.yaml\n%s\nEOF", a.cfg.AgentConfigContent),
+				fmt.Sprintf("cat << EOF > /run/velda/velda.yaml\n%s\nEOF", agentConfig),
 			},
 		})
 		if err != nil {
@@ -422,9 +425,25 @@ func (f *awsLaunchTemplatePoolFactory) CanHandle(pb *proto.AutoscalerBackend) bo
 	return false
 }
 
-func (f *awsLaunchTemplatePoolFactory) NewBackend(pb *proto.AutoscalerBackend) (broker.ResourcePoolBackend, error) {
+func (f *awsLaunchTemplatePoolFactory) NewBackend(pool *proto.AgentPool, brokerInfo *agentpb.BrokerInfo) (broker.ResourcePoolBackend, error) {
 	ctx := context.Background()
-	awsTemplate := pb.GetAwsLaunchTemplate()
+	awsTemplate := pool.GetAutoScaler().GetBackend().GetAwsLaunchTemplate()
+	if awsTemplate.AgentConfig != nil {
+		awsTemplate = pb.Clone(awsTemplate).(*proto.AutoscalerBackendAWSLaunchTemplate)
+		awsTemplate.AgentConfig.Pool = pool.GetName()
+		if awsTemplate.AgentConfig.Broker == nil {
+			if brokerInfo == nil {
+				return nil, fmt.Errorf("no default broker info provided for pool %s", pool.GetName())
+			}
+			awsTemplate.AgentConfig.Broker = brokerInfo
+		}
+		var err error
+		// We just cache the full content directly.
+		awsTemplate.AgentConfigContent, err = utils.ProtoToYaml(awsTemplate.AgentConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal agent config: %w", err)
+		}
+	}
 	prefix := awsTemplate.InstanceNamePrefix
 	if prefix == "" {
 		prefix = awsTemplate.LaunchTemplateName + "-"

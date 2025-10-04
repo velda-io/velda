@@ -50,9 +50,13 @@ func TestAWSBackend(t *testing.T) {
 			},
 		},
 	}
+	poolPb := &cfgpb.AgentPool{
+		Name:       "test-pool",
+		AutoScaler: &cfgpb.AgentPool_AutoScaler{Backend: configpb},
+	}
 
 	factory := &awsLaunchTemplatePoolFactory{}
-	backend, err := factory.NewBackend(configpb)
+	backend, err := factory.NewBackend(poolPb, nil)
 	if err != nil {
 		t.Fatalf("Failed to create backend: %v", err)
 	}
@@ -102,9 +106,13 @@ func TestAWSBackendWithDeletionBuffer(t *testing.T) {
 			},
 		},
 	}
+	poolPb := &cfgpb.AgentPool{
+		Name:       "test-pool",
+		AutoScaler: &cfgpb.AgentPool_AutoScaler{Backend: configpb},
+	}
 
 	factory := &awsLaunchTemplatePoolFactory{}
-	backend, err := factory.NewBackend(configpb)
+	backend, err := factory.NewBackend(poolPb, nil)
 	if err != nil {
 		t.Fatalf("Failed to create backend: %v", err)
 	}

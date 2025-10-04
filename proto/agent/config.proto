@@ -98,13 +98,14 @@ message DaemonConfig {
   Network network = 3;
 }
 
+message BrokerInfo {
+  // The URL of the broker.
+  string address = 1;
+  string public_address = 2;
+}
+
 message AgentConfig {
-  message Broker {
-    // The URL of the broker.
-    string address = 1;
-    string public_address = 2;
-  }
-  Broker broker = 1;
+  BrokerInfo broker = 1;
   string session = 2;
   int64 instance = 3;
 
