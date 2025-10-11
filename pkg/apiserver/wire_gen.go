@@ -38,9 +38,9 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	if err != nil {
 		return nil, err
 	}
-	accountingDb := _wireNullAccountingDbValue
+	sessionCompletionWatcher := _wireNullCompletionWatcherValue
 	watcher := broker.NewWatcher()
-	sessionHelper := ProvideSessionHelper(accountingDb, watcher)
+	sessionHelper := ProvideSessionHelper(sessionCompletionWatcher, watcher)
 	sessionDatabase := broker.NewSessionDatabase(sessionHelper)
 	permissions := ProvidePermission()
 	storage, err := ProvideStorage(config)
@@ -86,7 +86,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 var (
 	_wireServerAuthUnaryInterceptorValue  = ServerAuthUnaryInterceptor(sessionInterceptor)
 	_wireServerAuthStreamInterceptorValue = ServerAuthStreamInterceptor(sessionStreamInterceptor)
-	_wireNullAccountingDbValue            = &broker.NullAccountingDb{}
+	_wireNullCompletionWatcherValue       = &broker.NullCompletionWatcher{}
 	_wireRegistryValue                    = AllMetrics
 )
 

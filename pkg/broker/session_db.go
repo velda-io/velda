@@ -14,6 +14,7 @@
 package broker
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -22,24 +23,18 @@ import (
 	"velda.io/velda/pkg/proto"
 )
 
-type AccountingDb interface {
-	RecordExecution(data *proto.SessionExecutionRecord) error
+type SessionCompletionWatcher interface {
+	NotifySessionCompletion(ctx context.Context, record *proto.SessionExecutionRecord) error
 }
-
-type SessionWatcher interface {
+type SessionHelper interface {
+	SessionCompletionWatcher
 	NotifyStateChange(instanceId int64, sessionId string, state *proto.ExecutionStatus)
 	NotifyTaskChange(taskId string, state *proto.ExecutionStatus)
 }
 
-// A shared context object for session to call-back.
-type SessionHelper interface {
-	AccountingDb
-	SessionWatcher
-}
+type NullCompletionWatcher struct{}
 
-type NullAccountingDb struct{}
-
-func (db *NullAccountingDb) RecordExecution(data *proto.SessionExecutionRecord) error {
+func (db *NullCompletionWatcher) NotifySessionCompletion(ctx context.Context, data *proto.SessionExecutionRecord) error {
 	return nil
 }
 
