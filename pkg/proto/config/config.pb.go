@@ -367,7 +367,10 @@ type AutoscalerBackendAWSLaunchTemplate struct {
 	InstanceType string `protobuf:"bytes,5,opt,name=instance_type,json=instanceType,proto3" json:"instance_type,omitempty"`
 	// Inject setup script to the instance to configure the agent.
 	AgentConfigContent string `protobuf:"bytes,6,opt,name=agent_config_content,json=agentConfigContent,proto3" json:"agent_config_content,omitempty"`
-	// Pool will be automatically set.
+	// Structured version of the agent config.
+	// If both agent_config and agent_config_content are set,
+	// agent_config will be used.
+	// Pool & broker info will be automatically set.
 	AgentConfig *agent.AgentConfig `protobuf:"bytes,12,opt,name=agent_config,json=agentConfig,proto3" json:"agent_config,omitempty"`
 	// Restrict to a specific availability zone.
 	Zone string `protobuf:"bytes,7,opt,name=zone,proto3" json:"zone,omitempty"`

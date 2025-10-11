@@ -59,7 +59,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		ProvideSessionHelper,
 		ProvideBrokerInfo,
 		wire.Bind(new(tasks.TaskTracker), (**broker.TaskTracker)(nil)),
-		wire.InterfaceValue(new(broker.AccountingDb), &broker.NullAccountingDb{}),
+		wire.InterfaceValue(new(broker.SessionCompletionWatcher), &broker.NullCompletionWatcher{}),
 		DatabaseProviders,
 		wire.Value(ServerAuthUnaryInterceptor(sessionInterceptor)),
 		wire.Value(ServerAuthStreamInterceptor(sessionStreamInterceptor)),

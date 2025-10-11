@@ -194,13 +194,13 @@ func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler 
 
 var ProvideWatcher = broker.NewWatcher
 
-func ProvideSessionHelper(accountingDb broker.AccountingDb, watcher *broker.Watcher) broker.SessionHelper {
+func ProvideSessionHelper(completionWatcher broker.SessionCompletionWatcher, watcher *broker.Watcher) broker.SessionHelper {
 	return struct {
-		broker.AccountingDb
-		broker.SessionWatcher
+		broker.SessionCompletionWatcher
+		*broker.Watcher
 	}{
-		AccountingDb:   accountingDb,
-		SessionWatcher: watcher,
+		SessionCompletionWatcher: completionWatcher,
+		Watcher:                  watcher,
 	}
 }
 

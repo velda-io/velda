@@ -487,7 +487,8 @@ func (s *Session) recordExecution(finalState proto.SessionExecutionFinalState) e
 	if s.agent != nil {
 		data.AgentId = s.agent.id
 	}
-	err := s.helpers.RecordExecution(data)
+	ctx := rbac.ContextWithUser(context.Background(), s.user)
+	err := s.helpers.NotifySessionCompletion(ctx, data)
 	if err != nil {
 		log.Printf("Failed to record execution for session %s: %v", s.id, err)
 	}
