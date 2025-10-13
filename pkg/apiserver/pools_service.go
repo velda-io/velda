@@ -19,10 +19,12 @@ func NewPoolManagerServiceServer(s *broker.SchedulerSet) *PoolManagerServiceServ
 
 func (s *PoolManagerServiceServer) ListPools(ctx context.Context, in *proto.ListPoolsRequest) (*proto.ListPoolsResponse, error) {
 	poolNames := s.s.GetPools()
-	sort.Strings(poolNames)
 	pools := make([]*proto.Pool, 0, len(poolNames))
-	for _, pool := range poolNames {
-		pools = append(pools, &proto.Pool{Name: pool})
+	for name, pool := range poolNames {
+		pools = append(pools, &proto.Pool{Name: name, Description: pool.Description})
 	}
+	sort.Slice(pools, func(i, j int) bool {
+		return pools[i].Name < pools[j].Name
+	})
 	return &proto.ListPoolsResponse{Pools: pools}, nil
 }

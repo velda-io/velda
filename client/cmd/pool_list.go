@@ -15,6 +15,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -37,9 +39,17 @@ var listPoolCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("Error listing pools: %w", err)
 		}
+		// print as a table: NAME and DESCRIPTION
+		w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
+		fmt.Fprintln(w, "NAME\tDESCRIPTION")
 		for _, pool := range pools.Pools {
-			fmt.Printf("%s\n", pool.Name)
+			desc := pool.Description
+			if desc == "" {
+				desc = "-"
+			}
+			fmt.Fprintf(w, "%s\t%s\n", pool.Name, desc)
 		}
+		w.Flush()
 		return nil
 	},
 }

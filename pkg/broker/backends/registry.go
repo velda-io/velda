@@ -86,6 +86,7 @@ func AutoScaledConfigFromBackend(ctx context.Context, backend broker.ResourcePoo
 		KillUnknownAfter:     autoScalerCfg.KillUnknownAfter.AsDuration(),
 		DefaultSlotsPerAgent: int(autoScalerCfg.DefaultSlotsPerAgent),
 		Batch:                autoScalerCfg.Mode == proto.AgentPool_AutoScaler_MODE_BATCH,
+		Metadata:             autoScalerCfg.Metadata,
 	}
 }
 
