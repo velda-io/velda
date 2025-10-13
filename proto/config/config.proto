@@ -42,6 +42,10 @@ message Storage {
   reserved 2, 3;
 }
 
+message PoolMetadata {
+  string description = 1;
+}
+
 message AgentPool {
   string name = 1;
 	
@@ -93,6 +97,9 @@ message AgentPool {
       MODE_BATCH = 2;
     }
     Mode mode = 10;
+
+    // Metadata about the pool.
+    PoolMetadata metadata = 11;
   }
   AutoScaler auto_scaler = 2;
 }

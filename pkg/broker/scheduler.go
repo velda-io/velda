@@ -22,6 +22,8 @@ import (
 	"sync"
 
 	"github.com/emirpasic/gods/sets/treeset"
+
+	configproto "velda.io/velda/pkg/proto/config"
 )
 
 var UnknownPoolError = errors.New("pool not found")
@@ -69,14 +71,14 @@ func (s *SchedulerSet) getOrCreatePool(pool string, createAllowed bool) (*Schedu
 	return p, nil
 }
 
-func (s *SchedulerSet) GetPools() []string {
+func (s *SchedulerSet) GetPools() map[string]*configproto.PoolMetadata {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	result := make([]string, 0, len(s.agents))
-	for k := range s.agents {
+	result := make(map[string]*configproto.PoolMetadata, len(s.agents))
+	for k, v := range s.agents {
 		// Skip all labeled subpools.
 		if !strings.Contains(k, ":") {
-			result = append(result, k)
+			result[k] = v.PoolManager.Metadata.Load()
 		}
 	}
 	return result

@@ -21,6 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	proto "velda.io/velda/pkg/proto/config"
 )
 
 var ErrPoolMaxSizeReached = errors.New("pool is full")
@@ -164,6 +166,8 @@ type AutoScaledPool struct {
 	killIdleTimer           *time.Timer
 	killingIdle             bool
 	readyForIdleMaintenance bool
+
+	Metadata atomic.Pointer[proto.PoolMetadata]
 }
 
 type AutoScaledPoolConfig struct {
@@ -177,6 +181,7 @@ type AutoScaledPoolConfig struct {
 	KillUnknownAfter     time.Duration
 	DefaultSlotsPerAgent int
 	Batch                bool
+	Metadata             *proto.PoolMetadata
 }
 
 func NewAutoScaledPool(name string, config AutoScaledPoolConfig) *AutoScaledPool {
@@ -474,6 +479,7 @@ func (p *AutoScaledPool) UpdateConfig(config *AutoScaledPoolConfig) {
 	} else {
 		p.maintainIdleWorkers()
 	}
+	p.Metadata.Store(config.Metadata)
 }
 
 func (p *AutoScaledPool) ReadyForIdleMaintenance() {

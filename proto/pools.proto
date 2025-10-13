@@ -11,6 +11,8 @@ message ListPoolsRequest {
 
 message Pool {
   string name = 1;
+  string description = 2;
+  reserved 50 to 100;
 }
 
 message ListPoolsResponse {
