@@ -54,7 +54,6 @@ func (p *AwsSmmPoolProvisioner) Run(ctx context.Context) {
 	ssmClient := ssm.NewFromConfig(p.awsConfig)
 
 	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	updateLoop := func(t time.Time) {
 		var nextToken *string
 
@@ -97,6 +96,7 @@ func (p *AwsSmmPoolProvisioner) Run(ctx context.Context) {
 	updateLoop(time.Now())
 
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
 			case t := <-ticker.C:

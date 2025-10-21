@@ -49,7 +49,6 @@ func (p *GcsPoolProvisioner) Run(ctx context.Context) {
 		interval = 60 * time.Second
 	}
 	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	updateLoop := func(t time.Time) {
 		it := p.storageClient.Bucket(p.cfg.Bucket).Objects(ctx, &storage.Query{
 			Prefix: p.cfg.ConfigPrefix + "/",
@@ -88,6 +87,7 @@ func (p *GcsPoolProvisioner) Run(ctx context.Context) {
 	updateLoop(time.Now())
 
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
 			case t := <-ticker.C:
