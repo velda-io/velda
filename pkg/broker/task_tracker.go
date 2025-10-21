@@ -49,6 +49,7 @@ type TaskQueueDb interface {
 	CreateTask(ctx context.Context, session *proto.SessionRequest) (string, int, error)
 	RenewLeaser(ctx context.Context, leaserIdentity string, now time.Time) error
 	ReconnectTask(ctx context.Context, taskId string, leaserIdentity string) error
+	UpdateTaskFinalResult(ctx context.Context, taskId string, result *db.BatchTaskResult) error
 }
 
 type TaskTracker struct {
@@ -110,6 +111,7 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 				Priority:   task.Priority,
 			}
 			if task.Task.Workload.TotalShards > 0 && task.Task.Workload.ShardIndex < 0 {
+				startTime := time.Now()
 				if task.Task.Workload.ShardScheduling == proto.Workload_SHARD_SCHEDULING_GANG {
 					// If supported, use batch-scheduling.
 					// This may modify the req object
@@ -127,6 +129,11 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 					if _, _, err := t.db.CreateTask(ctx, taskShard); err != nil {
 						return err
 					}
+				}
+				// The task should be marked as running_subtasks.
+				code := int32(0)
+				if err := t.db.UpdateTaskFinalResult(ctx, task.Id, &db.BatchTaskResult{StartTime: startTime, Payload: &proto.BatchTaskResult{ExitCode: &code}}); err != nil {
+					log.Printf("Failed to update task %s to running_subtasks: %v", task.Id, err)
 				}
 				return nil
 			}
