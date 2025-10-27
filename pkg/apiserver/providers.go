@@ -228,8 +228,9 @@ func ProvideTaskService(ctx context.Context, grpcServer *grpc.Server, mux *runti
 }
 
 var ProvideNfsBrokerAuth = wire.NewSet(
+	NewBrokerAuth,
 	broker.NewNfsExportAuth,
-	wire.Bind(new(broker.AuthHelper), new(*broker.NfsExportAuth)),
+	wire.Bind(new(broker.AuthHelper), new(*BrokerAuth)),
 )
 
 func ProvidePoolService(grpcServer *grpc.Server, mux *runtime.ServeMux, schedulers *broker.SchedulerSet) proto.PoolManagerServiceServer {

@@ -22,7 +22,6 @@ import (
 	"os/exec"
 
 	"velda.io/velda/pkg/proto"
-	"velda.io/velda/pkg/rbac"
 )
 
 type LocalDiskProvider interface {
@@ -46,7 +45,7 @@ func NewNfsExportAuth(disk LocalDiskProvider) (*NfsExportAuth, error) {
 	}, nil
 }
 
-func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, session *Session) (rbac.User, error) {
+func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
 	instanceID := session.Request.InstanceId
 	exportPath := n.disk.GetRoot(instanceID)
 	agentHost := agent.Host
@@ -54,7 +53,7 @@ func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, se
 	// Use exportfs command to export NFS
 	err := exportNFS(exportPath, agentHost.String(), session)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to export NFS: %w", err)
 	}
 	session.Request.AgentSessionInfo = &proto.AgentSessionInfo{
 		FileMount: &proto.AgentSessionInfo_NfsMount_{
@@ -64,7 +63,7 @@ func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, se
 			},
 		},
 	}
-	return rbac.UserFromContext(ctx), nil
+	return nil
 }
 
 // exportNFS is a helper function to handle NFS export logic using exportfs command
