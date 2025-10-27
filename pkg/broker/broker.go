@@ -42,6 +42,8 @@ type TaskDb interface {
 type AuthHelper interface {
 	UpdateServerInfo(context.Context, *proto.ServerInfo) error
 	GrantAccessToAgent(context.Context, *Agent, *Session) (rbac.User, error)
+	// Used when session reconnects.
+	ReGrantAccessToAgent(context.Context, *Agent, *Session) (rbac.User, error)
 	RevokeAccessToAgent(ctx context.Context, agent *Agent, session *Session) error
 	GrantAccessToClient(context.Context, *Session, *proto.ExecutionStatus) error
 }
@@ -94,21 +96,29 @@ func (s *server) AgentUpdate(stream proto.BrokerService_AgentUpdateServer) error
 		update := func(sess *Session) error {
 			agent.mySessions[key] = sess
 			agent.handleSessionInitResponse(stream.Context(), session.Response)
+			if sess.user == nil {
+				user, err := s.ReGrantAccessToAgent(stream.Context(), agent, sess)
+				if err != nil {
+					// TODO: should session be killed?
+					log.Printf("Failed to regrant access for sess: %v", sess.Key())
+				}
+				sess.user = user
+			}
 			sess.Reconnect()
+			if request.TaskId != "" {
+				err := s.taskTracker.ReconnectTask(stream.Context(), sess)
+				if err != nil {
+					log.Printf("Failed to reconnect task %s: %v", request.TaskId, err)
+					// We should terminate the task? Also need to validate the previous leaser identity.
+					// For now, let's just ignore it.
+				}
+			}
 			return nil
 		}
 		session, err := s.sessions.RegisterSession(request, scheduler, update)
 		if err != nil {
 			log.Printf("Failed to register session %s: %v", request.SessionId, err)
 			continue
-		}
-		if request.TaskId != "" {
-			err := s.taskTracker.ReconnectTask(stream.Context(), session)
-			if err != nil {
-				log.Printf("Failed to reconnect task %s: %v", request.TaskId, err)
-				// We should terminate the task? Also need to validate the previous leaser identity.
-				// For now, let's just ignore it.
-			}
 		}
 		log.Printf("Agent %s: Reconnected session %s", agent.id, session.Key())
 	}

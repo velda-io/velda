@@ -61,7 +61,8 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	if err != nil {
 		return nil, err
 	}
-	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, nfsExportAuth, apiserverDatabase)
+	brokerAuth := NewBrokerAuth(nfsExportAuth)
+	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, brokerAuth, apiserverDatabase)
 	taskLogDb := ProvideTaskLogDb(storage)
 	taskServiceServer := ProvideTaskService(context, server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
 	poolManagerServiceServer := ProvidePoolService(server, runtimeServeMux, schedulerSet)
