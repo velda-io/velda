@@ -82,6 +82,7 @@ func AutoScaledConfigFromBackend(ctx context.Context, backend broker.ResourcePoo
 		MaxIdle:              int(autoScalerCfg.MaxIdleAgents),
 		IdleDecay:            autoScalerCfg.IdleDecay.AsDuration(),
 		MaxSize:              int(autoScalerCfg.MaxAgents),
+		MinSize:              int(autoScalerCfg.GetMinAgents()),
 		SyncLoopInterval:     autoScalerCfg.SyncLoopInterval.AsDuration(),
 		KillUnknownAfter:     autoScalerCfg.KillUnknownAfter.AsDuration(),
 		DefaultSlotsPerAgent: int(autoScalerCfg.DefaultSlotsPerAgent),
