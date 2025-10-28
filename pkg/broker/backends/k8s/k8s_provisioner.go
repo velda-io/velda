@@ -145,6 +145,7 @@ func (p *K8sProvisioner) update(obj interface{}, new bool) error {
 	pool.PoolManager.UpdateConfig(&broker.AutoScaledPoolConfig{
 		Backend:              backend,
 		MinIdle:              poolCrd.Spec.AutoScaler.MinIdle,
+		MinSize:              poolCrd.Spec.AutoScaler.MinReplicas,
 		MaxSize:              poolCrd.Spec.AutoScaler.MaxReplicas,
 		MaxIdle:              poolCrd.Spec.AutoScaler.MaxIdle,
 		IdleDecay:            time.Duration(poolCrd.Spec.AutoScaler.IdleDecay) * time.Second,

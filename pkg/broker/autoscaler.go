@@ -134,6 +134,7 @@ type AutoScaledPool struct {
 	backend              ResourcePoolBackend
 	minIdle              int
 	maxIdle              int
+	minSize              int
 	idleDecay            time.Duration
 	syncLoopInterval     time.Duration
 	killUnknownAfter     time.Duration
@@ -176,6 +177,7 @@ type AutoScaledPoolConfig struct {
 	MinIdle              int
 	MaxIdle              int
 	IdleDecay            time.Duration
+	MinSize              int
 	MaxSize              int
 	SyncLoopInterval     time.Duration
 	KillUnknownAfter     time.Duration
@@ -451,6 +453,7 @@ func (p *AutoScaledPool) UpdateConfig(config *AutoScaledPoolConfig) {
 	p.maxIdle = config.MaxIdle
 	p.idleDecay = config.IdleDecay
 	p.maxSize = config.MaxSize
+	p.minSize = config.MinSize
 	p.batch = config.Batch
 	p.killUnknownAfter = config.KillUnknownAfter
 	if p.killingIdle {
@@ -504,7 +507,7 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 	if p.ctx.Err() != nil {
 		return
 	}
-	for !p.batch && p.idleSizeLocked() < p.minIdle && p.sizeLocked() < p.maxSize {
+	for !p.batch && (p.idleSizeLocked() < p.minIdle || p.sizeLocked() < p.minSize) && p.sizeLocked() < p.maxSize {
 		name, err := p.backend.RequestScaleUp(p.ctx)
 		p.logPrintf("Creating worker %s, before idle size: %d", name, p.idleSizeLocked())
 		if err != nil {
@@ -518,14 +521,14 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 	}
 
 	// Delete idle workers if there are too many.
-	for p.idleSizeLocked() > p.maxIdle {
+	for p.sizeLocked() > p.minSize && p.idleSizeLocked() > p.maxIdle {
 		if !p.deleteOneWorkerLocked() {
 			break
 		}
 		p.killingIdle = false
 		p.killIdleTimer.Stop()
 	}
-	if p.idleSizeLocked()-p.defaultSlotsPerAgent >= p.minIdle && len(p.idleWorkers) > 0 {
+	if p.sizeLocked() > p.minSize && p.idleSizeLocked()-p.defaultSlotsPerAgent >= p.minIdle && len(p.idleWorkers) > 0 {
 		if !p.killingIdle {
 			p.logPrintf("Started idle decay timer")
 			p.killIdleTimer.Reset(p.idleDecay)
@@ -560,8 +563,13 @@ func (p *AutoScaledPool) deleteOneWorkerLocked() bool {
 		name = k
 		break
 	}
+	// Do not delete if deleting this worker would violate min idle or min total size.
 	if p.idleSizeLocked()-p.workerDetail[name].availableSlot < p.minIdle {
 		p.logPrintf("Not enough idle slots to delete worker %s, current idle size: %d", name, p.idleSizeLocked())
+		return false
+	}
+	if p.sizeLocked() <= p.minSize {
+		p.logPrintf("Not deleting worker %s: would violate min pool size (%d)", name, p.minSize)
 		return false
 	}
 	statusChan := p.workerDetail[name].statusChan

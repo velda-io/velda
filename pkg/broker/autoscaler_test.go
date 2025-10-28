@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type FakeBackend struct {
@@ -46,7 +47,7 @@ func (f *FakeBackend) RequestScaleUp(ctx context.Context) (string, error) {
 }
 
 func (f *FakeBackend) GetPending(t *testing.T) string {
-	assert.NotEmpty(t, f.pending)
+	require.NotEmpty(t, f.pending)
 	name := f.pending[0]
 	f.pending = f.pending[1:]
 	return name
@@ -94,6 +95,7 @@ func TestAutoScaler(t *testing.T) {
 	pool := NewAutoScaledPool("pool", AutoScaledPoolConfig{
 		Context: context.Background(),
 		Backend: backend,
+		MinSize: 2,
 		MinIdle: 1,
 		MaxIdle: 3,
 		// Not part of this test.
@@ -102,10 +104,7 @@ func TestAutoScaler(t *testing.T) {
 		DefaultSlotsPerAgent: 1,
 	})
 
-	requireWorker := func(t *testing.T) {
-		err := pool.RequestWorker()
-		assert.NoError(t, err)
-
+	allocateWorker := func(t *testing.T) string {
 		pool.mu.Lock()
 		assert.NotEmpty(t, pool.idleWorkers)
 		var worker string
@@ -116,6 +115,14 @@ func TestAutoScaler(t *testing.T) {
 		pool.mu.Unlock()
 		assert.NotEmpty(t, worker)
 		assert.NoError(t, pool.MarkBusy(worker, 0))
+		return worker
+	}
+
+	// Helper to require a worker from the pool, and assign it to be busy.
+	requireWorker := func(t *testing.T) {
+		err := pool.RequestWorker()
+		assert.NoError(t, err)
+		allocateWorker(t)
 	}
 
 	inspectChan := make(chan AgentStatusRequest, 100)
@@ -136,13 +143,20 @@ func TestAutoScaler(t *testing.T) {
 
 	t.Run("InitialWorkers", func(t *testing.T) {
 		pool.ReadyForIdleMaintenance()
-		// Should trigger a scale-up for min-idle.
-		assert.Equal(t, 1, len(backend.workers))
+		// Should trigger a scale-up for min size.
+		assert.Equal(t, 2, len(backend.workers))
+		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 1)
 		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 1)
 	})
 
+	t.Run("RequestWorkerAndMaintainSize", func(t *testing.T) {
+		requireWorker(t)
+		// Should also trigger a scale-up for min-idle.
+		assert.Equal(t, 2, len(backend.workers))
+	})
+
 	t.Run("RequestWorkerAndScaleUpForIdle", func(t *testing.T) {
-		for i := 0; i < 4; i++ {
+		for i := 1; i < 4; i++ {
 			requireWorker(t)
 			log.Printf("Requesting worker %d: %d idle, %d pending", i, pool.idleSlots, pool.pendingSessions)
 			// Should also trigger a scale-up for min-idle.
@@ -192,21 +206,20 @@ func TestAutoScaler(t *testing.T) {
 		pool.MarkIdle(backend.workers[3].Name, 1)
 
 		if !assert.Eventually(t, func() bool {
-			return len(backend.workers) == 1
+			return len(backend.workers) == 2
 		}, 3*time.Second, 10*time.Millisecond) {
-			assert.Failf(t, "", "Expected 1 worker, got %d", len(backend.workers))
+			assert.Failf(t, "", "Expected 2 worker, got %d", len(backend.workers))
 		}
 	})
 
-	assert.Equal(t, 1, len(backend.workers))
-	assert.Equal(t, 1, len(pool.idleWorkers))
+	assert.Equal(t, 2, len(backend.workers))
+	assert.Equal(t, 2, len(pool.idleWorkers))
 
 	t.Run("CancelRequestDuringStarting", func(t *testing.T) {
 		// Use the first idle worker.
 		requireWorker(t)
-		newInst1 := backend.GetPending(t)
 
-		// req 2
+		// req 2, will create a new worker.
 		assert.NoError(t, pool.RequestWorker())
 		newInst2 := backend.GetPending(t)
 
@@ -227,8 +240,7 @@ func TestAutoScaler(t *testing.T) {
 		assert.NoError(t, pool.RequestWorker())
 		newInst3 := backend.GetPending(t)
 
-		pool.NotifyAgentAvailable(newInst1, false, inspectChan, 1) // Assign to Req 3
-		pool.MarkBusy(newInst1, 0)
+		allocateWorker(t)                                          // Assign to Req 3
 		pool.NotifyAgentAvailable(newInst2, false, inspectChan, 1) // Assign to Req 4
 		pool.MarkBusy(newInst2, 0)
 		pool.NotifyAgentAvailable(newInst3, false, inspectChan, 1)
@@ -247,16 +259,20 @@ func TestAutoScaler(t *testing.T) {
 		backend.RequestDelete(context.Background(), backend.workers[0].Name)
 		pool.MarkLost(backend.workers[0].Name)
 		backend.RequestDelete(context.Background(), backend.workers[0].Name)
-		assert.True(t, backend.NoPending())
 
-		// Losing an idle worker, need to scale up to meet min-idle.
-		pool.MarkLost(backend.workers[0].Name)
-		backend.RequestDelete(context.Background(), backend.workers[0].Name)
+		// Scale up to meet min-size.
 		newWorker := backend.GetPending(t)
 		pool.NotifyAgentAvailable(newWorker, false, inspectChan, 1)
 
-		// Should trigger a scale-up for min-idle.
-		assert.Equal(t, 1, len(backend.workers))
+		// Scale up again to meet min-size.
+		pool.MarkLost(backend.workers[0].Name)
+		backend.RequestDelete(context.Background(), backend.workers[0].Name)
+		newWorker2 := backend.GetPending(t)
+		pool.NotifyAgentAvailable(newWorker2, false, inspectChan, 1)
+
+		// Should trigger a scale-up for min-idle & min-size.
+		assert.Equal(t, 0, len(pool.runningWorkers))
+		assert.Equal(t, 2, len(backend.workers))
 	})
 
 	t.Run("Reconnect", func(t *testing.T) {
@@ -277,6 +293,7 @@ func TestAutoScaler(t *testing.T) {
 		// Should scale down a worker to meet max-idle.
 
 		assert.Eventually(t, func() bool {
+			log.Printf("len workers: %d", len(backend.workers))
 			return len(backend.workers) == 3
 		}, 3*time.Second, 10*time.Millisecond)
 	})

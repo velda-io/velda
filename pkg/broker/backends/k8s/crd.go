@@ -23,6 +23,7 @@ import (
 )
 
 type AgentPoolAutoScalerSpec struct {
+	MinReplicas int `json:"minReplicas"`
 	MaxReplicas int `json:"maxReplicas"`
 	MinIdle     int `json:"minIdle"`
 	MaxIdle     int `json:"maxIdle"`

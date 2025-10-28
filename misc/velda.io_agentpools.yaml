@@ -58,12 +58,15 @@ spec:
                     type: integer
                   minIdle:
                     type: integer
+                  minReplicas:
+                    type: integer
                 required:
                 - idleDecaySecond
                 - killUnknownAfterSecond
                 - maxIdle
                 - maxReplicas
                 - minIdle
+                - minReplicas
                 type: object
               template:
                 description: |-

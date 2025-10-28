@@ -75,6 +75,7 @@ func (p *AwsAutoPoolProvisioner) run(ctx context.Context) error {
 		if autoScaler == nil {
 			autoScaler = &configpb.AgentPool_AutoScaler{
 				MaxAgents:     10,
+				MinAgents:     0,
 				MaxIdleAgents: 1,
 				IdleDecay:     durationpb.New(1 * time.Minute),
 			}
