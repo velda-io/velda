@@ -163,6 +163,46 @@ message AutoscalerBackendAWSLaunchTemplate {
   google.protobuf.Duration max_instance_lifetime = 14;
 }
 
+message AutoscalerBackendNebiusLaunchTemplate {
+  // Parent ID (e.g., project or folder ID)
+  string parent_id = 1;
+  
+  // The prefix of the instance name.
+  // If not set, will use instance_template_name as the prefix.
+  string instance_name_prefix = 2;
+
+  // Platform type (e.g., "gpu-h200-hxm")
+  string platform = 3;
+
+  // Instance resource preset (e.g., "1gpu-16vcpu-200gb")
+  string resource_preset = 4;
+
+  // Structured version of the agent config.
+  // If both agent_config and agent_config_content are set,
+  // agent_config will be used.
+  // Pool & broker info will be automatically set.
+  string agent_config_content = 5;
+  velda.agent.AgentConfig agent_config = 6;
+
+  // Subnet ID to launch the instance in.
+  string subnet_id = 7;
+  
+  // Boot disk size in GB (default: 40)
+  int64 boot_disk_size_gb = 8;
+  
+  // Whether to make instance preemptible (cheaper but can be stopped)
+  bool preemptible = 9;
+
+  // Whether to use public IP address for the instance.
+  bool use_public_ip = 10;
+
+  // Additional labels to add to the instance.
+  map<string, string> labels = 11;
+
+  // SSH public key for admin access.
+  string admin_ssh_key = 12;
+}
+
 message AutoscalerBackendKubernetes {
   string kubeconfig = 1;
   string context = 2;
@@ -253,6 +293,7 @@ message AutoscalerBackend {
   oneof backend {
     AutoscalerBackendGCEInstanceGroup gce_instance_group = 1;
     AutoscalerBackendAWSLaunchTemplate aws_launch_template = 4;
+    AutoscalerBackendNebiusLaunchTemplate nebius_launch_template = 5;
     AutoscalerBackendKubernetes kubernetes = 2;
     AutoscalerBackendCommand command = 3;
   }
