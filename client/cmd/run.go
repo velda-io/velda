@@ -114,6 +114,7 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	checkPoint, _ := cmd.Flags().GetBool("checkpoint-on-idle")
 	keepAlive, _ := cmd.Flags().GetBool("keep-alive")
 	keepAliveTime, _ := cmd.Flags().GetDuration("keep-alive-time")
+	priority, _ := cmd.Flags().GetInt64("priority")
 	if checkPoint {
 		sessionReq.ConnectionFinishAction = proto.SessionRequest_CONNECTION_FINISH_ACTION_CHECKPOINT
 		if keepAliveTime == 0 {
@@ -127,6 +128,7 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		sessionReq.ConnectionFinishAction = proto.SessionRequest_CONNECTION_FINISH_ACTION_TERMINATE
 		sessionReq.IdleTimeout = durationpb.New(keepAliveTime)
 	}
+	sessionReq.Priority = priority
 
 	batch, _ := cmd.Flags().GetBool("batch")
 	if batch {
@@ -454,6 +456,7 @@ func init() {
 	runCmd.Flags().StringSlice("after-fail", nil, "For batch task, run it after other tasks are failed")
 	runCmd.Flags().StringSliceP("labels", "l", nil, "Labels for the task")
 	runCmd.Flags().Int32P("total-shards", "N", 0, "Total number of shards to run. Each shard will have environment variable VELDA_SHARD_ID & VELDA_TOTAL_SHARDS set. Batch job only.")
+	runCmd.Flags().Int64("priority", 0, "Priority of the task. Lower number means higher priority.")
 	runCmd.Flags().Bool("gang", false, "Enable gang scheduling for the task. Ignored if total shard is 0")
 	runCmd.Flags().Duration("keep-alive-time", 0, "How long to keep the session alive after all connections are closed. Default to 0, which means no keep-alive.")
 	runCmd.Flags().SetInterspersed(false)
