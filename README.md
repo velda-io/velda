@@ -53,8 +53,8 @@ For organizations who want sharing the cluster resource or centralized managemen
 We support various deployment methods.
 * Set up a new cluster:
   * [Directly on machines](docs/cluster_setup.md)
-  * [Google Cloud](docs/terraform_gcp.md)
-  * AWS & other cloud providers coming soon.
+  * [AWS/Google Cloud](docs/terraform_setup.md)
+  * Other cloud providers coming soon.
 * [Connect to a cluster](docs/connect.md)
 
 # 🤝 Contributing
