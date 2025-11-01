@@ -67,7 +67,10 @@ func (n *nebiusPoolBackend) RequestScaleUp(ctx context.Context) (string, error) 
 	// Prepare cloud-init user data
 	var userData string
 	agentConfig := n.cfg.AgentConfigContent
-	version := velda.Version
+	version := n.cfg.AgentVersionOverride
+	if version == "" {
+		version = velda.Version
+	}
 	cloudInitConfig := map[string]interface{}{
 		"bootcmd": []string{
 			"mkdir -p /run/velda",
@@ -86,7 +89,7 @@ func (n *nebiusPoolBackend) RequestScaleUp(ctx context.Context) (string, error) 
 	if n.cfg.GetAdminSshKey() != "" {
 		cloudInitConfig["users"] = []map[string]interface{}{
 			{
-				"name":  "admin",
+				"name":  "velda",
 				"sudo":  "ALL=(ALL) NOPASSWD:ALL",
 				"shell": "/bin/bash",
 				"ssh_authorized_keys": []string{

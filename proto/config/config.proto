@@ -201,6 +201,10 @@ message AutoscalerBackendNebiusLaunchTemplate {
 
   // SSH public key for admin access.
   string admin_ssh_key = 12;
+
+  // If set, will override the agent version to install.
+  // Default to the current version of controller.
+  string agent_version_override = 13;
 }
 
 message AutoscalerBackendKubernetes {
