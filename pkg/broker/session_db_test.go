@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -159,4 +159,70 @@ func TestSessionDatabaseBySvcName(t *testing.T) {
 		assert.NotEqual(t, newsession, session)
 	})
 
+}
+
+func TestSessionDatabaseDisallowNewSession(t *testing.T) {
+	db := NewSessionDatabase(nil)
+	serviceName := "svc-test"
+	sessionID := "session-test"
+	makeRequest := func() *proto.SessionRequest {
+		return &proto.SessionRequest{
+			InstanceId:  instanceID,
+			Pool:        pool,
+			ServiceName: serviceName,
+		}
+	}
+	scheduler := &Scheduler{}
+
+	t.Run("DisallowNewSessionWithoutExisting", func(t *testing.T) {
+		request := makeRequest()
+		request.DisallowNewSession = true
+		_, err := db.AddSession(request, scheduler)
+		assert.ErrorContains(t, err, "new session creation is disallowed")
+	})
+
+	var session *Session
+	t.Run("CreateSession", func(t *testing.T) {
+		newsession, err := db.AddSession(makeRequest(), scheduler)
+		session = newsession
+		assert.Nil(t, err)
+		assert.NotNil(t, session)
+	})
+
+	t.Run("DisallowNewSessionWithExistingByServiceName", func(t *testing.T) {
+		request := makeRequest()
+		request.DisallowNewSession = true
+		newsession, err := db.AddSession(request, scheduler)
+		assert.ErrorIs(t, err, AlreadyExistsError)
+		assert.NotNil(t, newsession)
+		assert.Equal(t, newsession, session)
+	})
+
+	t.Run("RegisterSessionByID", func(t *testing.T) {
+		request := makeRequest()
+		request.SessionId = sessionID
+		request.ServiceName = ""
+		newsession, err := db.RegisterSession(request, scheduler)
+		assert.Nil(t, err)
+		assert.NotNil(t, newsession)
+	})
+
+	t.Run("DisallowNewSessionWithExistingBySessionID", func(t *testing.T) {
+		request := makeRequest()
+		request.SessionId = sessionID
+		request.ServiceName = ""
+		request.DisallowNewSession = true
+		newsession, err := db.AddSession(request, scheduler)
+		assert.ErrorIs(t, err, AlreadyExistsError)
+		assert.NotNil(t, newsession)
+	})
+
+	t.Run("DisallowNewSessionWithNonExistingSessionID", func(t *testing.T) {
+		request := makeRequest()
+		request.SessionId = "non-existing-session"
+		request.ServiceName = ""
+		request.DisallowNewSession = true
+		_, err := db.AddSession(request, scheduler)
+		assert.ErrorContains(t, err, "new session creation is disallowed")
+	})
 }
