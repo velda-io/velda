@@ -127,6 +127,11 @@ message SessionRequest {
   // complicated services.
   bool force_new_session = 13;
 
+  // When set to true, disallow creating a new session. Only return existing
+  // sessions matching the service_name or session_id.
+  // If no matching session exists, an error will be returned.
+  bool disallow_new_session = 18;
+
   // For batch workload: The dependencies of the task.
   repeated Dependency dependencies = 14;
 

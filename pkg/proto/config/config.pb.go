@@ -593,7 +593,7 @@ type AutoscalerBackendNebiusLaunchTemplate struct {
 	Labels map[string]string `protobuf:"bytes,11,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// SSH public key for admin access.
 	AdminSshKey string `protobuf:"bytes,12,opt,name=admin_ssh_key,json=adminSshKey,proto3" json:"admin_ssh_key,omitempty"`
-	// If set, will override the agent version installed.
+	// If set, will override the agent version to install.
 	// Default to the current version of controller.
 	AgentVersionOverride string `protobuf:"bytes,13,opt,name=agent_version_override,json=agentVersionOverride,proto3" json:"agent_version_override,omitempty"`
 	unknownFields        protoimpl.UnknownFields
