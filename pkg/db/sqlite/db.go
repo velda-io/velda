@@ -853,7 +853,7 @@ WHERE parent_id = ? AND status NOT IN ('COMPLETED')`, cleanParentId+"/").Scan(&f
 	return nil
 }
 
-func (s *SqliteDatabase) pollTasksOnce(ctx context.Context, leaserIdentity string) ([]*TaskWithUser, error) {
+func (s *SqliteDatabase) pollTasksOnce(ctx context.Context, leaserIdentity string, regionId int) ([]*TaskWithUser, error) {
 	options := columnOptions{hasPayload: true}
 
 	// SQLite doesn't support UPDATE...FROM with complex joins like PostgreSQL
@@ -916,7 +916,8 @@ WHERE parent_id = ? AND task_id = ?`, parentId, taskId).Scan(&status)
 func (s *SqliteDatabase) PollTasks(
 	ctx context.Context,
 	leaserIdentity string,
-	callback func(leaserIdentity string, task *TaskWithUser) error) error {
+	callback func(leaserIdentity string, task *TaskWithUser) error,
+	regionId int) error {
 
 	// Set up periodic polling with configurable intervals
 	pollInterval := 60 * time.Second // Check for new tasks every 60 seconds
@@ -926,13 +927,13 @@ func (s *SqliteDatabase) PollTasks(
 
 	// Helper function to poll and process tasks
 	pollAndProcess := func(reason string) error {
-		tasks, err := s.pollTasksOnce(ctx, leaserIdentity)
+		tasks, err := s.pollTasksOnce(ctx, leaserIdentity, regionId)
 		if err != nil {
 			return fmt.Errorf("failed to poll tasks (%s): %w", reason, err)
 		}
 
 		if len(tasks) > 0 {
-			log.Printf("Found %d tasks to process (%s)", len(tasks), reason)
+			log.Printf("Found %d tasks to process in region %d (%s)", len(tasks), regionId, reason)
 		}
 
 		for _, task := range tasks {

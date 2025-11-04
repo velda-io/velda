@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -59,4 +59,16 @@ type SessionKey struct {
 type ErrorWithExitCode interface {
 	error
 	ExitCode() int
+}
+
+func ExtractRegionId(instanceId int64) int {
+	return int((instanceId >> RegionOffset) & 0xFF)
+}
+
+func ExtractShardId(instanceId int64) int {
+	return int(instanceId>>ShardOffset) & 0xFF
+}
+
+func ExtractLocalInstanceId(instanceId int64) int64 {
+	return instanceId & ((1 << ShardOffset) - 1)
 }

@@ -26,6 +26,7 @@ message Server {
   string http_address = 2;
 
   reserved 3, 4, 5;
+  reserved 64 to 127;
 }
 
 message Storage {
@@ -48,16 +49,17 @@ message PoolMetadata {
 
 message AgentPool {
   string name = 1;
-	
+
   message AutoScaler {
     AutoscalerBackend backend = 1;
     int32 max_agents = 2;
     int32 min_idle_agents = 3;
     int32 max_idle_agents = 4;
-  // Minimum number of agents to keep in the pool (hard lower bound).
-  // This ensures the autoscaler will not scale the total number of agents
-  // below this value. Default is 0.
-  int32 min_agents = 12;
+
+    // Minimum number of agents to keep in the pool (hard lower bound).
+    // This ensures the autoscaler will not scale the total number of agents
+    // below this value. Default is 0.
+    int32 min_agents = 12;
 
     // How long to wait before removing idle agents.
     // Default will be 0 seconds: it will immediately remove idle agents
@@ -372,5 +374,7 @@ message Config {
   velda.agent.BrokerInfo default_broker_info = 11;
 
   reserved 2, 3, 7, 8, 10;
-  reserved 50 to 99;
+  reserved 50 to 59;
+  // Note: fields 60, 61 are reserved for region config in enterprise version
+  reserved 60, 61;
 }

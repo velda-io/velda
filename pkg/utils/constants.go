@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,5 +13,13 @@
 // limitations under the License.
 package utils
 
+// Region ID takes 8 bits (supports 256 regions)
+const RegionOffset = 48
+const RegionMask = (1 << RegionOffset) - 1
+
+// Shard ID takes 8 bits within a region (40-47)
 const ShardOffset = 40
 const ShardMask = (1 << ShardOffset) - 1
+
+// Lower 40 bits are the actual instance ID within a shard
+// Instance ID format: [8 bits region][8 bits shard][40 bits instance]

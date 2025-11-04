@@ -182,7 +182,7 @@ var ProvideSessionDb = broker.NewSessionDatabase
 
 func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler *broker.SchedulerSet, sessiondb *broker.SessionDatabase, taskdb broker.TaskQueueDb, _ ProvisionRunner, watcher *broker.Watcher) *broker.TaskTracker {
 	taskTrackerId := uuid.New().String()
-	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId, watcher)
+	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId, watcher, 0)
 
 	// Start task trackers for each pool
 	go func() {
