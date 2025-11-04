@@ -7,6 +7,7 @@ import "google/api/annotations.proto";
 option go_package = "velda.io/velda/pkg/proto";
 
 message ListPoolsRequest {
+  reserved 32 to 64;
 }
 
 message Pool {

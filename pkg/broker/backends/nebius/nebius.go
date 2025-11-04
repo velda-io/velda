@@ -19,12 +19,12 @@ import (
 	"log"
 	"os"
 
-	pb "github.com/golang/protobuf/proto"
 	"github.com/nebius/gosdk"
 	"github.com/nebius/gosdk/auth"
 	common "github.com/nebius/gosdk/proto/nebius/common/v1"
 	compute "github.com/nebius/gosdk/proto/nebius/compute/v1"
 	computeservice "github.com/nebius/gosdk/services/nebius/compute/v1"
+	pb "google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 
 	"velda.io/velda"
@@ -256,6 +256,20 @@ func (n *nebiusPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerSta
 		// Skip instances being deleted
 		if status.GetState() == compute.InstanceStatus_DELETING {
 			continue
+		}
+		// Client-side label/tag filtering
+		if len(n.cfg.GetLabels()) > 0 {
+			instLabels := metadata.GetLabels()
+			matched := true
+			for k, v := range n.cfg.GetLabels() {
+				if lv, ok := instLabels[k]; !ok || lv != v {
+					matched = false
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 
 		instanceId := metadata.GetName()

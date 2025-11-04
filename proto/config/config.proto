@@ -228,6 +228,7 @@ message Provisioner {
     KubernetesProvisioner kubernetes = 3;
     GCSProvisioner gcs = 4;
     AWSAutoProvisioner aws_auto = 5;
+    NebiusAutoProvisioner nebius_auto = 6;
   }
 }
 
@@ -285,6 +286,56 @@ message AWSAutoProvisioner {
 
   // If set, will skip the lookup and directly use the provided AMI.
   string ami_id = 7;
+}
+
+// Generate pools based on a list of pool configurations.
+message NebiusAutoProvisioner {
+  // Common configuration shared across all pools
+
+  // Parent ID (e.g., project or folder ID)
+  string parent_id = 1;
+
+  // Subnet ID to launch instances in
+  string subnet_id = 2;
+
+  // Whether to use public IP addresses for instances
+  bool use_public_ip = 3;
+
+  // Boot disk size in GB (default: 40)
+  int64 boot_disk_size_gb = 4;
+
+  // Additional labels to add to all instances
+  map<string, string> labels = 5;
+
+  // SSH public key for admin access
+  string admin_ssh_key = 6;
+
+  // If set, will override the agent version to install
+  string agent_version_override = 7;
+
+  // Default autoscaler config for all pools
+  // backend will be automatically generated per pool
+  AgentPool.AutoScaler autoscaler_config = 8;
+
+  // Array of pool-specific details
+  message PoolDetail {
+    // Pool name (will be used as the pool name)
+    string pool_name = 1;
+
+    // Platform type (e.g., "gpu-h200-hxm")
+    string platform = 2;
+
+    // Instance resource preset (e.g., "1gpu-16vcpu-200gb")
+    string resource_preset = 3;
+
+    // Whether to make instance preemptible
+    bool preemptible = 4;
+
+    // Optional: override autoscaler config for this pool
+    AgentPool.AutoScaler autoscaler_config = 5;
+  }
+
+  repeated PoolDetail pool_details = 9;
 }
 
 message GCSProvisioner {
