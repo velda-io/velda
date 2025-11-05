@@ -38,7 +38,7 @@ func NewSimpleMounter(sandboxConfig *agentpb.SandboxConfig) *SimpleMounter {
 
 func (m *SimpleMounter) Mount(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
 	shardId := strconv.FormatInt(session.InstanceId>>utils.ShardOffset, 16)
-	instanceId := strconv.FormatInt(session.InstanceId&utils.ShardMask, 10)
+	instanceId := strconv.FormatInt(session.InstanceId, 10)
 	switch s := m.sandboxConfig.GetDiskSource().GetSource().(type) {
 	case *agentpb.AgentDiskSource_MountedDiskSource_:
 		// Mount disk to workspace

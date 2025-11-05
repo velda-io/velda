@@ -15,7 +15,7 @@ type TaskDB interface {
 	CreateTask(ctx context.Context, session *proto.SessionRequest) (string, int, error)
 	ListTasks(ctx context.Context, request *proto.ListTasksRequest) ([]*proto.Task, string, error)
 	SearchTasks(ctx context.Context, request *proto.SearchTasksRequest) ([]*proto.Task, string, error)
-	PollTasks(ctx context.Context, leaserIdentity string, callback func(string, *db.TaskWithUser) error) error
+	PollTasks(ctx context.Context, leaserIdentity string, callback func(string, *db.TaskWithUser) error, regionId int) error
 	GetUpstreamCount(ctx context.Context, taskId string) (int, error)
 	GetTaskStatus(ctx context.Context, taskId string) (string, error)
 	UpdateTaskFinalResult(ctx context.Context, taskId string, result *db.BatchTaskResult) error
@@ -79,7 +79,7 @@ func RunTestTaskWithDb(t *testing.T, sdb TaskDB, instanceId int64) {
 			}
 			return nil
 		}
-		err = sdb.PollTasks(pollCtx, "leaser", callback)
+		err = sdb.PollTasks(pollCtx, "leaser", callback, 0)
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.Len(t, tasks, 4)
 		assert.Equal(t, "job1", tasks[0].Id)
