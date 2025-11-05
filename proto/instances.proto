@@ -72,6 +72,7 @@ message DeleteSnapshotRequest {
 
 message ListImagesRequest {
   string prefix = 1;
+  reserved 32 to 64;
 }
 
 message ListImagesResponse {
