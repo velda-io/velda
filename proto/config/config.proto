@@ -30,12 +30,8 @@ message Server {
 }
 
 message Storage {
-  message Zfs {
-    string pool = 1;
-  }
-  message MiniVelda {
-    string root = 1;
-  }
+  message Zfs { string pool = 1; }
+  message MiniVelda { string root = 1; }
   oneof storage {
     Zfs zfs = 1;
     MiniVelda mini = 4;
@@ -43,9 +39,7 @@ message Storage {
   reserved 2, 3;
 }
 
-message PoolMetadata {
-  string description = 1;
-}
+message PoolMetadata { string description = 1; }
 
 message AgentPool {
   string name = 1;
@@ -168,7 +162,7 @@ message AutoscalerBackendAWSLaunchTemplate {
 message AutoscalerBackendNebiusLaunchTemplate {
   // Parent ID (e.g., project or folder ID)
   string parent_id = 1;
-  
+
   // The prefix of the instance name.
   // If not set, will use instance_template_name as the prefix.
   string instance_name_prefix = 2;
@@ -188,10 +182,10 @@ message AutoscalerBackendNebiusLaunchTemplate {
 
   // Subnet ID to launch the instance in.
   string subnet_id = 7;
-  
+
   // Boot disk size in GB (default: 40)
   int64 boot_disk_size_gb = 8;
-  
+
   // Whether to make instance preemptible (cheaper but can be stopped)
   bool preemptible = 9;
 
@@ -225,7 +219,7 @@ message AutoscalerBackendCommand {
 
 message Provisioner {
   oneof provisioner {
-    //GCEProvisioner gce = 1;
+    // GCEProvisioner gce = 1;
     AWSProvisioner aws = 2;
     KubernetesProvisioner kubernetes = 3;
     GCSProvisioner gcs = 4;
@@ -239,7 +233,6 @@ message KubernetesProvisioner {
   // TODO: Should always use the namespace that apiserver runs.
   string namespace = 1;
 
-
   message GoogleKubernetesEngine {
     string project = 1;
     string location = 2;
@@ -248,9 +241,7 @@ message KubernetesProvisioner {
 
   // How to fetch the cluster credential.
   // If not set, will default to default config used in kubectl.
-  oneof cluster {
-    GoogleKubernetesEngine gke = 2;
-  }
+  oneof cluster { GoogleKubernetesEngine gke = 2; }
 }
 
 // Use AWS SSM parameter to provision agent pools.
@@ -332,6 +323,10 @@ message NebiusAutoProvisioner {
 
     // Whether to make instance preemptible
     bool preemptible = 4;
+
+    // Optional: description for the pool. If set, overrides the description in
+    // autoscaler.
+    string description = 6;
 
     // Optional: override autoscaler config for this pool
     AgentPool.AutoScaler autoscaler_config = 5;
