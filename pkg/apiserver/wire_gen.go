@@ -10,10 +10,9 @@ import (
 	"github.com/spf13/pflag"
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/proto"
-)
 
-import (
 	_ "net/http/pprof"
+
 	_ "velda.io/velda/pkg/broker/backends/registry"
 )
 

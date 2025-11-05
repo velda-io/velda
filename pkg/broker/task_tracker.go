@@ -45,7 +45,8 @@ type TaskQueueDb interface {
 	PollTasks(
 		ctx context.Context,
 		leaserIdentity string,
-		callback func(leaserIdentity string, task *db.TaskWithUser) error) error
+		callback func(leaserIdentity string, task *db.TaskWithUser) error,
+		regionId int) error
 	CreateTask(ctx context.Context, session *proto.SessionRequest) (string, int, error)
 	RenewLeaser(ctx context.Context, leaserIdentity string, now time.Time) error
 	ReconnectTask(ctx context.Context, taskId string, leaserIdentity string) error
@@ -56,6 +57,7 @@ type TaskTracker struct {
 	scheduler *SchedulerSet
 	sessions  *SessionDatabase
 	watcher   *Watcher
+	regionId  int
 
 	db       TaskQueueDb
 	identity string
@@ -68,13 +70,14 @@ type TaskTracker struct {
 	lastCleanup    time.Time
 }
 
-func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db TaskQueueDb, identity string, watcher *Watcher) *TaskTracker {
+func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db TaskQueueDb, identity string, watcher *Watcher, regionId int) *TaskTracker {
 	result := &TaskTracker{
 		scheduler:      schedulerSet,
 		sessions:       sessions,
 		db:             db,
 		identity:       identity,
 		watcher:        watcher,
+		regionId:       regionId,
 		gangs:          make(map[string]*GangCoordinator),
 		leasedSessions: make(map[string]map[string]*Session),
 		cancelled:      make(map[string]time.Time),
@@ -164,7 +167,7 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 				go session.Schedule(schedCtx)
 			}
 			return nil
-		})
+		}, t.regionId)
 	return err
 }
 

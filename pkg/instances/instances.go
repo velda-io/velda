@@ -83,7 +83,7 @@ func (s *service) CreateInstance(ctx context.Context, in *proto.CreateInstanceRe
 	} else {
 		shardId = rand.Intn(s.shardCount)
 	}
-	in.Instance.Id = int64(shardId) << ShardOffset
+	in.Instance.Id |= int64(shardId) << ShardOffset
 
 	if in.Instance.InstanceName == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "instance name is required")

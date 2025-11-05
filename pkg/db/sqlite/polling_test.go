@@ -78,7 +78,7 @@ func TestPollTasks(t *testing.T) {
 	pollDone := make(chan bool)
 	go func() {
 		defer close(pollDone)
-		database.PollTasks(pollCtx, "test-leaser", callback)
+		database.PollTasks(pollCtx, "test-leaser", callback, 0)
 	}()
 
 	<-taskPolled // Wait until a task is polled
@@ -155,6 +155,6 @@ func TestPollTasksWithDependencies(t *testing.T) {
 			pollCancel()
 		}
 		return nil
-	})
+	}, 0)
 	wg.Done()
 }
