@@ -235,14 +235,6 @@ func (n *nebiusPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerSta
 	listReq := &compute.ListInstancesRequest{
 		ParentId: n.cfg.GetParentId(),
 	}
-
-	// Add label filters if specified
-	if len(n.cfg.GetLabels()) > 0 {
-		// Note: Nebius API filtering may work differently
-		// For now we'll filter client-side
-		log.Printf("Filtering instances by labels: %v", n.cfg.GetLabels())
-	}
-
 	var res []broker.WorkerStatus
 	// We'll actively terminate any stopped instances (no parked/reuse support)
 	for instance, err := range n.instanceService.Filter(ctx, listReq) {
@@ -334,6 +326,9 @@ func (f *nebiusLaunchTemplatePoolFactory) NewBackend(pool *proto.AgentPool, brok
 				serviceAccountKey,
 			),
 		)
+	} else if token, err := os.ReadFile("/mnt/cloud-metadata/token"); err == nil {
+		// VM service account from Nebius
+		creds = gosdk.IAMToken(string(token))
 	} else {
 		return nil, fmt.Errorf("no Nebius credentials provided for pool %s", pool.GetName())
 	}
