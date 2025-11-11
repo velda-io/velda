@@ -64,7 +64,7 @@ type TaskServiceServer struct {
 }
 
 func NewTaskServiceServer(ctx context.Context, db TaskDb, logDb TaskLogDb, taskTracker TaskTracker, permissions rbac.Permissions) *TaskServiceServer {
-	return &TaskServiceServer{
+	s := &TaskServiceServer{
 		ctx:         ctx,
 		db:          db,
 		logDb:       logDb,
@@ -72,6 +72,8 @@ func NewTaskServiceServer(ctx context.Context, db TaskDb, logDb TaskLogDb, taskT
 		permission:  permissions,
 		bus:         pubsub.NewBus(),
 	}
+	db.SetTaskStatusCallback(s.NotifyTaskStatusFromDb)
+	return s
 }
 
 func (s *TaskServiceServer) GetTask(ctx context.Context, in *proto.GetTaskRequest) (*proto.Task, error) {

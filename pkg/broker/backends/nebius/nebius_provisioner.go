@@ -96,12 +96,15 @@ func (p *NebiusAutoPoolProvisioner) run(ctx context.Context) error {
 				IdleDecay:     durationpb.New(1 * time.Minute),
 			}
 		}
+		// Clone the autoscaler config and set the backend
+		autoScaler = pb.Clone(autoScaler).(*proto.AgentPool_AutoScaler)
 		if detail.Description != "" {
+			if autoScaler.Metadata == nil {
+				autoScaler.Metadata = &proto.PoolMetadata{}
+			}
 			autoScaler.Metadata.Description = detail.Description
 		}
 
-		// Clone the autoscaler config and set the backend
-		autoScaler = pb.Clone(autoScaler).(*proto.AgentPool_AutoScaler)
 		autoScaler.Backend = &proto.AutoscalerBackend{
 			Backend: &proto.AutoscalerBackend_NebiusLaunchTemplate{
 				NebiusLaunchTemplate: template,

@@ -10,9 +10,10 @@ import (
 	"github.com/spf13/pflag"
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/proto"
+)
 
+import (
 	_ "net/http/pprof"
-
 	_ "velda.io/velda/pkg/broker/backends/registry"
 )
 
@@ -54,7 +55,8 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	if err != nil {
 		return nil, err
 	}
-	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase, provisionRunner, watcher)
+	regionId := ProvideRegionId()
+	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase, provisionRunner, watcher, regionId)
 	localDiskProvider := ProvideLocalDiskStorage(storage)
 	nfsExportAuth, err := broker.NewNfsExportAuth(localDiskProvider)
 	if err != nil {

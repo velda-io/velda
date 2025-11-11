@@ -48,6 +48,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		FlagProviders,
 		ProvideRunners,
 		ProvideConfig,
+		ProvideRegionId,
 		ProvideStorage,
 		ProvidePermission,
 		ProvideInstanceService,
