@@ -50,6 +50,7 @@ Examples:
 		request := &proto.ListImagesRequest{
 			Prefix: prefix,
 		}
+		request.Region, _ = cmd.Flags().GetString("region")
 
 		response, err := client.ListImages(cmd.Context(), request)
 		cmd.SetOut(cmd.OutOrStdout())
@@ -73,4 +74,5 @@ Examples:
 
 func init() {
 	imageCmd.AddCommand(listImagesCmd)
+	listImagesCmd.Flags().String("region", "", "Specify the region to list images from")
 }

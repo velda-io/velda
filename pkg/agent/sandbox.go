@@ -95,6 +95,9 @@ func (p *LinuxNamespacePlugin) setupMounts(ctx context.Context, workDir string) 
 
 	// Disable propagation
 	workspaceDir := path.Join(workDir, "workspace")
+	if err := syscall.Mount("", workspaceDir, "", syscall.MS_SHARED, ""); err != nil {
+		die("remount slave", err)
+	}
 
 	// Mount misc
 	if err := syscall.Mount("none", path.Join(workspaceDir, "sys"), "sysfs", 0, ""); err != nil {

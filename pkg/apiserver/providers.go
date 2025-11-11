@@ -109,6 +109,12 @@ func ProvideCtx(s *ServiceCtx) context.Context {
 	return s.ctx
 }
 
+type RegionId int
+
+func ProvideRegionId() RegionId {
+	return RegionId(0)
+}
+
 func ProvideStorage(cfg *configpb.Config) (storage.Storage, error) {
 	config := cfg.GetStorage()
 	switch config.Storage.(type) {
@@ -180,9 +186,9 @@ func ProvideSchedulers(ctx context.Context, cfg *configpb.Config, brokerInfo *ag
 
 var ProvideSessionDb = broker.NewSessionDatabase
 
-func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler *broker.SchedulerSet, sessiondb *broker.SessionDatabase, taskdb broker.TaskQueueDb, _ ProvisionRunner, watcher *broker.Watcher) *broker.TaskTracker {
+func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler *broker.SchedulerSet, sessiondb *broker.SessionDatabase, taskdb broker.TaskQueueDb, _ ProvisionRunner, watcher *broker.Watcher, regionId RegionId) *broker.TaskTracker {
 	taskTrackerId := uuid.New().String()
-	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId, watcher, 0)
+	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId, watcher, int(regionId))
 
 	// Start task trackers for each pool
 	go func() {
@@ -221,7 +227,6 @@ func ProvideBrokerServer(grpcServer *grpc.Server, mux *runtime.ServeMux, schedul
 
 func ProvideTaskService(ctx context.Context, grpcServer *grpc.Server, mux *runtime.ServeMux, db tasks.TaskDb, logdb tasks.TaskLogDb, taskTracker tasks.TaskTracker, perm rbac.Permissions) proto.TaskServiceServer {
 	s := tasks.NewTaskServiceServer(ctx, db, logdb, taskTracker, perm)
-	db.SetTaskStatusCallback(s.NotifyTaskStatusFromDb)
 	proto.RegisterTaskServiceServer(grpcServer, s)
 	proto.RegisterTaskServiceHandlerServer(context.Background(), mux, s)
 	return s

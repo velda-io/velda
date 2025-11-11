@@ -14,12 +14,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"velda.io/velda/pkg/clientlib"
 	"velda.io/velda/pkg/proto"
@@ -63,18 +63,18 @@ and amount of compute resources attached to the session.
 		if err != nil {
 			return err
 		}
-		if len(sessions.Sessions) == 0 {
-			cmd.Println("No sessions found")
-			return nil
-		}
 		if output == "json" {
-			data, err := json.MarshalIndent(sessions, "", "  ")
+			data, err := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}.Marshal(sessions)
 			if err != nil {
 				return err
 			}
-			cmd.Println(string(data))
+			cmd.OutOrStdout().Write(data)
 			return nil
 		} else if output == "table" {
+			if len(sessions.Sessions) == 0 {
+				cmd.Println("No sessions found")
+				return nil
+			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 8, 2, ' ', 0)
 			fmt.Fprintln(w, "Session ID\tPool\tStatus\tService")
 			for _, session := range sessions.Sessions {
