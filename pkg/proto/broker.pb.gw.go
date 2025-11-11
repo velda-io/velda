@@ -115,6 +115,30 @@ func local_request_BrokerService_ListSessions_0(ctx context.Context, marshaler r
 	return msg, metadata, err
 }
 
+func request_BrokerService_SetTag_0(ctx context.Context, marshaler runtime.Marshaler, client BrokerServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq SetTagRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	msg, err := client.SetTag(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_BrokerService_SetTag_0(ctx context.Context, marshaler runtime.Marshaler, server BrokerServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq SetTagRequest
+		metadata runtime.ServerMetadata
+	)
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	msg, err := server.SetTag(ctx, &protoReq)
+	return msg, metadata, err
+}
+
 // RegisterBrokerServiceHandlerServer registers the http handlers for service BrokerService to "mux".
 // UnaryRPC     :call BrokerServiceServer directly.
 // StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
@@ -180,6 +204,26 @@ func RegisterBrokerServiceHandlerServer(ctx context.Context, mux *runtime.ServeM
 			return
 		}
 		forward_BrokerService_ListSessions_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodPost, pattern_BrokerService_SetTag_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.BrokerService/SetTag", runtime.WithHTTPPathPattern("/rest/broker/v1/session/set-tag"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_BrokerService_SetTag_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_BrokerService_SetTag_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
 
 	return nil
@@ -272,6 +316,23 @@ func RegisterBrokerServiceHandlerClient(ctx context.Context, mux *runtime.ServeM
 		}
 		forward_BrokerService_ListSessions_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodPost, pattern_BrokerService_SetTag_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.BrokerService/SetTag", runtime.WithHTTPPathPattern("/rest/broker/v1/session/set-tag"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_BrokerService_SetTag_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_BrokerService_SetTag_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 	return nil
 }
 
@@ -279,10 +340,12 @@ var (
 	pattern_BrokerService_RequestSession_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"rest", "broker", "v1", "session"}, ""))
 	pattern_BrokerService_KillSession_0    = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"rest", "broker", "v1", "session", "kill"}, ""))
 	pattern_BrokerService_ListSessions_0   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3}, []string{"rest", "broker", "v1", "sessions"}, ""))
+	pattern_BrokerService_SetTag_0         = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"rest", "broker", "v1", "session", "set-tag"}, ""))
 )
 
 var (
 	forward_BrokerService_RequestSession_0 = runtime.ForwardResponseMessage
 	forward_BrokerService_KillSession_0    = runtime.ForwardResponseMessage
 	forward_BrokerService_ListSessions_0   = runtime.ForwardResponseMessage
+	forward_BrokerService_SetTag_0         = runtime.ForwardResponseMessage
 )

@@ -111,6 +111,25 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	}
 	sessionReq.ForceNewSession, _ = cmd.Flags().GetBool("new-session")
 	sessionReq.Labels, _ = cmd.Flags().GetStringSlice("labels")
+	// Parse tags flag in format key=value,key2=value2 and attach to request
+	tagsStr, _ := cmd.Flags().GetString("tags")
+	if tagsStr != "" {
+		tags := make(map[string]string)
+		pairs := strings.Split(tagsStr, ",")
+		for _, p := range pairs {
+			if p == "" {
+				continue
+			}
+			parts := strings.SplitN(p, "=", 2)
+			if len(parts) == 1 {
+				// key without value, set to empty string
+				tags[parts[0]] = ""
+			} else {
+				tags[parts[0]] = parts[1]
+			}
+		}
+		sessionReq.Tags = tags
+	}
 	checkPoint, _ := cmd.Flags().GetBool("checkpoint-on-idle")
 	keepAlive, _ := cmd.Flags().GetBool("keep-alive")
 	keepAliveTime, _ := cmd.Flags().GetDuration("keep-alive-time")
@@ -455,6 +474,7 @@ func init() {
 	runCmd.Flags().StringSlice("after-success", nil, "For batch task, run it after other tasks finished successfully (return 0)")
 	runCmd.Flags().StringSlice("after-fail", nil, "For batch task, run it after other tasks are failed")
 	runCmd.Flags().StringSliceP("labels", "l", nil, "Labels for the task")
+	runCmd.Flags().String("tags", "", "Tags to set on the session in format key=value,key2=value2. Set value empty to remove tag.")
 	runCmd.Flags().Int32P("total-shards", "N", 0, "Total number of shards to run. Each shard will have environment variable VELDA_SHARD_ID & VELDA_TOTAL_SHARDS set. Batch job only.")
 	runCmd.Flags().Int64("priority", 0, "Priority of the task. Lower number means higher priority.")
 	runCmd.Flags().Bool("gang", false, "Enable gang scheduling for the task. Ignored if total shard is 0")

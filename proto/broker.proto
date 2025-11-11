@@ -118,6 +118,9 @@ message SessionRequest {
   // Additional metadata for searching the task.
   repeated string labels = 10;
 
+  // Key-value tags for the session.
+  map<string, string> tags = 19;
+
   // When requesting with a service name only, a new session will always be
   // created.
   //
@@ -253,6 +256,9 @@ message Session {
   repeated string labels = 7;
 
   string internal_ip_address = 8;
+
+  // Key-value tags for the session.
+  map<string, string> tags = 9;
 }
 
 message ListSessionsResponse { repeated Session sessions = 1; }
@@ -271,6 +277,16 @@ message KillSessionRequest {
   // If false, will send a SIGTERM to the main daemon.
   bool force = 4;
 }
+
+message SetTagRequest {
+  int64 instance_id = 1;
+  string session_id = 2;
+
+  // Tags to set or update. If a tag value is empty, the tag will be removed.
+  map<string, string> tags = 3;
+}
+
+message SetTagResponse {}
 
 // The broker service.
 service BrokerService {
@@ -294,6 +310,13 @@ service BrokerService {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse) {
     option (google.api.http) = {
       get : "/rest/broker/v1/sessions"
+    };
+  }
+
+  rpc SetTag(SetTagRequest) returns (SetTagResponse) {
+    option (google.api.http) = {
+      post : "/rest/broker/v1/session/set-tag"
+      body : "*"
     };
   }
 }

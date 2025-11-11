@@ -228,6 +228,7 @@ func (s *server) ListSessions(ctx context.Context, req *proto.ListSessionsReques
 			User:        session.Request.User,
 			ServiceName: session.Request.ServiceName,
 			Labels:      session.Request.Labels,
+			Tags:        session.Request.Tags,
 		}
 		if session.status.SshConnection != nil {
 			sessionProto.InternalIpAddress = session.status.SshConnection.Host
@@ -269,6 +270,36 @@ func (s *server) KillSession(ctx context.Context, req *proto.KillSessionRequest)
 		}
 	}
 	return &emptypb.Empty{}, nil
+}
+
+func (s *server) SetTag(ctx context.Context, req *proto.SetTagRequest) (*proto.SetTagResponse, error) {
+	if err := s.permissions.Check(ctx, rbac.Action("instance.update_session"), fmt.Sprintf("instances/%d", req.InstanceId)); err != nil {
+		return nil, err
+	}
+
+	session, err := s.sessions.GetSession(req.InstanceId, req.SessionId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %v", err)
+	}
+	if session == nil {
+		return nil, fmt.Errorf("session %s not found", req.SessionId)
+	}
+
+	// Initialize tags map if it doesn't exist
+	if session.Request.Tags == nil {
+		session.Request.Tags = make(map[string]string)
+	}
+
+	// Merge tags: update existing or add new tags, remove tags with empty values
+	for key, value := range req.Tags {
+		if value == "" {
+			delete(session.Request.Tags, key)
+		} else {
+			session.Request.Tags[key] = value
+		}
+	}
+
+	return &proto.SetTagResponse{}, nil
 }
 
 func (s *server) UpdateTaskResult(ctx context.Context, session *Session, result *proto.BatchTaskResult) error {
