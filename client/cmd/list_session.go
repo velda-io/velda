@@ -16,6 +16,7 @@ package cmd
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -26,6 +27,18 @@ import (
 )
 
 var allowedOutputFormats = []string{"table", "json"}
+
+// formatTags converts a map of tags to a string in the format "key=value,key2=value2"
+func formatTags(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	var pairs []string
+	for k, v := range tags {
+		pairs = append(pairs, fmt.Sprintf("%s=%s", k, v))
+	}
+	return strings.Join(pairs, ",")
+}
 
 var listSessionCmd = &cobra.Command{
 	Use:     "list-session",
@@ -76,10 +89,11 @@ and amount of compute resources attached to the session.
 				return nil
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 8, 2, ' ', 0)
-			fmt.Fprintln(w, "Session ID\tPool\tStatus\tService")
+			fmt.Fprintln(w, "Session ID\tPool\tStatus\tService\tTags")
 			for _, session := range sessions.Sessions {
 				statusStr := session.Status.String()[len("STATUS_"):]
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", session.SessionId, session.Pool, statusStr, session.ServiceName)
+				tagsStr := formatTags(session.Tags)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", session.SessionId, session.Pool, statusStr, session.ServiceName, tagsStr)
 			}
 			w.Flush()
 		}

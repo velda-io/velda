@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -91,6 +92,8 @@ type Session struct {
 
 	completions []func()
 	helpers     SessionHelper
+
+	tags map[string]string
 }
 
 func NewSession(request *proto.SessionRequest, scheduler *Scheduler, helpers SessionHelper) *Session {
@@ -109,6 +112,7 @@ func NewSession(request *proto.SessionRequest, scheduler *Scheduler, helpers Ses
 		staleTimeout:  DefaultStaleTimeout,
 		createTime:    time.Now(),
 		helpers:       helpers,
+		tags:          maps.Clone(request.Tags),
 	}
 }
 
@@ -504,4 +508,22 @@ func (s *Session) notifyChangeLocked() {
 	if s.Request.TaskId != "" {
 		s.helpers.NotifyTaskChange(s.Request.TaskId, status)
 	}
+}
+
+func (s *Session) SetTags(tags map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, v := range tags {
+		if v == "" {
+			delete(s.tags, k)
+		} else {
+			s.tags[k] = v
+		}
+	}
+}
+
+func (s *Session) GetTags() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return maps.Clone(s.tags)
 }
