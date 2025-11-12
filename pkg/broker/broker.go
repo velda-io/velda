@@ -228,7 +228,7 @@ func (s *server) ListSessions(ctx context.Context, req *proto.ListSessionsReques
 			User:        session.Request.User,
 			ServiceName: session.Request.ServiceName,
 			Labels:      session.Request.Labels,
-			Tags:        session.Request.Tags,
+			Tags:        session.GetTags(),
 		}
 		if session.status.SshConnection != nil {
 			sessionProto.InternalIpAddress = session.status.SshConnection.Host
@@ -284,20 +284,7 @@ func (s *server) SetTag(ctx context.Context, req *proto.SetTagRequest) (*proto.S
 	if session == nil {
 		return nil, fmt.Errorf("session %s not found", req.SessionId)
 	}
-
-	// Initialize tags map if it doesn't exist
-	if session.Request.Tags == nil {
-		session.Request.Tags = make(map[string]string)
-	}
-
-	// Merge tags: update existing or add new tags, remove tags with empty values
-	for key, value := range req.Tags {
-		if value == "" {
-			delete(session.Request.Tags, key)
-		} else {
-			session.Request.Tags[key] = value
-		}
-	}
+	session.SetTags(req.Tags)
 
 	return &proto.SetTagResponse{}, nil
 }

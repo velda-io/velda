@@ -24,7 +24,7 @@ import (
 )
 
 var setTagSessionCmd = &cobra.Command{
-	Use:   "set-tag",
+	Use:   "set-tag --session-id=<session-id> --tags=key=value,key2=value2",
 	Short: "Set or update tags for a session",
 	Args:  cobra.NoArgs,
 	Long: `Set or update tags for a session.
@@ -34,10 +34,10 @@ To remove a tag, set its value to an empty string.
 
 Examples:
   # Set tags for a session
-  velda sessions set-tag --session-id=abc123 --tags=env=prod,team=ml
+  velda set-tag --session-id=abc123 --tags=env=prod,team=ml
 
   # Remove a tag by setting empty value
-  velda sessions set-tag --session-id=abc123 --tags=env=,team=ml
+  velda set-tag --session-id=abc123 --tags=env=,team=ml
 `,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -82,7 +82,10 @@ Examples:
 		if err != nil {
 			return err
 		}
-		cmd.Println("Tags updated successfully")
+		quiet, _ := cmd.Flags().GetBool("quiet")
+		if !quiet {
+			cmd.Println("Tags updated successfully")
+		}
 		return nil
 	},
 }
@@ -92,4 +95,5 @@ func init() {
 	setTagSessionCmd.Flags().StringP("instance", "i", "", "Instance name or ID. Default to the current instance if running in Velda, or default-instance clientlib.")
 	setTagSessionCmd.Flags().String("session-id", "", "Specify the session ID to update.")
 	setTagSessionCmd.Flags().String("tags", "", "Tags to set in format key=value,key2=value2. Set value to empty string to remove a tag.")
+	setTagSessionCmd.Flags().BoolP("quiet", "q", false, "Suppress output messages.")
 }
