@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/nebius/gosdk"
 	"github.com/nebius/gosdk/auth"
@@ -326,9 +327,13 @@ func (f *nebiusLaunchTemplatePoolFactory) NewBackend(pool *proto.AgentPool, brok
 				serviceAccountKey,
 			),
 		)
-	} else if token, err := os.ReadFile("/mnt/cloud-metadata/token"); err == nil {
+	} else if _, err := os.Stat("/mnt/cloud-metadata/token"); err == nil {
 		// VM service account from Nebius
-		creds = gosdk.IAMToken(string(token))
+		tokener, err := auth.NewFileTokener("/mnt/cloud-metadata/token", time.Hour)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize Nebius file tokener: %w", err)
+		}
+		creds = gosdk.CustomTokener(tokener)
 	} else {
 		return nil, fmt.Errorf("no Nebius credentials provided for pool %s", pool.GetName())
 	}
