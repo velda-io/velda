@@ -201,6 +201,11 @@ message AutoscalerBackendNebiusLaunchTemplate {
   // If set, will override the agent version to install.
   // Default to the current version of controller.
   string agent_version_override = 13;
+
+  // Maximum number of disks to keep in the pool for reuse.
+  // When this limit is reached, disks will be deleted instead of pooled.
+  // Default: 0 (no disk pooling)
+  int32 max_disk_pool_size = 14;
 }
 
 message AutoscalerBackendKubernetes {
@@ -333,6 +338,8 @@ message NebiusAutoProvisioner {
   }
 
   repeated PoolDetail pool_details = 9;
+
+  int32 max_disk_pool_size = 10;
 }
 
 message GCSProvisioner {
