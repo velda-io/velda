@@ -65,6 +65,7 @@ func (p *NebiusAutoPoolProvisioner) run(ctx context.Context) error {
 			UsePublicIp:          p.cfg.UsePublicIp,
 			AdminSshKey:          p.cfg.AdminSshKey,
 			AgentVersionOverride: p.cfg.AgentVersionOverride,
+			MaxDiskPoolSize:      p.cfg.MaxDiskPoolSize,
 			AgentConfig:          &agentpb.AgentConfig{},
 		}
 
