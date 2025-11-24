@@ -368,7 +368,7 @@ func getWorkload(cmd *cobra.Command, args []string) (*proto.Workload, error) {
 		groupsUint32 = append(groupsUint32, uint32(group))
 	}
 	environs := os.Environ()
-	environs = append(environs, removeLocalEnvs()...)
+	environs = append(environs, clientlib.RemoveLocalEnvs()...)
 	commandPath, err := exec.LookPath(command)
 	if err != nil {
 		return nil, fmt.Errorf("Error finding command path: %v", err)
@@ -428,27 +428,6 @@ func escapeArgsForShell(args []string) []string {
 		escaped[i] = "'" + escapedArg + "'"
 	}
 	return escaped
-}
-
-func removeLocalEnvs() []string {
-	libraryPaths := strings.Split(os.Getenv("LD_LIBRARY_PATH"), ":")
-	binPath := strings.Split(os.Getenv("PATH"), ":")
-	output := []string{}
-	for i, path := range libraryPaths {
-		if path == "/var/nvidia/lib" {
-			libraryPaths = append(libraryPaths[:i], libraryPaths[i+1:]...)
-			output = append(output, fmt.Sprint("LD_LIBRARY_PATH=", strings.Join(libraryPaths, ":")))
-			break
-		}
-	}
-	for i, path := range binPath {
-		if path == "/var/nvidia/bin" {
-			binPath = append(binPath[:i], binPath[i+1:]...)
-			output = append(output, fmt.Sprint("PATH=", strings.Join(binPath, ":")))
-			break
-		}
-	}
-	return output
 }
 
 func init() {
