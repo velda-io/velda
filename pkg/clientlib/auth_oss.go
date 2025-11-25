@@ -16,7 +16,9 @@ package clientlib
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -50,6 +52,62 @@ func (o OssAuthProvider) DeleteProfile(profile string) error {
 func (o OssAuthProvider) BindSession(ctx context.Context, session *proto.SessionRequest) context.Context {
 	ctx = context.WithValue(ctx, "instanceId", session.InstanceId)
 	return ctx
+}
+
+// dialJumpServer establishes a connection through an SSH jump server
+func dialJumpServer(jumpProxy, jumpIdentityFile, targetHost string, targetPort int) (net.Conn, error) {
+	// Parse jump proxy in format user@host
+	parts := strings.Split(jumpProxy, "@")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid jump-proxy format, expected user@host, got: %s", jumpProxy)
+	}
+	jumpUser := parts[0]
+	jumpHost := parts[1]
+
+	// Add default SSH port if not specified
+	if !strings.Contains(jumpHost, ":") {
+		jumpHost = jumpHost + ":22"
+	}
+
+	// Read jump server identity file
+	var authMethods []ssh.AuthMethod
+	if jumpIdentityFile != "" {
+		keyData, err := os.ReadFile(jumpIdentityFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading jump server SSH key file %s: %v", jumpIdentityFile, err)
+		}
+
+		key, err := ssh.ParsePrivateKey(keyData)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing jump server SSH key file %s: %v", jumpIdentityFile, err)
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(key))
+	}
+
+	// Configure jump server client
+	jumpConfig := &ssh.ClientConfig{
+		User:            jumpUser,
+		Auth:            authMethods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For jump server
+	}
+
+	// Connect to jump server
+	DebugLog("Connecting to jump server: %s@%s", jumpUser, jumpHost)
+	jumpClient, err := ssh.Dial("tcp", jumpHost, jumpConfig)
+	if err != nil {
+		return nil, fmt.Errorf("error dialing jump server: %v", err)
+	}
+
+	// Dial target through jump server
+	targetAddr := fmt.Sprintf("%s:%d", targetHost, targetPort)
+	DebugLog("Dialing target %s through jump server", targetAddr)
+	conn, err := jumpClient.Dial("tcp", targetAddr)
+	if err != nil {
+		jumpClient.Close()
+		return nil, fmt.Errorf("error dialing target through jump server: %v", err)
+	}
+
+	return conn, nil
 }
 
 func (o OssAuthProvider) SshDial(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error) {
@@ -88,9 +146,35 @@ func (o OssAuthProvider) SshDial(cmd *cobra.Command, sshConn *proto.ExecutionSta
 		HostKeyCallback: ssh.FixedHostKey(hostKey),
 	}
 
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port), clientConfig)
-	if err != nil {
-		return nil, fmt.Errorf("Error dialing ssh: %v", err)
+	// Check if jump server is configured
+	var jumpProxy, jumpIdentityFile string
+	if !IsInSession() {
+		jumpProxy, _ = GetFlagValue(cmd, "jump-proxy")
+		jumpIdentityFile, _ = GetFlagValue(cmd, "jump-identity-file")
+	}
+
+	var client *ssh.Client
+	if jumpProxy != "" {
+		// Use jump server to connect
+		DebugLog("Using jump server: %s", jumpProxy)
+		conn, err := dialJumpServer(jumpProxy, jumpIdentityFile, sshConn.Host, int(sshConn.Port))
+		if err != nil {
+			return nil, err
+		}
+
+		// Create SSH client using the connection through jump server
+		sshConn2, chans, reqs, err := ssh.NewClientConn(conn, fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port), clientConfig)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("Error creating SSH client connection through jump server: %v", err)
+		}
+		client = ssh.NewClient(sshConn2, chans, reqs)
+	} else {
+		// Direct connection
+		client, err = ssh.Dial("tcp", fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port), clientConfig)
+		if err != nil {
+			return nil, fmt.Errorf("Error dialing ssh: %v", err)
+		}
 	}
 	return &SshClient{Client: client, ShutdownMessage: ""}, nil
 }

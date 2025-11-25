@@ -49,6 +49,14 @@ var configSetCmd = &cobra.Command{
 			cobra.CheckErr(cfg.SetConfig("identity-file", flags.Lookup("identity-file").Value.String()))
 			updated = true
 		}
+		if flags.Changed("jump-proxy") {
+			cobra.CheckErr(cfg.SetConfig("jump-proxy", flags.Lookup("jump-proxy").Value.String()))
+			updated = true
+		}
+		if flags.Changed("jump-identity-file") {
+			cobra.CheckErr(cfg.SetConfig("jump-identity-file", flags.Lookup("jump-identity-file").Value.String()))
+			updated = true
+		}
 		if !updated {
 			cobra.CheckErr("No config item specified")
 		}
@@ -60,4 +68,6 @@ func init() {
 	configSetCmd.Flags().String("default-instance", "", "Configure default instance")
 	configSetCmd.Flags().String("broker", "", "The address of broker")
 	configSetCmd.Flags().String("identity-file", "", "The identity file to use for authentication")
+	configSetCmd.Flags().String("jump-proxy", "", "SSH jump server in user@host format")
+	configSetCmd.Flags().String("jump-identity-file", "", "The identity file to use for jump server authentication")
 }
