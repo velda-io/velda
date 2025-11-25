@@ -21,3 +21,4 @@ function export_docker() {
 zfs create $zpool_root/seed
 export_docker ubuntu
 export_docker ubuntu-docker
+export_docker python
