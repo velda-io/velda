@@ -54,19 +54,40 @@ func (o OssAuthProvider) BindSession(ctx context.Context, session *proto.Session
 	return ctx
 }
 
+type jumpConn struct {
+	net.Conn
+	client *ssh.Client
+}
+
+func (jc *jumpConn) Close() error {
+	jc.Conn.Close()
+	return jc.client.Close()
+}
+
 // dialJumpServer establishes a connection through an SSH jump server
 func dialJumpServer(jumpProxy, jumpIdentityFile, targetHost string, targetPort int) (net.Conn, error) {
-	// Parse jump proxy in format user@host
-	parts := strings.Split(jumpProxy, "@")
-	if len(parts) != 2 {
+	// Parse jump proxy in format user@host. Use last '@' to support any '@' in user if present.
+	at := strings.LastIndex(jumpProxy, "@")
+	if at <= 0 || at == len(jumpProxy)-1 {
 		return nil, fmt.Errorf("invalid jump-proxy format, expected user@host, got: %s", jumpProxy)
 	}
-	jumpUser := parts[0]
-	jumpHost := parts[1]
+	jumpUser := strings.TrimSpace(jumpProxy[:at])
+	jumpHost := strings.TrimSpace(jumpProxy[at+1:])
 
-	// Add default SSH port if not specified
-	if !strings.Contains(jumpHost, ":") {
-		jumpHost = jumpHost + ":22"
+	// Validate non-empty parts
+	if jumpUser == "" {
+		return nil, fmt.Errorf("invalid jump-proxy: username is empty in %s", jumpProxy)
+	}
+	if jumpHost == "" {
+		return nil, fmt.Errorf("invalid jump-proxy: host is empty in %s", jumpProxy)
+	}
+
+	if _, _, err := net.SplitHostPort(jumpHost); err != nil {
+		if !strings.Contains(err.Error(), "missing port in address") {
+			return nil, fmt.Errorf("invalid jump-proxy host: %v", err)
+		}
+		// Add default SSH port if not specified
+		jumpHost = fmt.Sprintf("%s:22", jumpHost)
 	}
 
 	// Read jump server identity file
@@ -82,6 +103,8 @@ func dialJumpServer(jumpProxy, jumpIdentityFile, targetHost string, targetPort i
 			return nil, fmt.Errorf("error parsing jump server SSH key file %s: %v", jumpIdentityFile, err)
 		}
 		authMethods = append(authMethods, ssh.PublicKeys(key))
+	} else {
+		return nil, fmt.Errorf("jump server identity file is required")
 	}
 
 	// Configure jump server client
@@ -107,7 +130,7 @@ func dialJumpServer(jumpProxy, jumpIdentityFile, targetHost string, targetPort i
 		return nil, fmt.Errorf("error dialing target through jump server: %v", err)
 	}
 
-	return conn, nil
+	return &jumpConn{Conn: conn, client: jumpClient}, nil
 }
 
 func (o OssAuthProvider) SshDial(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error) {
