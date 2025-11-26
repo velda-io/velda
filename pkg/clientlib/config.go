@@ -47,6 +47,8 @@ func InitConfigFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&profileInput, "profile", "", "The user profile to use.")
 	cmd.PersistentFlags().BoolVar(&Debug, "debug", false, "Enable debug mode")
 	cmd.PersistentFlags().String("identity-file", "", "Path to the private key for SSH authentication")
+	cmd.PersistentFlags().String("jump-proxy", "", "SSH jump server in user@host format")
+	cmd.PersistentFlags().String("jump-identity-file", "", "Path to the private key for SSH jump server authentication")
 
 	// Legacy flags.
 	cmd.PersistentFlags().StringVar(&brokerAddrFlag, "broker", "novahub.dev:50051", "broker address")
