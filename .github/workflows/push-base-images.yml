@@ -1,4 +1,4 @@
-name: Build and push base-ubuntu image for velda dev sandbox
+name: Build base Velda dev sandbox images
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       branch:
         description: 'Branch to build from'
         required: false
-        default: 'master'
+        default: 'main'
       dockerfile:
         description: 'Optional: path to Dockerfile. If empty, build all misc/base_*.Dockerfile files'
         required: false
