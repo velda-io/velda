@@ -17,12 +17,10 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"sync"
-	"time"
 
 	"github.com/nebius/gosdk"
-	"github.com/nebius/gosdk/auth"
+	"github.com/nebius/gosdk/config/reader"
 	common "github.com/nebius/gosdk/proto/nebius/common/v1"
 	compute "github.com/nebius/gosdk/proto/nebius/compute/v1"
 	computeservice "github.com/nebius/gosdk/services/nebius/compute/v1"
@@ -558,36 +556,11 @@ func (f *nebiusLaunchTemplatePoolFactory) NewBackend(pool *proto.AgentPool, brok
 		nebiusTemplate.InstanceNamePrefix = fmt.Sprintf("velda-%s", pool.GetName())
 	}
 
-	// Initialize Nebius SDK with credentials
-	var creds gosdk.Credentials
-	var err error
-	// Try environment variable
-	if token := os.Getenv("NEBIUS_IAM_TOKEN"); token != "" {
-		creds = gosdk.IAMToken(token)
-	} else if serviceAccountKey := os.Getenv("NEBIUS_SERVICE_ACCOUNT_KEY"); serviceAccountKey != "" {
-		// Parse service account credentials from JSON
-		creds = gosdk.ServiceAccountReader(
-			auth.NewServiceAccountCredentialsFileParser(
-				nil,
-				serviceAccountKey,
-			),
-		)
-	} else if _, err := os.Stat("/mnt/cloud-metadata/token"); err == nil {
-		// VM service account from Nebius
-		tokener, err := auth.NewFileTokener("/mnt/cloud-metadata/token", time.Hour)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize Nebius file tokener: %w", err)
-		}
-		creds = gosdk.CustomTokener(tokener)
-	} else {
-		return nil, fmt.Errorf("no Nebius credentials provided for pool %s", pool.GetName())
+	cfgReader := reader.NewConfigReader(reader.WithoutBrowserOpen())
+	if err := cfgReader.Load(ctx); err != nil {
+		return nil, fmt.Errorf("failed to load Nebius config: %w", err)
 	}
-
-	sdkOptions := []gosdk.Option{
-		gosdk.WithCredentials(creds),
-	}
-
-	sdk, err := gosdk.New(ctx, sdkOptions...)
+	sdk, err := gosdk.New(ctx, gosdk.WithConfigReader(cfgReader))
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize Nebius SDK: %w", err)
 	}
