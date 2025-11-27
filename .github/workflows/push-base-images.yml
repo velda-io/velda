@@ -1,0 +1,75 @@
+name: Build and push base-ubuntu image for velda dev sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build from'
+        required: false
+        default: 'master'
+      dockerfile:
+        description: 'Optional: path to Dockerfile. If empty, build all misc/base_*.Dockerfile files'
+        required: false
+        default: ''
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      files: ${{ steps.find.outputs.files }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      - name: Find Dockerfiles
+        id: find
+        run: |
+          if [ -n "${{ github.event.inputs.dockerfile }}" ]; then
+            printf '%s\n' "${{ github.event.inputs.dockerfile }}" > files.txt
+          else
+            git ls-files 'misc/base_*.Dockerfile' > files.txt || true
+          fi
+          # remove empty lines
+          awk 'NF' files.txt > files.clean || true
+          if [ ! -s files.clean ]; then
+            echo "No misc/base_*.Dockerfile found in repository" >&2
+            exit 1
+          fi
+          files_json=$(jq -R -s -c 'split("\n")[:-1]' files.clean)
+          echo "files=$files_json" >> $GITHUB_OUTPUT
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dockerfile: ${{ fromJson(needs.prepare.outputs.files) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      - name: Determine tag
+        id: tag
+        run: |
+          df="${{ matrix.dockerfile }}"
+          tag=$(grep '^# IMAGE:' "$df" | sed 's/^# IMAGE: //' | head -n1 | xargs)
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: veldaio
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ steps.tag.outputs.tag }}
