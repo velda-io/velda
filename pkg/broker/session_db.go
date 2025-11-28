@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"velda.io/velda/pkg/proto"
 )
@@ -26,8 +27,16 @@ import (
 type SessionCompletionWatcher interface {
 	NotifySessionCompletion(ctx context.Context, record *proto.SessionExecutionRecord) error
 }
+
+type QuotaChecker interface {
+	// Quota management methods
+	GrantQuota(ctx context.Context, pool string, previousGrant *QuotaGrant, totalConsumedTime time.Duration) (*QuotaGrant, error)
+	ReturnQuota(ctx context.Context, grant *QuotaGrant, actualUsageDuration time.Duration) error
+}
+
 type SessionHelper interface {
 	SessionCompletionWatcher
+	QuotaChecker
 	NotifyStateChange(instanceId int64, sessionId string, state *proto.ExecutionStatus)
 	NotifyTaskChange(taskId string, state *proto.ExecutionStatus)
 }

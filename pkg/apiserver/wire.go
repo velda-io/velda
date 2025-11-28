@@ -65,6 +65,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		wire.Value(ServerAuthUnaryInterceptor(sessionInterceptor)),
 		wire.Value(ServerAuthStreamInterceptor(sessionStreamInterceptor)),
 		ProvideTaskLogDb,
+		ProvideQuotaChecker,
 		ProvideBrokerServer,
 		ProvideTaskService,
 		ProvideNfsBrokerAuth,

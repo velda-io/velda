@@ -94,6 +94,9 @@ type Session struct {
 	helpers     SessionHelper
 
 	tags map[string]string
+
+	quotaGrant     *QuotaGrant
+	quotaCheckDone chan struct{}
 }
 
 func NewSession(request *proto.SessionRequest, scheduler *Scheduler, helpers SessionHelper) *Session {
@@ -217,6 +220,13 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 		switch s.state {
 		case schedulingStateCreated:
 			nextState = schedulingStateQueueing
+			// Check quota when session is being scheduled
+			if err := s.checkQuota(ctx); err != nil {
+				log.Printf("Failed to check quota for session %s during scheduling: %v", s.id, err)
+				s.schedulingErr = fmt.Errorf("quota check failed: %w", err)
+				s.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_NO_QUOTA)
+				return
+			}
 			if !batched {
 				// For batched, the request happens during reservation.
 				pool.RequestWorker()
@@ -260,6 +270,7 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 			defer s.mu.Unlock()
 			s.updateFromAgentResponseLocked(response)
 			s.notifyChangeLocked()
+			s.startQuotaMonitoring()
 			return
 		case schedulingStateCancelling:
 			select {
@@ -496,6 +507,10 @@ func (s *Session) recordExecution(finalState proto.SessionExecutionFinalState) e
 	if err != nil {
 		log.Printf("Failed to record execution for session %s: %v", s.id, err)
 	}
+	if err := s.returnQuota(ctx); err != nil {
+		log.Printf("Failed to return quota for session %s: %v", s.id, err)
+	}
+
 	return err
 }
 
@@ -526,4 +541,75 @@ func (s *Session) GetTags() map[string]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return maps.Clone(s.tags)
+}
+
+// checkQuota obtains a quota grant for this session from the SessionHelper.
+func (s *Session) checkQuota(ctx context.Context) error {
+	if s.helpers == nil {
+		return nil
+	}
+
+	pool := s.Request.Pool
+	if pool == "" && s.scheduler != nil && s.scheduler.PoolManager != nil {
+		pool = s.scheduler.PoolManager.name
+	}
+	var consumed time.Duration
+	if !s.startTime.IsZero() {
+		consumed = time.Since(s.startTime)
+	}
+
+	grant, err := s.helpers.GrantQuota(ctx, pool, nil, consumed)
+	if err != nil {
+		return fmt.Errorf("failed to grant quota: %w", err)
+	}
+
+	s.quotaGrant = grant
+	return nil
+}
+
+// returnQuota returns the quota grant back to the SessionHelper.
+// Should be called when session terminates.
+func (s *Session) returnQuota(ctx context.Context) error {
+	grant := s.quotaGrant
+	s.quotaGrant = nil
+
+	if grant == nil || s.helpers == nil {
+		return nil
+	}
+
+	// Calculate actual usage duration for this grant
+	actualUsage := time.Since(s.startTime)
+	if s.startTime.IsZero() {
+		actualUsage = 0
+	} else {
+		close(s.quotaCheckDone)
+	}
+
+	return s.helpers.ReturnQuota(ctx, grant, actualUsage)
+}
+
+// startQuotaMonitoring starts a goroutine that periodically checks if quota has expired.
+func (s *Session) startQuotaMonitoring() {
+	if s.helpers == nil {
+		return
+	}
+	s.quotaCheckDone = make(chan struct{})
+
+	ctx := rbac.ContextWithUser(context.Background(), s.user)
+	go func() {
+		for {
+			newGrant, err := s.helpers.GrantQuota(ctx, s.Request.Pool, s.quotaGrant, time.Since(s.startTime))
+			if err != nil {
+				log.Printf("Session %s quota check failed, terminating: %v", s.id, err)
+				// Terminate session due to quota expiration
+				s.Kill(ctx, false)
+				return
+			}
+			select {
+			case <-time.After(newGrant.NextCheck):
+			case <-s.quotaCheckDone:
+				return
+			}
+		}
+	}()
 }

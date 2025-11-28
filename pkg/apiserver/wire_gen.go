@@ -40,7 +40,8 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	}
 	sessionCompletionWatcher := _wireNullCompletionWatcherValue
 	watcher := broker.NewWatcher()
-	sessionHelper := ProvideSessionHelper(sessionCompletionWatcher, watcher)
+	quotaChecker := ProvideQuotaChecker()
+	sessionHelper := ProvideSessionHelper(sessionCompletionWatcher, watcher, quotaChecker)
 	sessionDatabase := broker.NewSessionDatabase(sessionHelper)
 	permissions := ProvidePermission()
 	storage, err := ProvideStorage(config)
