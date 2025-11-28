@@ -200,13 +200,15 @@ func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler 
 
 var ProvideWatcher = broker.NewWatcher
 
-func ProvideSessionHelper(completionWatcher broker.SessionCompletionWatcher, watcher *broker.Watcher) broker.SessionHelper {
+func ProvideSessionHelper(completionWatcher broker.SessionCompletionWatcher, watcher *broker.Watcher, quotaChecker broker.QuotaChecker) broker.SessionHelper {
 	return struct {
 		broker.SessionCompletionWatcher
+		broker.QuotaChecker
 		*broker.Watcher
 	}{
-		SessionCompletionWatcher: completionWatcher,
-		Watcher:                  watcher,
+		completionWatcher,
+		quotaChecker,
+		watcher,
 	}
 }
 
@@ -216,6 +218,10 @@ func ProvideLocalDiskStorage(s storage.Storage) broker.LocalDiskProvider {
 
 func ProvideTaskLogDb(s storage.Storage) tasks.TaskLogDb {
 	return storage.NewLocalStorageLogDb(s)
+}
+
+func ProvideQuotaChecker() broker.QuotaChecker {
+	return &broker.AlwaysAllowQuotaChecker{}
 }
 
 func ProvideBrokerServer(grpcServer *grpc.Server, mux *runtime.ServeMux, schedulers *broker.SchedulerSet, sessions *broker.SessionDatabase, permissions rbac.Permissions, taskTracker *broker.TaskTracker, auth broker.AuthHelper, taskdb broker.TaskDb) proto.BrokerServiceServer {
