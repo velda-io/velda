@@ -146,7 +146,7 @@ jobs:
   packer-images:
     needs: build-package
     # Skip if release was skipped
-    if: needs.build-package.outputs.skip_release != 'true'
+    if: needs.build-package.outputs.skip_release != 'true' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -237,7 +237,7 @@ jobs:
           name: Release ${{ needs.build-package.outputs.version }}
           body: |
             ${{ github.event_name == 'schedule' && steps.build_changelog.outputs.changelog || format('**Tag:** {0}\n**Commit:** {1}', needs.build-package.outputs.version, github.sha) }}
-          draft: true
-          prerelease: false
+          draft: ${{ github.event_name != 'schedule' }}
+          prerelease: ${{ github.event_name == 'schedule' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
