@@ -20,14 +20,15 @@ import (
 
 // QuotaGrant represents an allocated quota for a session.
 type QuotaGrant struct {
-	// New granted total time.
-	NextCheck    time.Duration
+	// NextCheck indicates when the next quota check should occur.
+	NextCheck time.Duration
+	// TotalGranted is the total duration of quota granted for this grant.
 	TotalGranted time.Duration
 	// Pool this grant is for
 	Pool string
 	// GrantID is a unique identifier for this grant
 	GrantID string
-	// BalanceDeducted is the amount deducted from quota.
+	// BalanceDeducted is the amount deducted from quota, in implementation-specific units.
 	BalanceDeducted int64
 }
 
@@ -40,7 +41,7 @@ func (a *AlwaysAllowQuotaChecker) GrantQuota(ctx context.Context, pool string, p
 		TotalGranted:    1 * time.Hour,
 		Pool:            pool,
 		BalanceDeducted: 0,
-		GrantID:         "oss-unlimited",
+		GrantID:         "unlimited",
 	}, nil
 }
 

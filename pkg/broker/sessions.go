@@ -590,6 +590,9 @@ func (s *Session) returnQuota(ctx context.Context) error {
 
 // startQuotaMonitoring starts a goroutine that periodically checks if quota has expired.
 func (s *Session) startQuotaMonitoring() {
+	if s.helpers == nil {
+		return
+	}
 	s.quotaCheckDone = make(chan struct{})
 
 	ctx := rbac.ContextWithUser(context.Background(), s.user)
