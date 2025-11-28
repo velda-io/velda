@@ -81,7 +81,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             # Use CalVer for automated releases: YYYY.MM.DD
-            calver_tag=$(date -u +"%Y.%m.%d")
+            calver_tag=$(date -u +"weekly-%Y%m%d-%H%M%S")
             
             # Check if tag already exists, if so append sequence number
             existing=$(git tag --list "${calver_tag}*" | sort -V || true)
@@ -218,94 +218,25 @@ jobs:
           name: release-bin
           path: ./bin
 
-      - name: Generate changelog
-        id: changelog
+      - name: "Generate Changelog"
+        id: build_changelog
         if: github.event_name == 'schedule'
-        run: |
-          set -euo pipefail
-          
-          # Get the latest tag (excluding the one we just created)
-          latest_tag=$(git tag --sort=-version:refname | grep -v "^${{ needs.build-package.outputs.version }}$" | head -n1 || echo "")
-          
-          if [ -z "$latest_tag" ]; then
-            range="HEAD"
-            echo "Generating changelog for all commits"
-          else
-            range="${latest_tag}..HEAD"
-            echo "Generating changelog for ${range}"
-          fi
-          
-          # Create changelog with categorized commits
-          changelog_file=$(mktemp)
-          
-          # Features
-          features=$(git log "$range" --pretty=format:"- %s (%h)" --grep="^feat" --grep="^feature" -i || true)
-          
-          # Bug fixes
-          fixes=$(git log "$range" --pretty=format:"- %s (%h)" --grep="^fix" -i || true)
-          
-          # Documentation
-          docs=$(git log "$range" --pretty=format:"- %s (%h)" --grep="^docs" -i || true)
-          
-          # Other changes
-          others=$(git log "$range" --pretty=format:"- %s (%h)" --invert-grep --grep="^feat" --grep="^feature" --grep="^fix" --grep="^docs" -i || true)
-          
-          # Build changelog file
-          {
-            echo "## What's Changed"
-            echo ""
-            
-            if [ -n "$features" ]; then
-              echo "### ✨ Features"
-              echo "$features"
-              echo ""
-            fi
-            
-            if [ -n "$fixes" ]; then
-              echo "### 🐛 Bug Fixes"
-              echo "$fixes"
-              echo ""
-            fi
-            
-            if [ -n "$docs" ]; then
-              echo "### 📚 Documentation"
-              echo "$docs"
-              echo ""
-            fi
-            
-            if [ -n "$others" ]; then
-              echo "### 🔧 Other Changes"
-              echo "$others"
-              echo ""
-            fi
-            
-            if [ -n "$latest_tag" ]; then
-              echo "---"
-              echo ""
-              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${latest_tag}...${{ needs.build-package.outputs.version }}"
-            fi
-          } > "$changelog_file"
-          
-          # Output changelog
-          changelog_content=$(cat "$changelog_file")
-          {
-            echo "changelog<<EOF"
-            echo "$changelog_content"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-          
-          echo "Generated changelog:"
-          cat "$changelog_file"
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          ignorePreReleases: "false"
+          toTag: ${{ needs.build-package.outputs.version }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        if: github.event_name != 'schedule' || steps.build_changelog.outputs.changelog != ''
         with:
           files: |
             bin/*
           tag_name: ${{ needs.build-package.outputs.version }}
           name: Release ${{ needs.build-package.outputs.version }}
           body: |
-            ${{ github.event_name == 'schedule' && steps.changelog.outputs.changelog || format('**Tag:** {0}\n**Commit:** {1}', needs.build-package.outputs.version, github.sha) }}
+            ${{ github.event_name == 'schedule' && steps.build_changelog.outputs.changelog || format('**Tag:** {0}\n**Commit:** {1}', needs.build-package.outputs.version, github.sha) }}
           draft: true
           prerelease: false
         env:
