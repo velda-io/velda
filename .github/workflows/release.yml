@@ -82,32 +82,7 @@ jobs:
           if [ "${{ github.event_name }}" = "schedule" ]; then
             # Use CalVer for automated releases: YYYY.MM.DD
             calver_tag=$(date -u +"weekly-%Y%m%d-%H%M%S")
-            
-            # Check if tag already exists, if so append sequence number
-            existing=$(git tag --list "${calver_tag}*" | sort -V || true)
-            
-            if [ -z "$existing" ]; then
-              VERSION="$calver_tag"
-            else
-              # Find the highest sequence number for today
-              max=0
-              while read -r t; do
-                if [ "$t" = "$calver_tag" ]; then
-                  max=0
-                else
-                  num=$(echo "$t" | sed -E "s/^${calver_tag}\.([0-9]+)$/\1/")
-                  if [[ "$num" =~ ^[0-9]+$ ]]; then
-                    if [ "$num" -gt "$max" ]; then
-                      max=$num
-                    fi
-                  fi
-                fi
-              done <<< "$existing"
-              
-              # Append sequence number
-              VERSION="${calver_tag}.$((max + 1))"
-            fi
-            
+            VERSION="$calver_tag"
             echo "Generated CalVer version: $VERSION"
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
             echo "VERSION=$VERSION" >> "$GITHUB_ENV"
