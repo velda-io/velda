@@ -16,7 +16,7 @@ package apiserver
 import (
 	"context"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -66,7 +66,7 @@ func wrapError(method string, err error) error {
 	}
 
 	// Generate a random error ID
-	errorID := rand.Int31()
+	errorID := rand.Uint32()
 
 	// Log the method name, error ID, and original error
 	log.Printf("GRPC Error - Method: %s, ErrorID: %d, Error: %v", method, errorID, err)
