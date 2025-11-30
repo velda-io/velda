@@ -28,6 +28,7 @@ type Committer interface {
 }
 
 var ErrNotFound = status.Error(codes.NotFound, "not found")
+var ErrAlreadyExists = status.Error(codes.AlreadyExists, "already exists")
 
 type TaskWithUser struct {
 	*proto.Task

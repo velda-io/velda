@@ -265,10 +265,12 @@ func ProvideGrpcServer(metrics *prometheus_grpc.ServerMetrics, authUnaryIntercep
 		grpc.ChainUnaryInterceptor(
 			metrics.UnaryServerInterceptor(),
 			grpc.UnaryServerInterceptor(authUnaryInterceptor),
+			ErrorWrapperUnaryInterceptor(),
 		),
 		grpc.ChainStreamInterceptor(
 			metrics.StreamServerInterceptor(),
 			grpc.StreamServerInterceptor(authStreamInterceptor),
+			ErrorWrapperStreamInterceptor(),
 		),
 	)
 }
