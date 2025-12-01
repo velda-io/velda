@@ -19,19 +19,14 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"velda.io/velda/pkg/proto"
 )
 
 type SessionCompletionWatcher interface {
 	NotifySessionCompletion(ctx context.Context, record *proto.SessionExecutionRecord) error
-}
-
-type QuotaChecker interface {
-	// Quota management methods
-	GrantQuota(ctx context.Context, pool string, previousGrant *QuotaGrant, totalConsumedTime time.Duration) (*QuotaGrant, error)
-	ReturnQuota(ctx context.Context, grant *QuotaGrant, actualUsageDuration time.Duration) error
 }
 
 type SessionHelper interface {
@@ -191,14 +186,14 @@ func (db *SessionDatabase) AddSession(sessionReq *proto.SessionRequest, schedule
 			}
 		}
 		if sessionReq.DisallowNewSession {
-			return nil, fmt.Errorf("no session found with service name '%s' and new session creation is disallowed", sessionReq.ServiceName)
+			return nil, status.Errorf(codes.NotFound, "no session found with service name '%s' and new session creation is disallowed", sessionReq.ServiceName)
 		}
 	}
 	if scheduler == nil {
-		return nil, fmt.Errorf("No session exists and scheduler is not provided")
+		return nil, status.Errorf(codes.NotFound, "No session exists and scheduler is not provided")
 	}
 	if sessionReq.DisallowNewSession {
-		return nil, fmt.Errorf("no existing session found and new session creation is disallowed")
+		return nil, status.Errorf(codes.NotFound, "no existing session found and new session creation is disallowed")
 	}
 	sessionReq.SessionId = newSessionId()
 	for _, ok := instance.sessions[sessionReq.SessionId]; ok; _, ok = instance.sessions[sessionReq.SessionId] {
