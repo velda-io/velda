@@ -13,6 +13,7 @@ import (
 // TaskDB is the minimal interface required to run task-related tests.
 type TaskDB interface {
 	CreateTask(ctx context.Context, session *proto.SessionRequest) (string, int, error)
+	GetTask(ctx context.Context, taskId string) (*proto.Task, error)
 	ListTasks(ctx context.Context, request *proto.ListTasksRequest) ([]*proto.Task, string, error)
 	SearchTasks(ctx context.Context, request *proto.SearchTasksRequest) ([]*proto.Task, string, error)
 	PollTasks(ctx context.Context, leaserIdentity string, callback func(string, *db.TaskWithUser) error, regionId int) error
@@ -52,6 +53,17 @@ func RunTestTaskWithDb(t *testing.T, sdb TaskDB, instanceId int64) {
 			Labels:     []string{"label1=value1"},
 		})
 		assert.NoError(t, err)
+
+		task, err := sdb.GetTask(ctx, "job1/s1")
+		assert.NoError(t, err)
+		assert.Equal(t, "job1/s1", task.Id)
+		assert.Equal(t, "pool", task.Pool)
+		assert.Equal(t, int64(1), task.Priority)
+		assert.Equal(t, []string{"label1=value1"}, task.Labels)
+
+		_, err = sdb.GetTask(ctx, "not-exist")
+		assert.ErrorIs(t, err, db.ErrNotFound)
+
 		_, _, err = sdb.CreateTask(ctx, &proto.SessionRequest{
 			TaskId:     "job1/s2",
 			Pool:       "pool2",

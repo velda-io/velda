@@ -15,6 +15,7 @@ package apiserver
 
 import (
 	"context"
+	"errors"
 	"log"
 	"math/rand/v2"
 
@@ -55,14 +56,32 @@ func wrapError(method string, err error) error {
 		return nil
 	}
 
-	// Check if error is already a gRPC status error
-	st, ok := status.FromError(err)
-	if ok {
-		// If it's a known error code (not Internal or Unknown), return as-is
-		code := st.Code()
-		if code != codes.Unknown && code != codes.Internal {
-			return err
+	// Search the error chain for an underlying gRPC status error and keep
+	// the deepest (most specific) one we find. When returning a status
+	// error we always return a fresh status error (no wrapped chain) so
+	// callers don't see internal context added elsewhere in the chain.
+	var deepest *status.Status
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if st, ok := status.FromError(e); ok {
+			deepest = st
 		}
+	}
+	if deepest != nil {
+		code := deepest.Code()
+		// If it's a known error code (not Internal or Unknown), return a
+		// clean status error with the same code and message (no chain).
+		if code != codes.Unknown && code != codes.Internal {
+			return status.Error(code, deepest.Message())
+		}
+		// If the deepest status is Internal/Unknown, fall through and let
+		// the wrapper produce an opaque Internal error ID instead of
+		// returning the chained error.
+	}
+	if errors.Is(err, context.Canceled) {
+		return status.Error(codes.Canceled, context.Canceled.Error())
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
 	}
 
 	// Generate a random error ID

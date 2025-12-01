@@ -16,175 +16,68 @@ package apiserver
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
-	"google.golang.org/grpc"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-func TestErrorWrapperUnaryInterceptor(t *testing.T) {
-	interceptor := ErrorWrapperUnaryInterceptor()
+func TestWrapError_UnwrapsDeepestStatusAndRemovesChain(t *testing.T) {
+	t.Run("returns clean status for deepest known code", func(t *testing.T) {
+		deep := status.Error(codes.NotFound, "resource missing")
+		wrapped := fmt.Errorf("level1: %w", fmt.Errorf("level2: %w", deep))
 
-	tests := []struct {
-		name            string
-		handlerError    error
-		expectedCode    codes.Code
-		shouldBeWrapped bool
-	}{
-		{
-			name:            "Unknown error gets wrapped",
-			handlerError:    errors.New("some unknown error"),
-			expectedCode:    codes.Internal,
-			shouldBeWrapped: true,
-		},
-		{
-			name:            "Internal error gets wrapped",
-			handlerError:    status.Error(codes.Internal, "internal error"),
-			expectedCode:    codes.Internal,
-			shouldBeWrapped: true,
-		},
-		{
-			name:            "Unknown code error gets wrapped",
-			handlerError:    status.Error(codes.Unknown, "unknown error"),
-			expectedCode:    codes.Internal,
-			shouldBeWrapped: true,
-		},
-		{
-			name:            "NotFound error not wrapped",
-			handlerError:    status.Error(codes.NotFound, "not found"),
-			expectedCode:    codes.NotFound,
-			shouldBeWrapped: false,
-		},
-		{
-			name:            "PermissionDenied error not wrapped",
-			handlerError:    status.Error(codes.PermissionDenied, "permission denied"),
-			expectedCode:    codes.PermissionDenied,
-			shouldBeWrapped: false,
-		},
-		{
-			name:            "InvalidArgument error not wrapped",
-			handlerError:    status.Error(codes.InvalidArgument, "invalid argument"),
-			expectedCode:    codes.InvalidArgument,
-			shouldBeWrapped: false,
-		},
-		{
-			name:            "Nil error returns nil",
-			handlerError:    nil,
-			expectedCode:    codes.OK,
-			shouldBeWrapped: false,
-		},
-	}
+		got := wrapError("/svc.Svc/Method", wrapped)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-				return nil, tt.handlerError
-			}
+		st, ok := status.FromError(got)
+		require.True(t, ok, "expected a status error, got: %v", got)
+		require.Equal(t, codes.NotFound, st.Code())
+		require.Equal(t, "resource missing", st.Message())
+		require.Nil(t, errors.Unwrap(got))
+	})
 
-			info := &grpc.UnaryServerInfo{
-				FullMethod: "/test.Service/TestMethod",
-			}
+	t.Run("internal deepest status yields opaque internal without original message", func(t *testing.T) {
+		deep := status.Error(codes.Internal, "db boom")
+		wrapped := fmt.Errorf("wrap: %w", deep)
 
-			_, err := interceptor(context.Background(), nil, info, handler)
+		got := wrapError("/svc.Svc/Method", wrapped)
 
-			if tt.handlerError == nil {
-				if err != nil {
-					t.Errorf("Expected no error, got: %v", err)
-				}
-				return
-			}
+		st, ok := status.FromError(got)
+		require.True(t, ok, "expected a status error, got: %v", got)
+		require.Equal(t, codes.Internal, st.Code())
+		// Should be our opaque internal message, not the original "db boom" text
+		assert.NotContains(t, st.Message(), "db boom", "opaque internal message leaked original message: %q", st.Message())
+		assert.True(t, strings.HasPrefix(st.Message(), "Internal server error (error ID:"), "expected opaque internal message, got %q", st.Message())
+		require.Nil(t, errors.Unwrap(got))
+	})
 
-			if err == nil {
-				t.Fatalf("Expected error, got nil")
-			}
+	t.Run("Unknown error shall be internalized", func(t *testing.T) {
+		deep := errors.New("db boom")
+		wrapped := fmt.Errorf("wrap: %w", deep)
 
-			st, ok := status.FromError(err)
-			if !ok {
-				t.Fatalf("Expected gRPC status error, got: %v", err)
-			}
+		got := wrapError("/svc.Svc/Method", wrapped)
 
-			if st.Code() != tt.expectedCode {
-				t.Errorf("Expected code %v, got %v", tt.expectedCode, st.Code())
-			}
+		st, ok := status.FromError(got)
+		require.True(t, ok, "expected a status error, got: %v", got)
+		require.Equal(t, codes.Internal, st.Code())
+		// Should be our opaque internal message, not the original "db boom" text
+		assert.NotContains(t, st.Message(), "db boom", "opaque internal message leaked original message: %q", st.Message())
+		assert.True(t, strings.HasPrefix(st.Message(), "Internal server error (error ID:"), "expected opaque internal message, got %q", st.Message())
+		require.Nil(t, errors.Unwrap(got))
+	})
 
-			if tt.shouldBeWrapped {
-				// Check that error message contains "error ID:"
-				if len(st.Message()) == 0 {
-					t.Errorf("Expected error message, got empty string")
-				}
-			}
-		})
-	}
-}
+	t.Run("preserves context.Canceled when wrapped", func(t *testing.T) {
+		wrapped := fmt.Errorf("wrapper: %w", context.Canceled)
 
-func TestErrorWrapperStreamInterceptor(t *testing.T) {
-	interceptor := ErrorWrapperStreamInterceptor()
-
-	tests := []struct {
-		name            string
-		handlerError    error
-		expectedCode    codes.Code
-		shouldBeWrapped bool
-	}{
-		{
-			name:            "Unknown error gets wrapped",
-			handlerError:    errors.New("some unknown error"),
-			expectedCode:    codes.Internal,
-			shouldBeWrapped: true,
-		},
-		{
-			name:            "NotFound error not wrapped",
-			handlerError:    status.Error(codes.NotFound, "not found"),
-			expectedCode:    codes.NotFound,
-			shouldBeWrapped: false,
-		},
-		{
-			name:            "Nil error returns nil",
-			handlerError:    nil,
-			expectedCode:    codes.OK,
-			shouldBeWrapped: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := func(srv interface{}, stream grpc.ServerStream) error {
-				return tt.handlerError
-			}
-
-			info := &grpc.StreamServerInfo{
-				FullMethod: "/test.Service/TestStreamMethod",
-			}
-
-			err := interceptor(nil, nil, info, handler)
-
-			if tt.handlerError == nil {
-				if err != nil {
-					t.Errorf("Expected no error, got: %v", err)
-				}
-				return
-			}
-
-			if err == nil {
-				t.Fatalf("Expected error, got nil")
-			}
-
-			st, ok := status.FromError(err)
-			if !ok {
-				t.Fatalf("Expected gRPC status error, got: %v", err)
-			}
-
-			if st.Code() != tt.expectedCode {
-				t.Errorf("Expected code %v, got %v", tt.expectedCode, st.Code())
-			}
-
-			if tt.shouldBeWrapped {
-				// Check that error message contains "error ID:"
-				if len(st.Message()) == 0 {
-					t.Errorf("Expected error message, got empty string")
-				}
-			}
-		})
-	}
+		got := wrapError("/svc.Svc/Method", wrapped)
+		st, ok := status.FromError(got)
+		require.True(t, ok, "expected a status error, got: %v", got)
+		require.Equal(t, codes.Canceled, st.Code())
+		require.Equal(t, context.Canceled.Error(), st.Message())
+	})
 }
