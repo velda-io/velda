@@ -195,13 +195,33 @@ jobs:
           name: release-bin
           path: ./bin
 
+      - name: Determine Previous Tag
+        id: determine_tag
+        run: |
+          current_version="${{ needs.build-package.outputs.version }}"
+          if [[ "$current_version" == weekly-* ]]; then
+            # Find last weekly tag
+            from_tag=$(git tag --list "weekly-*" --sort=-v:refname | grep -v "^$current_version$" | head -n 1)
+          else
+            # Find last regular tag (v*)
+            from_tag=$(git tag --list "v*" --sort=-v:refname | grep -v "^$current_version$" | head -n 1)
+          fi
+          
+          if [ -z "$from_tag" ]; then
+             echo "No previous tag found for this series. Changelog will be from the beginning."
+          else
+             echo "Previous tag: $from_tag"
+          fi
+          echo "from_tag=$from_tag" >> "$GITHUB_OUTPUT"
+
       - name: "Generate Changelog"
         id: build_changelog
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: mikepenz/release-changelog-builder-action@v4
         with:
           ignorePreReleases: "false"
           toTag: ${{ needs.build-package.outputs.version }}
+          fromTag: ${{ steps.determine_tag.outputs.from_tag }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
