@@ -1,6 +1,9 @@
 name: Build and Release
 
 on:
+  # Automated weekly release every Monday at 9:00 AM PST (17:00 UTC)
+  schedule:
+    - cron: '0 17 * * 1'
   push:
     tags:
       - 'v*.*.*'
@@ -8,13 +11,16 @@ on:
   # When triggered this way, VERSION will be set to: dev-[PR-number]-<timestamp>
   issue_comment:
     types: [created]
+  workflow_dispatch:
 
 jobs:
   build-package:
     runs-on: ubuntu-latest
-    # Only run on tag push, or when a PR comment containing `/run-release` was created.
+    # Run on tag push, schedule, or when a PR comment containing `/run-release` was created.
     if: >
+      github.event_name == 'workflow_dispatch' ||
       github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/run-release') && github.event.issue.pull_request)
     permissions:
       id-token: write
@@ -22,9 +28,12 @@ jobs:
       issues: write
     outputs:
       version: ${{ steps.set-version.outputs.version }}
+      skip_release: ${{ steps.check-changes.outputs.skip_release }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for change detection
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -35,25 +44,77 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - id: set-version
-        name: Set VERSION
+      - name: Check for changes since last release
+        id: check-changes
+        if: github.event_name == 'schedule'
         run: |
-          if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            PR_NUMBER=${{ github.event.issue.number }}
-            TS=$(date -u +%Y%m%d%H%M%S)
-            echo "version=dev-${PR_NUMBER}-${TS}" >> $GITHUB_OUTPUT
-            echo "VERSION=dev-${PR_NUMBER}-${TS}" >> $GITHUB_ENV
+          set -euo pipefail
+          
+          # Get the latest tag
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$latest_tag" ]; then
+            echo "skip_release=false" >> "$GITHUB_OUTPUT"
+            echo "No previous release found, proceeding with first release"
           else
-            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+            # Count commits since last tag
+            commit_count=$(git rev-list --count "${latest_tag}..HEAD" || echo "0")
+            
+            echo "Commits since $latest_tag: $commit_count"
+            
+            if [ "$commit_count" -eq 0 ]; then
+              echo "skip_release=true" >> "$GITHUB_OUTPUT"
+              echo "⚠️ No changes detected since last release. Skipping release creation."
+            else
+              echo "skip_release=false" >> "$GITHUB_OUTPUT"
+              echo "✅ Found $commit_count new commit(s) since last release"
+            fi
           fi
 
+      - name: Skip release (no changes)
+        if: github.event_name == 'schedule' && steps.check-changes.outputs.skip_release == 'true'
+        run: |
+          echo "::notice::No changes since last release. Skipping release creation."
+          exit 0
+
+      - id: set-version
+        name: Set VERSION
+        if: steps.check-changes.outputs.skip_release != 'true'
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # Use CalVer for automated releases: YYYY.MM.DD
+            calver_tag=$(date -u +"weekly-%Y%m%d-%H%M%S")
+            VERSION="$calver_tag"
+            echo "Generated CalVer version: $VERSION"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          elif [ "${{ github.event_name }}" = "issue_comment" ]; then
+            PR_NUMBER="${{ github.event.issue.number }}"
+            TS=$(date -u +%Y%m%d%H%M%S)
+            echo "version=dev-${PR_NUMBER}-${TS}" >> "$GITHUB_OUTPUT"
+            echo "VERSION=dev-${PR_NUMBER}-${TS}" >> "$GITHUB_ENV"
+          else
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "VERSION=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Create and push tag
+        if: github.event_name == 'schedule' && steps.check-changes.outputs.skip_release != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.set-version.outputs.version }}" -m "Release ${{ steps.set-version.outputs.version }}"
+          git push origin "refs/tags/${{ steps.set-version.outputs.version }}"
+          echo "✅ Created and pushed tag: ${{ steps.set-version.outputs.version }}"
+
       - name: Build release
+        if: steps.check-changes.outputs.skip_release != 'true'
         run: make release
         env:
           VERSION: ${{ env.VERSION }}
 
       - name: Upload build artifacts
+        if: steps.check-changes.outputs.skip_release != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: release-bin
@@ -61,6 +122,8 @@ jobs:
 
   packer-images:
     needs: build-package
+    # Skip if release was skipped
+    if: needs.build-package.outputs.skip_release != 'true' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -115,7 +178,7 @@ jobs:
           VERSION: ${{ needs.build-package.outputs.version }}
 
   create-release:
-    if: github.event_name == 'push'
+    if: (github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'schedule') && needs.build-package.outputs.skip_release != 'true'
     needs: [build-package, packer-images]
     runs-on: ubuntu-latest
     permissions:
@@ -123,6 +186,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download build artifacts
         uses: actions/download-artifact@v5
@@ -130,17 +195,46 @@ jobs:
           name: release-bin
           path: ./bin
 
+      - name: Determine Previous Tag
+        id: determine_tag
+        run: |
+          current_version="${{ needs.build-package.outputs.version }}"
+          if [[ "$current_version" == weekly-* ]]; then
+            # Find last weekly tag
+            from_tag=$(git tag --list "weekly-*" --sort=-v:refname | grep -v "^$current_version$" | head -n 1)
+          else
+            # Find last regular tag (v*)
+            from_tag=$(git tag --list "v*" --sort=-v:refname | grep -v "^$current_version$" | head -n 1)
+          fi
+          
+          if [ -z "$from_tag" ]; then
+             echo "No previous tag found for this series. Changelog will be from the beginning."
+          else
+             echo "Previous tag: $from_tag"
+          fi
+          echo "from_tag=$from_tag" >> "$GITHUB_OUTPUT"
+
+      - name: "Generate Changelog"
+        id: build_changelog
+        if: github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          ignorePreReleases: "false"
+          toTag: ${{ needs.build-package.outputs.version }}
+          fromTag: ${{ steps.determine_tag.outputs.from_tag }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        if: github.event_name != 'schedule' || steps.build_changelog.outputs.changelog != ''
         with:
           files: |
             bin/*
           tag_name: ${{ needs.build-package.outputs.version }}
           name: Release ${{ needs.build-package.outputs.version }}
           body: |
-            **Tag:** ${{ needs.build-package.outputs.version }}
-            **Commit:** ${{ github.sha }}
-          draft: true
-          prerelease: false
+            ${{ github.event_name == 'schedule' && steps.build_changelog.outputs.changelog || format('**Tag:** {0}\n**Commit:** {1}', needs.build-package.outputs.version, github.sha) }}
+          draft: ${{ github.event_name != 'schedule' }}
+          prerelease: ${{ github.event_name == 'schedule' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
