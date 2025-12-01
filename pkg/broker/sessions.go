@@ -95,7 +95,7 @@ type Session struct {
 
 	tags map[string]string
 
-	quotaGrant     *QuotaGrant
+	quotaGrant     QuotaGrant
 	quotaCheckDone chan struct{}
 }
 
@@ -222,7 +222,6 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 			nextState = schedulingStateQueueing
 			// Check quota when session is being scheduled
 			if err := s.checkQuota(ctx); err != nil {
-				log.Printf("Failed to check quota for session %s during scheduling: %v", s.id, err)
 				s.schedulingErr = fmt.Errorf("quota check failed: %w", err)
 				s.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_NO_QUOTA)
 				return
@@ -606,7 +605,7 @@ func (s *Session) startQuotaMonitoring() {
 				return
 			}
 			select {
-			case <-time.After(newGrant.NextCheck):
+			case <-time.After(newGrant.NextCheck()):
 			case <-s.quotaCheckDone:
 				return
 			}

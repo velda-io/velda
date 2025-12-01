@@ -380,6 +380,10 @@ func (a *Agent) handleSessionCompletion(ctx context.Context, resp *proto.Session
 		return nil
 	}
 	ctx = rbac.ContextWithUser(ctx, session.user)
+	err := a.delegate.RevokeAccessToAgent(ctx, a, session)
+	if err != nil {
+		return fmt.Errorf("failed to revoke access to agent %s for session %s: %w", a.id, sessionKey, err)
+	}
 	if resp.Checkpointed {
 		delete(a.mySessions, sessionKey)
 		session.Checkpointed()
@@ -399,10 +403,6 @@ func (a *Agent) handleSessionCompletion(ctx context.Context, resp *proto.Session
 		a.scheduler.AddAgent(a)
 		a.scheduler.PoolManager.MarkIdle(a.id, a.slots-len(a.mySessions))
 		a.receiving = true
-	}
-	err := a.delegate.RevokeAccessToAgent(ctx, a, session)
-	if err != nil {
-		return fmt.Errorf("failed to revoke access to agent %s for session %s: %w", a.id, sessionKey, err)
 	}
 	return nil
 }

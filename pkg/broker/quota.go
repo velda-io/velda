@@ -18,33 +18,29 @@ import (
 	"time"
 )
 
-// QuotaGrant represents an allocated quota for a session.
-type QuotaGrant struct {
-	// NextCheck indicates when the next quota check should occur.
-	NextCheck time.Duration
-	// TotalGranted is the total duration of quota granted for this grant.
-	TotalGranted time.Duration
-	// Pool this grant is for
-	Pool string
-	// GrantID is a unique identifier for this grant
-	GrantID string
-	// BalanceDeducted is the amount deducted from quota, in implementation-specific units.
-	BalanceDeducted int64
+type QuotaChecker interface {
+	// Quota management methods
+	GrantQuota(ctx context.Context, pool string, previousGrant QuotaGrant, totalConsumedTime time.Duration) (QuotaGrant, error)
+	ReturnQuota(ctx context.Context, grant QuotaGrant, actualUsageDuration time.Duration) error
+}
+
+type QuotaGrant interface {
+	NextCheck() time.Duration
+}
+
+type alwaysValidQuotaGrant struct{}
+
+func (g *alwaysValidQuotaGrant) NextCheck() time.Duration {
+	return 1 * time.Hour
 }
 
 // AlwaysAllowQuotaChecker is the OSS dummy implementation that always permits actions.
 type AlwaysAllowQuotaChecker struct{}
 
-func (a *AlwaysAllowQuotaChecker) GrantQuota(ctx context.Context, pool string, previousGrant *QuotaGrant, totalConsumedTime time.Duration) (*QuotaGrant, error) {
-	return &QuotaGrant{
-		NextCheck:       1 * time.Hour,
-		TotalGranted:    1 * time.Hour,
-		Pool:            pool,
-		BalanceDeducted: 0,
-		GrantID:         "unlimited",
-	}, nil
+func (a *AlwaysAllowQuotaChecker) GrantQuota(ctx context.Context, pool string, previousGrant QuotaGrant, totalConsumedTime time.Duration) (QuotaGrant, error) {
+	return &alwaysValidQuotaGrant{}, nil
 }
 
-func (a *AlwaysAllowQuotaChecker) ReturnQuota(ctx context.Context, grant *QuotaGrant, actualUsageDuration time.Duration) error {
+func (a *AlwaysAllowQuotaChecker) ReturnQuota(ctx context.Context, grant QuotaGrant, actualUsageDuration time.Duration) error {
 	return nil
 }
