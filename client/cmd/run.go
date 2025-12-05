@@ -16,7 +16,6 @@ package cmd
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -151,9 +150,6 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 
 	batch, _ := cmd.Flags().GetBool("batch")
 	if batch {
-		if !clientlib.IsInSession() {
-			return errors.New("Batch mode is only available in Velda session")
-		}
 		workload, err := getWorkload(cmd, args)
 		if err != nil {
 			return err
@@ -209,7 +205,7 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 			}
 		}
 
-		if !quiet && clientlib.GetAgentConfig().TaskId == "" && clientlib.GetAgentConfig().GetBroker().GetPublicAddress() != "" {
+		if !quiet && clientlib.GetAgentConfig().GetTaskId() == "" && clientlib.GetAgentConfig().GetBroker().GetPublicAddress() != "" {
 			publicAddr := clientlib.GetAgentConfig().GetBroker().GetPublicAddress()
 			taskUrl := fmt.Sprintf("%s/tasks/%s", publicAddr, taskId)
 			cmd.PrintErrf("Track task at %s\n", taskUrl)
@@ -338,60 +334,91 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 }
 
 func getWorkload(cmd *cobra.Command, args []string) (*proto.Workload, error) {
-	cwd, _ := cmd.Flags().GetString("directory")
-	if cwd == "" {
-		workingDir, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("Error getting working directory: %v", err)
+	if clientlib.IsInSession() {
+		cwd, _ := cmd.Flags().GetString("directory")
+		if cwd == "" && clientlib.IsInSession() {
+			workingDir, err := os.Getwd()
+			if err != nil {
+				return nil, fmt.Errorf("Error getting working directory: %v", err)
+			}
+			cwd = workingDir
 		}
-		cwd = workingDir
-	}
-	shell, _ := cmd.Flags().GetBool("shell")
-	var command string
-	var argv []string
-	if shell {
-		command = strings.Join(args, " ")
-		argv = []string{}
-	} else {
-		command = args[0]
-		argv = args[1:]
-	}
-	uid := syscall.Getuid()
-	gid := syscall.Getgid()
-	groups, err := syscall.Getgroups()
-	if err != nil {
-		log.Printf("Error getting groups: %v", err)
-		// Fallback to empty groups
-	}
-	groupsUint32 := make([]uint32, 0, len(groups))
-	for _, group := range groups {
-		groupsUint32 = append(groupsUint32, uint32(group))
-	}
-	environs := os.Environ()
-	environs = append(environs, clientlib.RemoveLocalEnvs()...)
-	commandPath, err := exec.LookPath(command)
-	if err != nil {
-		return nil, fmt.Errorf("Error finding command path: %v", err)
-	}
-	shards, _ := cmd.Flags().GetInt32("total-shards")
-	gang, _ := cmd.Flags().GetBool("gang")
-	shardMode := proto.Workload_SHARD_SCHEDULING_UNSPECIFIED
-	if gang {
-		shardMode = proto.Workload_SHARD_SCHEDULING_GANG
-	}
+		shell, _ := cmd.Flags().GetBool("shell")
+		var command string
+		var argv []string
+		if shell {
+			command = strings.Join(args, " ")
+			argv = []string{}
+		} else {
+			command = args[0]
+			argv = args[1:]
+		}
+		uid := syscall.Getuid()
+		gid := syscall.Getgid()
+		groups, err := syscall.Getgroups()
+		if err != nil {
+			log.Printf("Error getting groups: %v", err)
+			// Fallback to empty groups
+		}
+		groupsUint32 := make([]uint32, 0, len(groups))
+		for _, group := range groups {
+			groupsUint32 = append(groupsUint32, uint32(group))
+		}
 
+		// Determine environment handling based on context
+		var environs []string
+
+		shards, _ := cmd.Flags().GetInt32("total-shards")
+		gang, _ := cmd.Flags().GetBool("gang")
+		shardMode := proto.Workload_SHARD_SCHEDULING_UNSPECIFIED
+		if gang {
+			shardMode = proto.Workload_SHARD_SCHEDULING_GANG
+		}
+		// In session or non-batch: use current environment
+		environs = os.Environ()
+		environs = append(environs, clientlib.RemoveLocalEnvs()...)
+		commandPath, err := exec.LookPath(command)
+		if err != nil {
+			return nil, fmt.Errorf("Error finding command path: %v", err)
+		}
+		return &proto.Workload{
+			Command:         command,
+			CommandPath:     commandPath,
+			Args:            argv,
+			WorkingDir:      cwd,
+			Environs:        environs,
+			Shell:           shell,
+			Uid:             uint32(uid),
+			Gid:             uint32(gid),
+			Groups:          groupsUint32,
+			TotalShards:     shards,
+			ShardScheduling: shardMode,
+		}, nil
+	}
+	workingDir := cmd.Flag("directory").Value.String()
+
+	envFlags, _ := cmd.Flags().GetStringSlice("env")
+	environs := make([]string, 0, len(envFlags))
+
+	for _, envSpec := range envFlags {
+		parts := strings.SplitN(envSpec, "=", 2)
+		if len(parts) == 1 {
+			// KEY form - use current system value
+			if value, ok := os.LookupEnv(parts[0]); ok {
+				environs = append(environs, fmt.Sprintf("%s=%s", parts[0], value))
+			}
+		} else {
+			// KEY=VALUE form
+			environs = append(environs, envSpec)
+		}
+	}
+	loginUser := cmd.Flag("user").Value.String()
 	return &proto.Workload{
-		Command:         command,
-		CommandPath:     commandPath,
-		Args:            argv,
-		WorkingDir:      cwd,
-		Environs:        environs,
-		Shell:           shell,
-		Uid:             uint32(uid),
-		Gid:             uint32(gid),
-		Groups:          groupsUint32,
-		TotalShards:     shards,
-		ShardScheduling: shardMode,
+		Command:    args[0],
+		Args:       args[1:],
+		WorkingDir: workingDir,
+		Environs:   environs,
+		LoginUser:  loginUser,
 	}, nil
 }
 
@@ -458,6 +485,7 @@ func init() {
 	runCmd.Flags().Int64("priority", 0, "Priority of the task. Lower number means higher priority.")
 	runCmd.Flags().Bool("gang", false, "Enable gang scheduling for the task. Ignored if total shard is 0")
 	runCmd.Flags().Duration("keep-alive-time", 0, "How long to keep the session alive after all connections are closed. Default to 0, which means no keep-alive.")
+	runCmd.Flags().StringSliceP("env", "e", nil, "Environment variables to pass to the batch job in KEY=VALUE or KEY form. If VALUE is omitted, use current system value. Only valid for batch mode outside of session.")
 	runCmd.Flags().SetInterspersed(false)
 }
 

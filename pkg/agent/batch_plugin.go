@@ -77,20 +77,8 @@ func (p *BatchPlugin) Run(ctx context.Context) error {
 
 func (p *BatchPlugin) start(sessionReq *proto.SessionRequest) (*exec.Cmd, error) {
 	workload := sessionReq.Workload
-	commandPath := workload.CommandPath
-	if commandPath == "" {
-		commandPath = workload.Command
-	}
-	if strings.Contains(commandPath, "/") && commandPath[0] != '/' {
-		// Convert to absolute dir first, because current working dir can be different.
-		commandPath = filepath.Join(workload.WorkingDir, workload.Command)
-	}
-	commandPath, err := exec.LookPath(commandPath)
-	if err != nil {
-		return nil, fmt.Errorf("Command not found in PATH: %w", err)
-	}
 	taskId := sessionReq.TaskId
-	err = os.MkdirAll(fmt.Sprintf("/.velda_tasks/%s", filepath.Dir(taskId)), 0755)
+	err := os.MkdirAll(fmt.Sprintf("/.velda_tasks/%s", filepath.Dir(taskId)), 0755)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create task directories %s: %w", taskId, err)
 	}
@@ -106,18 +94,56 @@ func (p *BatchPlugin) start(sessionReq *proto.SessionRequest) (*exec.Cmd, error)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to open stderr file %s: %w", taskId, err)
 	}
+	var user *User
+	if workload.LoginUser != "" {
+		// If a login user is specified, look up that user and use their environment
+		user, err = LookupUser(workload.LoginUser)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to lookup user %s: %w", workload.LoginUser, err)
+		}
+		if workload.WorkingDir == "" {
+			workload.WorkingDir = user.HomeDir
+		}
+	}
+	commandPath := workload.CommandPath
+	if commandPath == "" {
+		commandPath = workload.Command
+	}
+	if strings.Contains(commandPath, "/") && commandPath[0] != '/' {
+		// Convert to absolute dir first, because current working dir can be different.
+		commandPath = filepath.Join(workload.WorkingDir, workload.Command)
+	}
+	commandPath, err = exec.LookPath(commandPath)
+	if err != nil {
+		return nil, fmt.Errorf("Command not found in PATH: %w", err)
+	}
 	cmd := exec.Command(commandPath, workload.Args...)
 	cmd.Dir = workload.WorkingDir
 	cmd.Env = workload.Environs
-	cmd.Stdin = stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{
+	// Determine user credentials and environment
+	var credential *syscall.Credential
+	if user != nil {
+		credential = user.Credential
+		// Update working directory if using user home directory
+		// Load default environment and append explicit environs
+		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, workload.Environs...)
+	} else {
+		// Use credentials from workload
+		credential = &syscall.Credential{
 			Uid:    workload.Uid,
 			Gid:    workload.Gid,
 			Groups: workload.Groups,
-		},
+		}
+		cmd.Env = workload.Environs
+	}
+
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: credential,
 	}
 	if p.commandModifier != nil {
 		p.commandModifier(cmd)

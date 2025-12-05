@@ -43,7 +43,7 @@ message Workload {
 
   // For multi-shard jobs, these fields are used to specify the shard
   // configuration.
-  
+
   // Total number of shards.
   int32 total_shards = 10;
   enum ShardScheduling {
@@ -58,6 +58,10 @@ message Workload {
   // 0-based index of the current shard.
   // -1 is used for parent group.
   int32 shard_index = 12;
+
+  // If set, will ignore uid/gid/groups and initialize the environment with
+  // the default environment variables of the user.
+  string login_user = 13;
 }
 
 message BatchTaskResult {
