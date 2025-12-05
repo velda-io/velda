@@ -14,7 +14,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -24,7 +23,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -237,146 +235,7 @@ func (s *SSHD) Shutdown(message string) {
 }
 
 func (s *SSHD) lookupUser(username string) (*User, error) {
-	// Provide fallback for root user, e.g. unsupported or uninitialized OS.
-	user, err := s.lookupUserPosix(username)
-	if err != nil && username == "root" {
-		return &User{
-			UserName: "root",
-			Name:     "root",
-			HomeDir:  "/",
-			Shell:    "/bin/bash",
-			Credential: &syscall.Credential{
-				Uid:    0,
-				Gid:    0,
-				Groups: []uint32{0},
-			},
-		}, nil
-	}
-	return user, err
-}
-
-func (s *SSHD) lookupUserPosix(username string) (*User, error) {
-	user, err := s.lookupUserInfo(username)
-	if err != nil {
-		return nil, err
-	}
-
-	groupCmd := exec.Command("id", "-G", username)
-	output, err := groupCmd.Output()
-	var groups []uint32
-	if err == nil {
-		groupstr := strings.Split(strings.Trim(string(output), "\n"), " ")
-		for _, g := range groupstr {
-			gid, err := strconv.Atoi(g)
-			if err != nil {
-				return nil, fmt.Errorf("Failed to parse group id: %w", err)
-			}
-			groups = append(groups, uint32(gid))
-		}
-	} else {
-		// Try to parse /etc/group
-		groupfile, err := os.ReadFile("/etc/group")
-		if err != nil {
-			return nil, fmt.Errorf("Failed to read /etc/group: %w", err)
-		}
-		groupstr := strings.Split(string(groupfile), "\n")
-		for _, g := range groupstr {
-			componenets := strings.Split(g, ":")
-			if len(componenets) < 4 {
-				log.Printf("Invalid group entry: %s", g)
-				continue
-			}
-			members := strings.Split(componenets[3], ",")
-			for _, m := range members {
-				if m == username {
-					groupId, err := strconv.Atoi(componenets[2])
-					if err != nil {
-						return nil, fmt.Errorf("Failed to parse group id: %w", err)
-					}
-					groups = append(groups, uint32(groupId))
-					break
-				}
-			}
-		}
-	}
-	uid, err := strconv.Atoi(user.Uid)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to parse user id: %w", err)
-	}
-	gid, err := strconv.Atoi(user.Gid)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to parse group id: %w", err)
-	}
-	if len(groups) == 0 {
-		groups = append(groups, uint32(gid))
-	}
-	user.Credential = &syscall.Credential{
-		Uid:    uint32(uid),
-		Gid:    uint32(gid),
-		Groups: groups,
-	}
-	return user, nil
-}
-
-func (s *SSHD) lookupUserInfo(username string) (*User, error) {
-	// First, try to use "getent" command to lookup the user.
-	user := &User{}
-	cmd := exec.Command("getent", "passwd", username)
-	output, err := cmd.Output()
-	if err == nil {
-		if err := user.FromString(string(output)); err != nil {
-			log.Printf("Failed to parse user info from getent: %v", err)
-		} else {
-			return user, nil
-		}
-	}
-
-	// If getent failed, tyr to parse from "/etc/passwd".
-	file, err := os.Open("/etc/passwd")
-	if err != nil {
-		return nil, fmt.Errorf("Failed to open /etc/passwd: %w", err)
-	}
-	defer file.Close()
-	reader := bufio.NewReader(file)
-	for {
-		line, err := reader.ReadString('\n')
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("Failed to read /etc/passwd: %w", err)
-		}
-		if strings.HasPrefix(line, username+":") {
-			if err := user.FromString(line); err != nil {
-				return nil, fmt.Errorf("Failed to parse user info: %w", err)
-			}
-			return user, nil
-		}
-	}
-
-	return nil, fmt.Errorf("User not found: %s", username)
-}
-
-func (s *sshSession) loadDefaultEnv() []string {
-	envfile, err := os.ReadFile("/etc/environment")
-	result := []string{}
-	if err != nil {
-		return result
-	}
-
-	lines := strings.Split(string(envfile), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		value := strings.Trim(parts[1], "\"")
-		result = append(result, fmt.Sprintf("%s=%s", parts[0], value))
-	}
-	return result
+	return LookupUser(username)
 }
 
 func (s *SSHD) handleChannels(chans <-chan ssh.NewChannel, user *User) {
@@ -621,7 +480,7 @@ func (s *sshSession) handleShell(channel ssh.Channel, req *ssh.Request) {
 	cmd := exec.Command(s.user.Shell)
 	// Make it a login shell.
 	cmd.Args = []string{"-" + path.Base(s.user.Shell)}
-	cmd.Env = s.loadDefaultEnv()
+	cmd.Env = os.Environ()
 	cmd.Dir = s.user.HomeDir
 	for k, v := range s.envVars {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
@@ -686,7 +545,7 @@ func (s *sshSession) handleExec(channel ssh.Channel, req *ssh.Request) {
 	log.Printf("Command execution requested: %s", cmd)
 	// Execute the command
 	command := exec.Command(s.user.Shell, "-c", cmd)
-	command.Env = s.loadDefaultEnv()
+	command.Env = os.Environ()
 	command.Dir = s.user.HomeDir
 	for k, v := range s.envVars {
 		command.Env = append(command.Env, fmt.Sprintf("%s=%s", k, v))
@@ -702,7 +561,7 @@ func (s *sshSession) handleSftpSubsystem(channel ssh.Channel, req *ssh.Request) 
 	executable := "/run/velda/velda"
 	cmd := exec.Command(executable, "agent", "sftp")
 	// Make it a login shell.
-	cmd.Env = s.loadDefaultEnv()
+	cmd.Env = os.Environ()
 	cmd.Dir = s.user.HomeDir
 	for k, v := range s.envVars {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))

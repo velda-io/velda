@@ -36,6 +36,9 @@ func testBatch(t *testing.T, r Runner) {
 	runCommandGetOutput := func(args ...string) (string, error) {
 		return runVeldaWithOutput(append([]string{"run", "--instance", instanceName, "-s", ""}, args...)...)
 	}
+	runBatchJob := func(args ...string) (string, error) {
+		return runVeldaWithOutput(append([]string{"run", "--batch", "--instance", instanceName, "-s", ""}, args...)...)
+	}
 	runCommand := func(args ...string) error {
 		return runVelda(append([]string{"run", "--instance", instanceName, "-s", ""}, args...)...)
 	}
@@ -77,7 +80,7 @@ EOF
 chmod +x script-log.sh
 `))
 
-		taskId, err := runCommandGetOutput("vbatch", "./script-log.sh")
+		taskId, err := runBatchJob("./script-log.sh")
 		taskId = strings.TrimSpace(taskId)
 		require.NoError(t, err)
 		// Wait until the job is finished
@@ -104,7 +107,7 @@ EOF
 chmod +x script-log-follow.sh
 `))
 
-		taskId, err := runCommandGetOutput("vbatch", "./script-log-follow.sh")
+		taskId, err := runBatchJob("./script-log-follow.sh")
 		require.NoError(t, err)
 		taskId = strings.TrimSpace(taskId)
 		// Wait until the job is finished
@@ -127,7 +130,7 @@ EOF
 chmod +x script-log-follow.sh
 `))
 
-		output, err := runCommandGetOutput("vbatch", "-f", "./script-log-follow.sh")
+		output, err := runBatchJob("-f", "./script-log-follow.sh")
 		require.NoError(t, err, "Failed to get logs with err", output)
 		lines := strings.Split(strings.TrimSpace(output), "\n")
 		assert.GreaterOrEqual(t, len(lines), 5, "Expect at least 5 lines of output")

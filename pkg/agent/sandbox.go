@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strings"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -202,7 +203,35 @@ func (p *PivotRootPlugin) Run(ctx context.Context) error {
 			log.Printf("Failed start mount -a -O nolazy: %v", err)
 		}
 	}
+	os.Clearenv()
+	err := setDefaultEnv()
+	if err != nil {
+		log.Printf("Failed to load default env: %v", err)
+	}
 	return p.RunNext(ctx)
+}
+
+func setDefaultEnv() error {
+	envfile, err := os.ReadFile("/etc/environment")
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(envfile), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		value := strings.Trim(parts[1], "\"")
+		if err := os.Setenv(parts[0], value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func NewLinuxNamespacePlugin(workspaceDir string, sandboxConfig *agentpb.SandboxConfig, requestPlugin interface{}) *LinuxNamespacePlugin {
