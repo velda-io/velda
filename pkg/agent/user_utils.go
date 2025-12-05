@@ -82,7 +82,7 @@ func lookupUserPosix(username string) (*User, error) {
 			members := strings.Split(componenets[3], ",")
 			for _, m := range members {
 				if m == username {
-					groupId, err := strconv.Atoi(componenets[2])
+					groupId, err := strconv.ParseUint(componenets[2], 10, 32)
 					if err != nil {
 						return nil, fmt.Errorf("Failed to parse group id: %w", err)
 					}
@@ -92,11 +92,11 @@ func lookupUserPosix(username string) (*User, error) {
 			}
 		}
 	}
-	uid, err := strconv.Atoi(user.Uid)
+	uid, err := strconv.ParseUint(user.Uid, 10, 32)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to parse user id: %w", err)
 	}
-	gid, err := strconv.Atoi(user.Gid)
+	gid, err := strconv.ParseUint(user.Gid, 10, 32)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to parse group id: %w", err)
 	}
