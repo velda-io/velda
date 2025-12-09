@@ -24,6 +24,7 @@ import (
 )
 
 var veldaDebug = flag.Bool("debug", false, "Enable debug mode for Velda commands")
+var streamCmdErr = flag.Bool("stream-cmd-err", false, "Stream command stderr to test output")
 
 func runVelda(args ...string) error {
 	out, stderr, err := runVeldaWithOutErr(args...)
@@ -69,7 +70,11 @@ func runVeldaWithOutErr(args ...string) (string, string, error) {
 		return "", "", err
 	}
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	if *streamCmdErr {
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stderr = &stderr
+	}
 	output, err := cmd.Output()
 	return string(output), stderr.String(), err
 }
