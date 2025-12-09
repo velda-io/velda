@@ -37,6 +37,11 @@ func RunAllTests(t *testing.T, runner Runner) {
 		}
 		testUbuntu(t, runner)
 	})
+
+	// Instance from docker image
+	t.Run("InstanceFromDocker", func(t *testing.T) {
+		testInstanceFromDocker(t, runner)
+	})
 	t.Run("Batch", func(t *testing.T) {
 		testBatch(t, runner)
 	})

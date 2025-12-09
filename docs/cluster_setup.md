@@ -36,10 +36,13 @@ agent_pools:
 - name: shell
 ```
 
-4. Initialize a default image. [This script](/misc/init_instance_from_docker.sh) will initialize an instance image from a Docker image.
+4. Initialize a default image. You can create an instance from a Docker image directly using the `velda` CLI.
+
+From a Docker image (requires Docker available where you run this command):
 ```bash
-./misc/init_instance_from_docker.sh veldaio/ubuntu:24.04 ubuntu_24
+velda instance create ubuntu_24 --docker-image ubuntu:24.04
 ```
+
 New images can be created from any existing instance.
 
 5. Start the API server
@@ -107,8 +110,11 @@ velda init --broker=${APISERVER}:50051
 
 4. Create an empty instance, and initialize it with a container image:
 ```bash
-velda instance create first-instance
-./misc/init_instance_from_docker.sh ubuntu:24.04 first-instance
+# Create an instance and populate it from a Docker image
+velda instance create first-instance --docker-image ubuntu:24.04
+
+# Or, if you have an exported tar filesystem, import it instead
+velda instance create first-instance --tar-file /path/to/ubuntu-24.04.tar
 ```
 Most images do not have development dependencies installed. To add some basic dependencies:
 ```bash
