@@ -15,13 +15,13 @@ debug-deps:
 
 RELEASE_FLAGS = -p $(shell nproc) --tags "${TAGS}" -ldflags "-X velda.io/velda.Version=${VERSION_V}"
 release-mini:
-	GOOS=linux GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-amd64 ./client
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-amd64 ./client
 
 release:
-	GOOS=linux GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-amd64 ./client
-	GOOS=linux GOARCH=arm64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-arm64 ./client
-	GOOS=darwin GOARCH=arm64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-darwin-arm64 ./client
-	GOOS=darwin GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-darwin-amd64 ./client
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-amd64 ./client
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-arm64 ./client
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-darwin-arm64 ./client
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-darwin-amd64 ./client
 
 format:
 	go fmt ./...
