@@ -21,6 +21,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/pkg/sftp"
 	"github.com/spf13/cobra"
@@ -61,6 +63,9 @@ func streamDockerImageToSftp(cmd *cobra.Command, containerID string, sftpClient 
 
 	// Delegate tar parsing and sftp writes to the generic tar reader helper
 	if err := streamTarReaderToSftp(cmd, pipe, sftpClient, verbose, quiet); err != nil {
+		if err != nil {
+			exportCmd.Process.Kill()
+		}
 		exportCmd.Wait()
 		if exportStderr.Len() > 0 {
 			cmd.ErrOrStderr().Write(exportStderr.Bytes())
@@ -80,8 +85,52 @@ func streamDockerImageToSftp(cmd *cobra.Command, containerID string, sftpClient 
 
 // streamTarReaderToSftp parses a tar stream from r and writes entries to sftpClient.
 // It preserves mode, ownership and times where possible.
+// File uploads are processed concurrently (up to 128 files), while mkdir operations are synchronous.
 func streamTarReaderToSftp(cmd *cobra.Command, r io.Reader, sftpClient *sftp.Client, verbose, quiet bool) error {
+	const maxConcurrentUploads = 128
+
 	tr := tar.NewReader(r)
+
+	// Semaphore to limit concurrent uploads
+	sem := make(chan struct{}, maxConcurrentUploads)
+	var wg sync.WaitGroup
+	var uploadErr error
+	var uploadErrMu sync.Mutex
+
+	// Helper function to wait for all pending uploads
+	waitForUploads := func() error {
+		wg.Wait()
+		uploadErrMu.Lock()
+		defer uploadErrMu.Unlock()
+		return uploadErr
+	}
+
+	runAsync := func(f func() error) {
+		sem <- struct{}{} // Acquire semaphore
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }() // Release semaphore
+
+			// Check if there was a previous error
+			uploadErrMu.Lock()
+			if uploadErr != nil {
+				uploadErrMu.Unlock()
+				return
+			}
+			uploadErrMu.Unlock()
+			err := f()
+			if err != nil {
+				uploadErrMu.Lock()
+				if uploadErr == nil {
+					uploadErr = err
+				}
+				uploadErrMu.Unlock()
+			}
+		}()
+	}
+
+	dirs := make(map[string]chan struct{})
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -97,69 +146,97 @@ func streamTarReaderToSftp(cmd *cobra.Command, r io.Reader, sftpClient *sftp.Cli
 		}
 		remotePath := filepath.Join("/", filepath.FromSlash(name))
 
+		// Ensure parent directory exists
+		dir := filepath.Dir(remotePath)
+		ch := dirs[dir]
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := sftpClient.MkdirAll(remotePath); err != nil {
-				return fmt.Errorf("failed to create remote directory %s: %v", remotePath, err)
-			}
-			if err := sftpClient.Chmod(remotePath, os.FileMode(hdr.Mode)); err != nil {
-				if !quiet {
-					cmd.Printf("Warning: failed to set mode for %s: %v\n", remotePath, err)
+			mych := make(chan struct{})
+			dirs[remotePath] = mych
+			runAsync(func() error {
+				defer close(mych)
+				if ch != nil {
+					<-ch
 				}
-			}
-			if err := sftpClient.Chtimes(remotePath, hdr.ModTime, hdr.ModTime); err != nil {
-				if !quiet {
-					cmd.Printf("Warning: failed to set times for %s: %v\n", remotePath, err)
+				if err := sftpClient.Mkdir(remotePath); err != nil && !strings.Contains(err.Error(), "file exists") {
+					return fmt.Errorf("failed to create remote directory %s: %v", remotePath, err)
 				}
-			}
-			if err := sftpClient.Chown(remotePath, hdr.Uid, hdr.Gid); err != nil {
-				if !quiet {
-					cmd.Printf("Warning: failed to set ownership for %s: %v\n", remotePath, err)
+				if err := sftpClient.Chmod(remotePath, os.FileMode(hdr.Mode)); err != nil {
+					return fmt.Errorf("failed to set mode for %s: %v", remotePath, err)
 				}
-			}
-			if verbose && !quiet {
-				cmd.Printf("Created directory: %s\n", remotePath)
-			}
+				if err := sftpClient.Chown(remotePath, hdr.Uid, hdr.Gid); err != nil {
+					return fmt.Errorf("failed to set ownership for %s: %v", remotePath, err)
+				}
+				if verbose && !quiet {
+					cmd.Printf("Created directory: %s\n", remotePath)
+				}
+				return nil
+			})
 
 		case tar.TypeSymlink:
-			if err := sftpClient.Symlink(hdr.Linkname, remotePath); err != nil {
-				return fmt.Errorf("failed to create symlink %s -> %s: %v", remotePath, hdr.Linkname, err)
-			}
-			if verbose && !quiet {
-				cmd.Printf("Created symlink: %s -> %s\n", remotePath, hdr.Linkname)
-			}
+			runAsync(func() error {
+				if ch != nil {
+					<-ch
+				}
+				if err := sftpClient.Symlink(hdr.Linkname, remotePath); err != nil {
+					return fmt.Errorf("failed to create symlink %s -> %s: %v", remotePath, hdr.Linkname, err)
+				}
+				if verbose && !quiet {
+					cmd.Printf("Created symlink: %s -> %s\n", remotePath, hdr.Linkname)
+				}
+				return nil
+			})
+		case tar.TypeLink:
+			// We treat hard link as symlink for now, the SFTP-go server may not support hard links
+
+			runAsync(func() error {
+				if ch != nil {
+					<-ch
+				}
+				if err := sftpClient.Symlink("/"+hdr.Linkname, remotePath); err != nil {
+					return fmt.Errorf("failed to create hard link %s -> %s: %v", remotePath, hdr.Linkname, err)
+				}
+				if verbose && !quiet {
+					cmd.Printf("Created hard link: %s -> %s\n", remotePath, hdr.Linkname)
+				}
+				return nil
+			})
 
 		case tar.TypeReg, tar.TypeRegA:
-			if err := sftpClient.MkdirAll(filepath.Dir(remotePath)); err != nil {
-				return fmt.Errorf("failed to create parent dir for %s: %v", remotePath, err)
+			// Read file data into memory
+			data := make([]byte, hdr.Size)
+			if _, err := io.ReadFull(tr, data); err != nil {
+				return fmt.Errorf("failed to read file contents for %s: %v", remotePath, err)
 			}
-			rf, err := sftpClient.OpenFile(remotePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
-			if err != nil {
-				return fmt.Errorf("failed to create remote file %s: %v", remotePath, err)
-			}
-			if _, err := io.CopyN(rf, tr, hdr.Size); err != nil {
+
+			runAsync(func() error {
+				if ch != nil {
+					<-ch
+				}
+				rf, err := sftpClient.OpenFile(remotePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+				if err != nil {
+					return fmt.Errorf("failed to create remote file %s: %v", remotePath, err)
+				}
+
+				if _, err := rf.Write(data); err != nil {
+					rf.Close()
+					return fmt.Errorf("failed to copy file contents for %s: %v", remotePath, err)
+				}
 				rf.Close()
-				return fmt.Errorf("failed to copy file contents for %s: %v", remotePath, err)
-			}
-			rf.Close()
-			if err := sftpClient.Chmod(remotePath, os.FileMode(hdr.Mode)); err != nil {
-				if !quiet {
-					cmd.Printf("Warning: failed to set mode for %s: %v\n", remotePath, err)
+
+				if err := sftpClient.Chmod(remotePath, os.FileMode(hdr.Mode)); err != nil {
+					return fmt.Errorf("failed to set mode for %s: %v", remotePath, err)
 				}
-			}
-			if err := sftpClient.Chtimes(remotePath, hdr.ModTime, hdr.ModTime); err != nil {
-				if !quiet {
-					cmd.Printf("Warning: failed to set times for %s: %v\n", remotePath, err)
+
+				if err := sftpClient.Chown(remotePath, hdr.Uid, hdr.Gid); err != nil {
+					return fmt.Errorf("failed to set ownership for %s: %v", remotePath, err)
 				}
-			}
-			if err := sftpClient.Chown(remotePath, hdr.Uid, hdr.Gid); err != nil {
-				if !quiet {
-					cmd.Printf("Warning: failed to set ownership for %s: %v\n", remotePath, err)
+
+				if verbose && !quiet {
+					cmd.Printf("Copied: %s\n", remotePath)
 				}
-			}
-			if verbose && !quiet {
-				cmd.Printf("Copied: %s\n", remotePath)
-			}
+				return nil
+			})
 
 		default:
 			if verbose && !quiet {
@@ -167,7 +244,9 @@ func streamTarReaderToSftp(cmd *cobra.Command, r io.Reader, sftpClient *sftp.Cli
 			}
 		}
 	}
-	return nil
+
+	// Wait for all remaining uploads to complete
+	return waitForUploads()
 }
 
 // runInitScript runs the initialization script on an instance using
