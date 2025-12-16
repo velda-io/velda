@@ -158,19 +158,14 @@ func streamTarReaderToSftp(cmd *cobra.Command, r io.Reader, sftpClient *sftp.Cli
 				if ch != nil {
 					<-ch
 				}
-				// Mkdir is synchronous to ensure directories exist before files are created within them
 				if err := sftpClient.Mkdir(remotePath); err != nil && !strings.Contains(err.Error(), "file exists") {
 					return fmt.Errorf("failed to create remote directory %s: %v", remotePath, err)
 				}
-				if os.FileMode(hdr.Mode)&(os.ModePerm|os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0755 {
-					if err := sftpClient.Chmod(remotePath, os.FileMode(hdr.Mode)); err != nil {
-						return fmt.Errorf("failed to set mode for %s: %v", remotePath, err)
-					}
+				if err := sftpClient.Chmod(remotePath, os.FileMode(hdr.Mode)); err != nil {
+					return fmt.Errorf("failed to set mode for %s: %v", remotePath, err)
 				}
-				if hdr.Uid != 0 || hdr.Gid != 0 {
-					if err := sftpClient.Chown(remotePath, hdr.Uid, hdr.Gid); err != nil {
-						return fmt.Errorf("failed to set ownership for %s: %v", remotePath, err)
-					}
+				if err := sftpClient.Chown(remotePath, hdr.Uid, hdr.Gid); err != nil {
+					return fmt.Errorf("failed to set ownership for %s: %v", remotePath, err)
 				}
 				if verbose && !quiet {
 					cmd.Printf("Created directory: %s\n", remotePath)
@@ -229,16 +224,12 @@ func streamTarReaderToSftp(cmd *cobra.Command, r io.Reader, sftpClient *sftp.Cli
 				}
 				rf.Close()
 
-				if os.FileMode(hdr.Mode)&(os.ModePerm|os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0644 {
-					if err := sftpClient.Chmod(remotePath, os.FileMode(hdr.Mode)); err != nil {
-						return fmt.Errorf("failed to set mode for %s: %v", remotePath, err)
-					}
+				if err := sftpClient.Chmod(remotePath, os.FileMode(hdr.Mode)); err != nil {
+					return fmt.Errorf("failed to set mode for %s: %v", remotePath, err)
 				}
 
-				if hdr.Uid != 0 || hdr.Gid != 0 {
-					if err := sftpClient.Chown(remotePath, hdr.Uid, hdr.Gid); err != nil {
-						return fmt.Errorf("failed to set ownership for %s: %v", remotePath, err)
-					}
+				if err := sftpClient.Chown(remotePath, hdr.Uid, hdr.Gid); err != nil {
+					return fmt.Errorf("failed to set ownership for %s: %v", remotePath, err)
 				}
 
 				if verbose && !quiet {
