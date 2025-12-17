@@ -175,7 +175,9 @@ func (s *SSHD) Start() (net.Addr, error) {
 					close(s.childProcessWaiter)
 					s.childProcessWaiter = nil
 				}
-				s.idleTimer.Stop()
+				if s.idleTimer != nil {
+					s.idleTimer.Stop()
+				}
 			}()
 			log.Printf("new SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
 
