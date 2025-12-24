@@ -135,17 +135,34 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 	if version == "" {
 		version = velda.Version
 	}
+
+	// Build runcmd list
+	runcmds := []string{}
+
+	// Add Tailscale installation and configuration if tailscale_config is set
+	if tsConfig := n.cfg.GetTailscaleConfig(); tsConfig != nil && tsConfig.GetServer() != "" && tsConfig.GetPreAuthKey() != "" {
+		tailscaleCmd := "curl -fsSL https://tailscale.com/install.sh | sh"
+		runcmds = append(runcmds, tailscaleCmd)
+
+		// Build tailscale up command with server and auth key
+		tailscaleUpCmd := fmt.Sprintf("tailscale up --login-server=%s --authkey=%s --accept-routes",
+			tsConfig.GetServer(),
+			tsConfig.GetPreAuthKey())
+		runcmds = append(runcmds, tailscaleUpCmd)
+	}
+
+	runcmds = append(runcmds,
+		"curl -fsSL https://velda-release.s3.us-west-1.amazonaws.com/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh",
+		fmt.Sprintf("[ \"$(/bin/velda version || true)\" != \"%s\" ] && curl -fsSL https://velda-release.s3.us-west-1.amazonaws.com/velda-%s-linux-amd64 -o /tmp/velda && chmod +x /tmp/velda && mv /tmp/velda /bin/velda || true", version, version),
+		"[ ! -e /usr/lib/systemd/system/velda-agent.service ] && curl -fsSL https://velda-release.s3.us-west-1.amazonaws.com/velda-agent.service -o /usr/lib/systemd/system/velda-agent.service && systemctl daemon-reload && systemctl enable velda-agent.service && systemctl start velda-agent.service",
+	)
 	cloudInitConfig := map[string]interface{}{
 		"bootcmd": []string{
 			"mkdir -p /run/velda",
 			fmt.Sprintf("cat << EOF > /run/velda/velda.yaml\n%s\nEOF", agentConfig),
 			"nvidia-smi",
 		},
-		"runcmd": []string{
-			"curl -fsSL https://velda-release.s3.us-west-1.amazonaws.com/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh",
-			fmt.Sprintf("[ \"$(/bin/velda version || true)\" != \"%s\" ] && curl -fsSL https://velda-release.s3.us-west-1.amazonaws.com/velda-%s-linux-amd64 -o /tmp/velda && chmod +x /tmp/velda && mv /tmp/velda /bin/velda || true", version, version),
-			"[ ! -e /usr/lib/systemd/system/velda-agent.service ] && curl -fsSL https://velda-release.s3.us-west-1.amazonaws.com/velda-agent.service -o /usr/lib/systemd/system/velda-agent.service && systemctl daemon-reload && systemctl enable velda-agent.service && systemctl start velda-agent.service",
-		},
+		"runcmd": runcmds,
 	}
 	if n.cfg.GetAdminSshKey() != "" {
 		cloudInitConfig["users"] = []map[string]interface{}{

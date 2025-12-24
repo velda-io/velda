@@ -41,6 +41,14 @@ message Storage {
 
 message PoolMetadata { string description = 1; }
 
+message TailscaleConfig {
+  // Tailscale control server URL
+  string server = 1;
+
+  // Pre-authentication key for joining the tailnet
+  string pre_auth_key = 2;
+}
+
 message AgentPool {
   string name = 1;
 
@@ -206,6 +214,9 @@ message AutoscalerBackendNebiusLaunchTemplate {
   // When this limit is reached, disks will be deleted instead of pooled.
   // Default: 0 (no disk pooling)
   int32 max_disk_pool_size = 14;
+
+  // Tailscale configuration for the instance
+  TailscaleConfig tailscale_config = 15;
 }
 
 message AutoscalerBackendKubernetes {
@@ -340,6 +351,9 @@ message NebiusAutoProvisioner {
   repeated PoolDetail pool_details = 9;
 
   int32 max_disk_pool_size = 10;
+
+  // Tailscale configuration for all instances
+  TailscaleConfig tailscale_config = 11;
 }
 
 message GCSProvisioner {
