@@ -270,7 +270,10 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 				response := <-s.agentResponse
 				if response.Error == nil && s.agent != nil {
 					// Agent has already started the session, need to kill it
-					s.agent.RequestKill(context.Background(), s.Request.InstanceId, s.Request.SessionId, false)
+					// Use a short timeout context since the session is being cancelled
+					killCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					s.agent.RequestKill(killCtx, s.Request.InstanceId, s.Request.SessionId, false)
 				}
 				nextState = schedulingStateCancelling
 				s.schedulingErr = errors.New("session cancelled by kill command")
@@ -450,9 +453,9 @@ func (s *Session) Kill(ctx context.Context, force bool) error {
 	if s.status.Status == proto.ExecutionStatus_STATUS_RUNNING {
 		return s.agent.RequestKill(ctx, s.Request.InstanceId, s.Request.SessionId, force)
 	}
-	if s.status.Status == proto.ExecutionStatus_STATUS_QUEUEING || 
-	   s.status.Status == proto.ExecutionStatus_STATUS_WAITING_FOR_OTHER_SHARDS ||
-	   s.status.Status == proto.ExecutionStatus_STATUS_STALE {
+	if s.status.Status == proto.ExecutionStatus_STATUS_QUEUEING ||
+		s.status.Status == proto.ExecutionStatus_STATUS_WAITING_FOR_OTHER_SHARDS ||
+		s.status.Status == proto.ExecutionStatus_STATUS_STALE {
 		// Send cancellation signal to the scheduling loop
 		select {
 		case s.cancelSignal <- struct{}{}:
