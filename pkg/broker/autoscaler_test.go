@@ -498,22 +498,6 @@ func TestCancelledDuringPending(t *testing.T) {
 		DefaultSlotsPerAgent: 1,
 	})
 
-	inspectChan := make(chan AgentStatusRequest, 100)
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		for {
-			select {
-			case req := <-inspectChan:
-				if req.shutdown {
-					pool.MarkDeleting(req.target)
-				}
-			case <-stop:
-				return
-			}
-		}
-	}()
-
 	pool.ReadyForIdleMaintenance()
 	pool.RequestWorker()
 	pool.RequestCancelled()
