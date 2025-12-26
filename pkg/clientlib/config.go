@@ -82,9 +82,18 @@ func InitConfig() {
 	systemConfigPath = os.Getenv("VELDA_SYSTEM_CONFIG")
 	if systemConfigPath == "" {
 		systemConfigPath = "/run/velda/velda.yaml"
+		if _, err := os.Stat(systemConfigPath); err != nil {
+			systemConfigPath = "/etc/velda/agent.yaml"
+		}
 	}
-	_, err := os.Stat(systemConfigPath)
-	if err != nil {
+	if _, err := os.Stat(systemConfigPath); err == nil {
+		// Agent daemon.
+		agentConfig = &agentpb.AgentConfig{}
+		if err := utils.LoadProto(systemConfigPath, agentConfig); err != nil {
+			log.Printf("Failed to load agent config: %v", err)
+		}
+		brokerAddrFlag = agentConfig.Broker.Address
+	} else {
 		// User login.
 		if configDir == "" {
 			configDir = os.Getenv("VELDA_CONFIG_DIR")
@@ -107,13 +116,6 @@ func InitConfig() {
 			}
 		}
 		DebugLog("Using profile: %s", profile)
-	} else {
-		// Agent daemon.
-		agentConfig = &agentpb.AgentConfig{}
-		if err := utils.LoadProto(systemConfigPath, agentConfig); err != nil {
-			log.Printf("Failed to load agent config: %v", err)
-		}
-		brokerAddrFlag = agentConfig.Broker.Address
 	}
 }
 

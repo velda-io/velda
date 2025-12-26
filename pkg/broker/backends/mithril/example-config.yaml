@@ -1,0 +1,115 @@
+# Example Mithril Auto Provisioner Configuration
+# This creates multiple agent pools using Mithril spot bids
+
+server:
+  listen_address: ":50051"
+  # Set this to your server's public address for agents to connect
+  default_broker_info:
+    address: "your-server.example.com:50051"
+
+storage:
+  type: POSTGRES
+  postgres:
+    host: "localhost"
+    port: 5432
+    user: "velda"
+    password: "velda"
+    database: "velda"
+
+provisioners:
+  - mithril_auto:
+      # Your Mithril project ID (format: proj_...)
+      project_id: "proj_abc123456"
+      
+      # Region to launch instances in (e.g., us-central1-a, us-west-2)
+      region: "us-central3-a"
+      
+      # API key for authentication (format: fkey_...)
+      # It's recommended to set this via environment variable: MITHRIL_API_KEY
+      api_token: "MITHRIL_API_KEY"
+      
+      # SSH key IDs (format: sshkey_...) - must be pre-configured in your Mithril project
+      ssh_key_ids:
+        - "sshkey_1234567890"
+      
+      # Common labels for all instances
+      labels:
+        environment: "production"
+        managed-by: "velda"
+      
+      # Agent version override (optional)
+      agent_version_override: "1.0.0"
+      
+      # Maximum number of suspended (paused) bids to keep for reuse
+      # When set > 0, bids will be paused instead of terminated for faster restart
+      # Default: 0 (no bid pooling)
+      max_suspended_bids: 3
+      
+      # Optional: Tailscale configuration for network connectivity
+      # Get an auth key from https://login.tailscale.com/admin/settings/keys
+      # tailscale_config:
+      #   pre_auth_key: "tskey-auth-..."
+      
+      # Default autoscaler configuration for all pools
+      autoscaler_config:
+        max_agents: 10
+        min_agents: 0
+        max_idle_agents: 1
+        idle_decay: "5m"
+        initial_delay: "30s"
+      
+      # Pool-specific configurations
+      pool_details:
+        # High-performance H100 pool
+        - pool_name: "h100-pool"
+          instance_type: "it_h100_8x"  # Get from /v2/instance-types API
+          limit_price: 3.5
+          description: "8x H100 GPUs for large-scale training"
+          autoscaler_config:
+            max_agents: 5
+            min_agents: 0
+            max_idle_agents: 0
+        
+        # Cost-effective A100 pool
+        - pool_name: "a100-pool"
+          instance_type: "it_a100_8x"
+          limit_price: 2.0
+          description: "8x A100 GPUs for general workloads"
+          autoscaler_config:
+            max_agents: 20
+            min_agents: 0
+            max_idle_agents: 2
+        
+        # Budget-friendly single GPU pool
+        - pool_name: "single-a100"
+          instance_type: "it_RrgkIZz6c9BZu5gi"
+          limit_price: 1.5
+          description: "Single A100 GPU for development and testing"
+          autoscaler_config:
+            max_agents: 50
+            min_agents: 0
+            max_idle_agents: 5
+
+# Alternative: Direct pool configuration without auto-provisioner
+# agent_pools:
+#   - name: "custom-h100"
+#     auto_scaler:
+#       max_agents: 10
+#       min_agents: 0
+#       max_idle_agents: 1
+#       idle_decay: "5m"
+#       backend:
+#         mithril_spot_bid:
+#           instance_type: "it_h100_8x"
+#           region: "us-central1-a"
+#           limit_price_per_gpu_hour: 3.5
+#           project_id: "proj_abc123456"
+#           api_token: "${MITHRIL_API_KEY}"
+#           ssh_key_ids:
+#             - "sshkey_1234567890"
+#           labels:
+#             pool: "custom-h100"
+#           agent_config:
+#             pool: "custom-h100"
+#             broker:
+#               address: "your-server.example.com:50051"

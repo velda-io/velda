@@ -241,6 +241,7 @@ message Provisioner {
     GCSProvisioner gcs = 4;
     AWSAutoProvisioner aws_auto = 5;
     NebiusAutoProvisioner nebius_auto = 6;
+    MithrilAutoProvisioner mithril_auto = 7;
   }
 }
 
@@ -356,6 +357,121 @@ message NebiusAutoProvisioner {
   TailscaleConfig tailscale_config = 11;
 }
 
+message AutoscalerBackendMithrilSpotBid {
+  // Instance type (e.g., "8xh100", "a100", "8xa100")
+  string instance_type = 1;
+
+  // Region to launch the instance in (e.g., "us-west-2")
+  string region = 2;
+
+  // Limit price per GPU-hour in dollars
+  // The spot bid will be allocated when spot price is below this limit
+  double limit_price = 3;
+
+  // Structured version of the agent config.
+  // If both agent_config and agent_config_content are set,
+  // agent_config will be used.
+  // Pool & broker info will be automatically set.
+  string agent_config_content = 4;
+  velda.agent.AgentConfig agent_config = 5;
+
+  // Additional labels/tags to add to the instance.
+  map<string, string> labels = 6;
+
+  // SSH key ID(s) to use for accessing instances
+  // These must be pre-configured in the Mithril project
+  repeated string ssh_key_ids = 7;
+
+  // If set, will override the agent version to install.
+  // Default to the current version of controller.
+  string agent_version_override = 8;
+
+  // Optional startup script to run on instance initialization
+  string startup_script = 9;
+
+  // Project ID in Mithril
+  string project_id = 10;
+
+  // API token for authentication
+  // Should be set via environment variable MITHRIL_API_TOKEN
+  string api_token = 11;
+
+  // Optional: API endpoint override (default: api.mithril.ai)
+  string api_endpoint = 12;
+
+  // Maximum number of suspended (paused) bids to keep in the pool for reuse.
+  // This help reduce start-up time.
+  // When this limit is reached, bids will be terminated instead of paused.
+  // Default: 0 (no bid pooling)
+  int32 max_suspended_bids = 13;
+
+  // Optional: Tailscale configuration for instance network connectivity
+  // If provided, Tailscale will be installed and authenticated during instance
+  // startup
+  TailscaleConfig tailscale_config = 14;
+
+  // Optional: amount of memory in GB to request for the instance
+  int32 memory_gb = 15;
+}
+
+message MithrilAutoProvisioner {
+  // Common configuration shared across all pools
+
+  // Project ID in Mithril
+  string project_id = 1;
+
+  // Region to launch instances in
+  string region = 2;
+
+  // API token for authentication
+  string api_token = 3;
+
+  // SSH key IDs to use for all instances
+  repeated string ssh_key_ids = 4;
+
+  // Additional labels to add to all instances
+  map<string, string> labels = 5;
+
+  // If set, will override the agent version to install
+  string agent_version_override = 6;
+
+  // Default autoscaler config for all pools
+  // backend will be automatically generated per pool
+  AgentPool.AutoScaler autoscaler_config = 7;
+
+  // Optional: API endpoint override
+  string api_endpoint = 8;
+
+  // Array of pool-specific details
+  message PoolDetail {
+    // Pool name
+    string pool_name = 1;
+
+    // Instance type (e.g., "it_RrgkIZz6c9BZu5gi")
+    string instance_type = 2;
+
+    // Limit price per GPU-hour in dollars
+    double limit_price = 3;
+
+    // Optional: amount of memory in GB to request for the instance
+    int32 memory_gb = 6;
+
+    // Optional: description for the pool
+    string description = 4;
+
+    // Optional: override autoscaler config for this pool
+    AgentPool.AutoScaler autoscaler_config = 5;
+  }
+
+  repeated PoolDetail pool_details = 9;
+
+  // Maximum number of suspended (paused) bids to keep in the pool for reuse.
+  int32 max_suspended_bids = 10;
+
+  // Optional: Tailscale configuration for all instances
+  TailscaleConfig tailscale_config = 11;
+}
+
 message GCSProvisioner {
   string bucket = 1;
   string config_prefix = 2;
@@ -367,6 +483,7 @@ message AutoscalerBackend {
     AutoscalerBackendGCEInstanceGroup gce_instance_group = 1;
     AutoscalerBackendAWSLaunchTemplate aws_launch_template = 4;
     AutoscalerBackendNebiusLaunchTemplate nebius_launch_template = 5;
+    AutoscalerBackendMithrilSpotBid mithril_spot_bid = 6;
     AutoscalerBackendKubernetes kubernetes = 2;
     AutoscalerBackendCommand command = 3;
   }

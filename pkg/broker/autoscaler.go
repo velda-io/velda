@@ -41,15 +41,20 @@ const (
 	WorkerStatusIdle
 	// Worker was connected but lose connection, and the deletion is not requested by the scheduler.
 	WorkerStatusLost
-	// Worker has been requested to delete by the scheduler, but the connection is still alive.
-	WorkerStatusDeleting
-	// Worker in the backend list, but was not requested by the scheduler. It may reconnect later.
-	WorkerStatusUnknown
-	// Worker has been requested to delete by the scheduler, and connection is terminated.
-	// Waiting to confirm that backend has marked it deleted.
-	WorkerStatusDisconnected
 	// Worker has been requested to delete by the scheduler, and waiting for the worker to confirm deletion.
 	WorkerStatusNotifyDeleting
+	// Worker has confirmed to stop receiving tasks and request deleting, but the connection is still alive.
+	WorkerStatusDeleting
+	// Worker has been requested to delete by the scheduler, and connection is terminated.
+	// Waiting to confirm that backend has marked it deleted.
+	// This state can be skipped if the backend doesn't report terminating instances.
+	WorkerStatusDisconnected
+	// Worker was in shutting down state, but future action is bringing it back to running.
+	// It's considered as PENDING + DELETING
+	WorkerStatusNeedsRestart
+	// Worker in the backend list, but was not connected with the scheduler and no previous interactions.
+	// It may reconnect later. We treat it as a running worker until reconnected or timeout.
+	WorkerStatusUnknown
 	// This is not used.
 	WorkerStatusMax
 	// Workers being deleted do not have a record in AutoScalePool.
@@ -359,6 +364,8 @@ func (p *AutoScaledPool) MarkLost(workerName string) error {
 	oldStatus := p.workerStatus[workerName]
 	if oldStatus == WorkerStatusNone {
 		p.logPrintf("Worker %s lost, was not in pool", workerName)
+	} else if oldStatus == WorkerStatusNeedsRestart {
+		p.setWorkerStatusLocked(workerName, WorkerStatusPending, -1)
 	} else if oldStatus == WorkerStatusDeleting {
 		p.setWorkerStatusLocked(workerName, WorkerStatusDisconnected, 0)
 	} else {
@@ -657,6 +664,10 @@ func (p *AutoScaledPool) setWorkerStatusLocked(name string, status WorkerStatusC
 		delete(p.workersByStatus[currentStatus], name)
 		if currentStatus == WorkerStatusUnknown || currentStatus == WorkerStatusPending || currentStatus == WorkerStatusLost {
 			delete(p.lastKnownTime, name)
+		}
+		if status == WorkerStatusPending && currentStatus == WorkerStatusDeleting {
+			status = WorkerStatusNeedsRestart
+			p.logPrintf("Worker %s is being marked as pending while deleting, marking as NeedsRestart", name)
 		}
 	} else if !ok {
 		p.workerDetail[name] = &workerDetail{}
