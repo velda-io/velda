@@ -293,8 +293,7 @@ func (p *AutoScaledPool) Reconnect(ctx context.Context) error {
 	if p.killUnknownAfter > 0 {
 		for name, lastConnect := range p.lastKnownTime {
 			if time.Since(lastConnect) > p.killUnknownAfter {
-				err := p.backend.RequestDelete(ctx, name)
-				if err != nil {
+				if err := p.backend.RequestDelete(ctx, name); err != nil {
 					p.logPrintf("Failed to request deletion for unknown worker %s: %v", name, err)
 				} else {
 					p.removeWorkerLocked(name)
@@ -378,7 +377,9 @@ func (p *AutoScaledPool) MarkDeleting(workerName string) error {
 	oldStatus := p.workerStatus[workerName]
 	p.logPrintf("Worker %s deleting, was %v", workerName, oldStatus)
 	p.setWorkerStatusLocked(workerName, WorkerStatusDeleting, 0)
-	p.backend.RequestDelete(p.ctx, workerName)
+	if err := p.backend.RequestDelete(p.ctx, workerName); err != nil {
+		p.logPrintf("Failed to request deletion for worker %s: %v", workerName, err)
+	}
 	p.maintainIdleWorkers()
 	return nil
 }
@@ -528,7 +529,7 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 		p.killingIdle = false
 		p.killIdleTimer.Stop()
 	}
-	if p.sizeLocked() > p.minSize && p.idleSizeLocked()-p.defaultSlotsPerAgent >= p.minIdle && len(p.idleWorkers) > 0 {
+	if p.canKillIdleWorkerLocked() {
 		if !p.killingIdle {
 			p.logPrintf("Started idle decay timer")
 			p.killIdleTimer.Reset(p.idleDecay)
@@ -540,11 +541,15 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 	}
 }
 
+func (p *AutoScaledPool) canKillIdleWorkerLocked() bool {
+	return p.sizeLocked() > p.minSize && p.idleSizeLocked()-p.defaultSlotsPerAgent >= p.minIdle && (len(p.idleWorkers) > 0 || len(p.pendingWorkers) > 0)
+}
+
 func (p *AutoScaledPool) deleteOneIdleWorker() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.killingIdle = false
-	if p.idleSizeLocked()-p.defaultSlotsPerAgent < p.minIdle || len(p.idleWorkers) <= p.minIdle {
+	if !p.canKillIdleWorkerLocked() {
 		p.logPrintf("No idle workers to delete, stopping idle decay timer")
 		return
 	}
@@ -554,31 +559,51 @@ func (p *AutoScaledPool) deleteOneIdleWorker() {
 }
 
 func (p *AutoScaledPool) deleteOneWorkerLocked() bool {
-	if len(p.idleWorkers) == 0 {
+	if len(p.idleWorkers) == 0 && len(p.pendingWorkers) == 0 {
 		p.logPrintf("No idle workers to delete")
 		return false
 	}
-	var name string
-	for k := range p.idleWorkers {
-		name = k
-		break
-	}
-	// Do not delete if deleting this worker would violate min idle or min total size.
-	if p.idleSizeLocked()-p.workerDetail[name].availableSlot < p.minIdle {
-		p.logPrintf("Not enough idle slots to delete worker %s, current idle size: %d", name, p.idleSizeLocked())
-		return false
-	}
 	if p.sizeLocked() <= p.minSize {
-		p.logPrintf("Not deleting worker %s: would violate min pool size (%d)", name, p.minSize)
+		p.logPrintf("Not deleting worker: would violate min pool size (%d)", p.minSize)
 		return false
 	}
-	statusChan := p.workerDetail[name].statusChan
-	statusChan <- AgentStatusRequest{
-		shutdown: true,
-		target:   name,
+	var name string
+	// Prefer deleting pending workers first, since they have not started.
+	if len(p.pendingWorkers) > 0 {
+		for k := range p.pendingWorkers {
+			name = k
+			break
+		}
+		p.logPrintf("Deleting pending worker %s", name)
+		p.setWorkerStatusLocked(name, WorkerStatusDeleting, 0)
+		if err := p.backend.RequestDelete(p.ctx, name); err != nil {
+			p.logPrintf("Failed to delete pending worker %s: %v", name, err)
+		}
+	} else {
+		for k := range p.idleWorkers {
+			// Do not delete if deleting this worker would violate min idle or min total size.
+			if p.idleSizeLocked()-p.workerDetail[k].availableSlot < p.minIdle {
+				continue
+			}
+			name = k
+			break
+		}
+		if name == "" {
+			p.logPrintf("No idle workers can be deleted without violating min idle size")
+			return false
+		}
+		// Send signal to worker to remove from scheduler, then request shutdown from backend.
+		statusChan := p.workerDetail[name].statusChan
+		statusChan <- AgentStatusRequest{
+			shutdown: true,
+			target:   name,
+		}
+		p.setWorkerStatusLocked(name, WorkerStatusNotifyDeleting, -1)
+		p.logPrintf("Deleting idle worker %s, current idle size: %d", name, p.idleSizeLocked())
+		if err := p.backend.RequestDelete(p.ctx, name); err != nil {
+			p.logPrintf("Failed to delete idle worker %s: %v", name, err)
+		}
 	}
-	p.setWorkerStatusLocked(name, WorkerStatusNotifyDeleting, -1)
-	p.logPrintf("Deleting idle worker %s, current idle size: %d", name, p.idleSizeLocked())
 	return true
 }
 

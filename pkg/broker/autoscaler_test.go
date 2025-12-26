@@ -30,18 +30,29 @@ type FakeBackend struct {
 	pending []string
 	lastId  int
 	clock   func() time.Time
+	// If true, deleted worker names can be reused
+	recycleWorkerNames bool
+	deletedWorkers     []string
 }
 
 func (f *FakeBackend) RequestScaleUp(ctx context.Context) (string, error) {
-	id := f.lastId
-	f.lastId++
-	name := fmt.Sprintf("worker-%d", id)
+	var name string
+	// Recycle deleted worker names if enabled
+	if f.recycleWorkerNames && len(f.deletedWorkers) > 0 {
+		name = f.deletedWorkers[0]
+		f.deletedWorkers = f.deletedWorkers[1:]
+		log.Printf("Fake backend: Scale up (recycled) %s", name)
+	} else {
+		id := f.lastId
+		f.lastId++
+		name = fmt.Sprintf("worker-%d", id)
+		log.Printf("Fake backend: Scale up %s", name)
+	}
 	f.workers = append(f.workers, WorkerStatus{
 		Name:      name,
 		CreatedAt: f.clock(),
 	})
 	f.pending = append(f.pending, name)
-	log.Printf("Fake backend: Scale up %s", name)
 
 	return name, nil
 }
@@ -62,6 +73,9 @@ func (f *FakeBackend) RequestDelete(ctx context.Context, workerName string) erro
 		if v.Name == workerName {
 			log.Printf("Fake backend: Scale down %s", workerName)
 			f.workers = append(f.workers[:i], f.workers[i+1:]...)
+			if f.recycleWorkerNames {
+				f.deletedWorkers = append(f.deletedWorkers, workerName)
+			}
 			return nil
 		}
 	}
@@ -466,4 +480,29 @@ func TestDeleteUnknownWorkers(t *testing.T) {
 	assert.NoError(t, pool.Reconnect(context.Background()))
 	// Should delete the lost worker, as it was not seen for 300ms.
 	assert.Equal(t, 0, len(backend.workers), time.Since(pool.lastKnownTime[lost]))
+}
+
+func TestCancelledDuringPending(t *testing.T) {
+	backend := &FakeBackend{
+		workers: []WorkerStatus{},
+		clock:   time.Now,
+	}
+
+	pool := NewAutoScaledPool("pool", AutoScaledPoolConfig{
+		Context:              context.Background(),
+		Backend:              backend,
+		MinIdle:              0,
+		MaxIdle:              0,
+		IdleDecay:            0 * time.Hour,
+		MaxSize:              2,
+		DefaultSlotsPerAgent: 1,
+	})
+
+	pool.ReadyForIdleMaintenance()
+	pool.RequestWorker()
+	pool.RequestCancelled()
+	// Verify worker is deleted from backend
+	assert.Eventually(t, func() bool {
+		return len(backend.workers) == 0
+	}, 3*time.Second, 10*time.Millisecond)
 }
