@@ -58,12 +58,12 @@ provisioners:
       pool_details:
         - pool_name: "h100-pool"
           instance_type: "it_h100_8x"
-          limit_price_per_gpu_hour: 3.5
+          limit_price: 3.5
           description: "8x H100 GPUs for training"
         
         - pool_name: "a100-pool"
           instance_type: "it_a100_8x"
-          limit_price_per_gpu_hour: 2.0
+          limit_price: 2.0
           description: "8x A100 GPUs for general workloads"
 ```
 
@@ -80,7 +80,7 @@ agent_pools:
         mithril_spot_bid:
           instance_type: "it_h100_8x"
           region: "us-central1-a"
-          limit_price_per_gpu_hour: 3.5
+          limit_price: 3.5
           project_id: "proj_abc123456"
           api_token: "${MITHRIL_API_KEY}"
           ssh_key_ids:
@@ -109,7 +109,7 @@ agent_pools:
 |-------|------|----------|-------------|
 | `pool_name` | string | Yes | Unique name for the pool |
 | `instance_type` | string | Yes | Mithril instance type ID (format: `it_...`) |
-| `limit_price_per_gpu_hour` | float | Yes | Maximum price per GPU-hour in USD |
+| `limit_price` | float | Yes | Maximum price per GPU-hour in USD |
 | `description` | string | No | Human-readable description |
 | `autoscaler_config` | AutoScaler | No | Pool-specific autoscaler override |
 
@@ -119,7 +119,7 @@ agent_pools:
 |-------|------|----------|-------------|
 | `instance_type` | string | Yes | Mithril instance type ID (format: `it_...`) |
 | `region` | string | Yes | Region for instances (e.g., "us-central1-a") |
-| `limit_price_per_gpu_hour` | float | Yes | Maximum price per GPU-hour |
+| `limit_price` | float | Yes | Maximum price per GPU-hour |
 | `project_id` | string | Yes | Mithril project ID (format: `proj_...`) |
 | `api_token` | string | Yes | API key (format: `fkey_...`) |
 | `ssh_key_ids` | []string | No | SSH key IDs (format: `sshkey_...`) |
@@ -227,7 +227,7 @@ Refer to the [Mithril API documentation](https://docs.mithril.ai/compute-api/com
 
 ### Limit Prices
 
-Set `limit_price_per_gpu_hour` to control maximum costs:
+Set `limit_price` to control maximum costs:
 - Your bid is allocated when the spot price is below your limit
 - You're billed at the current spot price (≤ your limit)
 - Instances are preempted if spot price exceeds your limit
@@ -239,12 +239,12 @@ pool_details:
   # Premium pool - always available
   - pool_name: "h100-premium"
     instance_type: "it_h100_8x"
-    limit_price_per_gpu_hour: 5.0  # High limit for availability
+    limit_price: 5.0  # High limit for availability
   
   # Cost-optimized pool
   - pool_name: "h100-budget"
     instance_type: "it_h100_8x"
-    limit_price_per_gpu_hour: 2.0  # Lower limit for cost savings
+    limit_price: 2.0  # Lower limit for cost savings
 ```
 
 ## Autoscaling Behavior

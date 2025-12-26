@@ -1,5 +1,3 @@
-//go:build mithril
-
 // Copyright 2025 Velda Inc
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -42,14 +40,12 @@ func TestMithrilBackend(t *testing.T) {
 	configpb := &cfgpb.AutoscalerBackend{
 		Backend: &cfgpb.AutoscalerBackend_MithrilSpotBid{
 			MithrilSpotBid: &cfgpb.AutoscalerBackendMithrilSpotBid{
-				InstanceType:         "it_tcjiKnwIK0jX21t3",
-				Region:               "me-central1-a",
-				LimitPricePerGpuHour: 0.14,
-				ProjectId:            projectID,
-				ApiToken:             apiToken,
-				AgentConfig:          &agentpb.AgentConfig{},
-				SshKeyIds:            []string{"sshkey_gF53iOZEqDDm5qin"},
-				AgentVersionOverride: "dev-ent-20250918-151205",
+				InstanceType: "it_RrgkIZz6c9BZu5gi",
+				Region:       "us-central3-a",
+				LimitPrice:   0.14,
+				ProjectId:    projectID,
+				ApiToken:     apiToken,
+				AgentConfig:  &agentpb.AgentConfig{},
 				Labels: map[string]string{
 					"velda-test": "velda",
 				},
@@ -64,7 +60,7 @@ func TestMithrilBackend(t *testing.T) {
 
 	factory := &mithrilSpotBidPoolFactory{}
 	brokerInfo := &agentpb.BrokerInfo{
-		Address: "172.31.30.15:50051",
+		Address: "localhost:50051",
 	}
 	backend, err := factory.NewBackend(poolPb, brokerInfo)
 	if err != nil {
