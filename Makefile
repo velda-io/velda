@@ -16,6 +16,7 @@ debug-deps:
 RELEASE_FLAGS = -p $(shell nproc) --tags "${TAGS}" -ldflags "-X velda.io/velda.Version=${VERSION_V}"
 release-mini:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-amd64 ./client
+	ln -sf velda-${VERSION_V}-linux-amd64 bin/velda-latest-linux-amd64
 
 release:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-amd64 ./client

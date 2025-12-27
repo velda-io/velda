@@ -242,6 +242,7 @@ message Provisioner {
     AWSAutoProvisioner aws_auto = 5;
     NebiusAutoProvisioner nebius_auto = 6;
     MithrilAutoProvisioner mithril_auto = 7;
+    DigitalOceanAutoProvisioner digitalocean_auto = 8;
   }
 }
 
@@ -414,6 +415,62 @@ message AutoscalerBackendMithrilSpotBid {
   int32 memory_gb = 15;
 }
 
+message AutoscalerBackendDigitalOceanDroplet {
+  // Droplet name
+  string name = 1;
+
+  // Region to launch the droplet in (e.g., "atl1", "nyc1", "sfo3")
+  string region = 2;
+
+  // Size/tier of the droplet (e.g., "gpu-mi300x1-192gb-devcloud", "s-1vcpu-1gb")
+  string size = 3;
+
+  // Image to use for the droplet (e.g., "amd-rocm71software", "ubuntu-20-04-x64")
+  string image = 4;
+
+  // SSH key IDs to use for accessing droplets
+  // These must be pre-configured in your DigitalOcean account
+  repeated int32 ssh_key_ids = 5;
+
+  // Enable automated backups
+  bool backups = 6;
+
+  // Enable IPv6 networking
+  bool ipv6 = 7;
+
+  // Enable monitoring
+  bool monitoring = 8;
+
+  // Tags to apply to the droplet
+  repeated string tags = 9;
+
+  // VPC UUID to attach the droplet to
+  string vpc_uuid = 10;
+
+  // Structured version of the agent config.
+  // If both agent_config and agent_config_content are set,
+  // agent_config will be used.
+  // Pool & broker info will be automatically set.
+  string agent_config_content = 11;
+  velda.agent.AgentConfig agent_config = 12;
+
+  // Additional labels/tags to add to the droplet.
+  map<string, string> labels = 13;
+
+  // If set, will override the agent version to install.
+  // Default to the current version of controller.
+  string agent_version_override = 14;
+
+  // API token for authentication
+  // Should be set via environment variable DIGITALOCEAN_API_TOKEN
+  string api_token = 15;
+
+  // Optional: API endpoint override (default: https://api-amd.digitalocean.com)
+  string api_endpoint = 16;
+
+  TailscaleConfig tailscale_config = 17;
+}
+
 message MithrilAutoProvisioner {
   // Common configuration shared across all pools
 
@@ -472,6 +529,67 @@ message MithrilAutoProvisioner {
   TailscaleConfig tailscale_config = 11;
 }
 
+message DigitalOceanAutoProvisioner {
+  // Common configuration shared across all pools
+
+  // Region to launch droplets in (e.g., "atl1", "nyc1", "sfo3")
+  string region = 1;
+
+  // API token for authentication
+  string api_token = 2;
+
+  // SSH key IDs to use for all droplets
+  repeated int32 ssh_key_ids = 3;
+
+  // Additional labels to add to all droplets
+  map<string, string> labels = 4;
+
+  // If set, will override the agent version to install
+  string agent_version_override = 5;
+
+  // Default autoscaler config for all pools
+  // backend will be automatically generated per pool
+  AgentPool.AutoScaler autoscaler_config = 6;
+
+  // Optional: API endpoint override
+  string api_endpoint = 7;
+
+  // Array of pool-specific details
+  message PoolDetail {
+    // Pool name
+    string pool_name = 1;
+
+    // Size/tier of the droplet (e.g., "gpu-mi300x1-192gb-devcloud")
+    string size = 2;
+
+    // Image to use (e.g., "amd-rocm71software")
+    string image = 3;
+
+    // Optional: description for the pool
+    string description = 4;
+
+    // Optional: override autoscaler config for this pool
+    AgentPool.AutoScaler autoscaler_config = 5;
+
+    // Optional: Enable backups
+    bool backups = 6;
+
+    // Optional: Enable IPv6
+    bool ipv6 = 7;
+
+    // Optional: Enable monitoring
+    bool monitoring = 8;
+
+    // Optional: VPC UUID
+    string vpc_uuid = 9;
+  }
+
+  repeated PoolDetail pool_details = 8;
+
+  // Optional: Tailscale configuration for all droplets
+  TailscaleConfig tailscale_config = 9;
+}
+
 message GCSProvisioner {
   string bucket = 1;
   string config_prefix = 2;
@@ -484,6 +602,7 @@ message AutoscalerBackend {
     AutoscalerBackendAWSLaunchTemplate aws_launch_template = 4;
     AutoscalerBackendNebiusLaunchTemplate nebius_launch_template = 5;
     AutoscalerBackendMithrilSpotBid mithril_spot_bid = 6;
+    AutoscalerBackendDigitalOceanDroplet digitalocean_droplet = 7;
     AutoscalerBackendKubernetes kubernetes = 2;
     AutoscalerBackendCommand command = 3;
   }

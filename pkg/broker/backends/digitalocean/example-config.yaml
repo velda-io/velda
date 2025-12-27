@@ -1,0 +1,90 @@
+# Example DigitalOcean Auto Provisioner Configuration
+# This creates multiple agent pools using DigitalOcean droplets
+
+server:
+  listen_address: ":50051"
+  # Set this to your server's public address for agents to connect
+  default_broker_info:
+    address: "your-server.example.com:50051"
+
+storage:
+  type: POSTGRES
+  postgres:
+    host: "localhost"
+    port: 5432
+    user: "velda"
+    password: "velda"
+    database: "velda"
+
+provisioners:
+  - digitalocean_auto:
+      # Region to launch droplets in (e.g., atl1, nyc1, sfo3)
+      region: "atl1"
+      
+      # API token for authentication
+      # It's recommended to set this via environment variable: DIGITALOCEAN_API_TOKEN
+      api_token: "DIGITALOCEAN_API_TOKEN"
+      
+      # SSH key IDs - must be pre-configured in your DigitalOcean account
+      # You can get these from: https://cloud.digitalocean.com/account/security
+      ssh_key_ids:
+        - 52896465
+      
+      # Common labels for all droplets
+      labels:
+        environment: "production"
+        managed-by: "velda"
+      
+      # Agent version override (optional)
+      agent_version_override: "1.0.0"
+      
+      # Optional: API endpoint override (for AMD DigitalOcean)
+      api_endpoint: "https://api-amd.digitalocean.com"
+      
+      # Optional: Tailscale configuration for network connectivity
+      # Get an auth key from https://login.tailscale.com/admin/settings/keys
+      # tailscale_config:
+      #   server: "https://login.tailscale.com"
+      #   pre_auth_key: "tskey-auth-..."
+      
+      # Pool definitions - one pool per GPU type/configuration
+      pool_details:
+        # Pool for AMD MI300X GPUs
+        - pool_name: "amd-mi300x"
+          size: "gpu-mi300x1-192gb-devcloud"
+          image: "amd-rocm71software"
+          description: "AMD MI300X GPU pool with ROCm 7.1"
+          backups: false
+          ipv6: false
+          monitoring: true
+          # Optional: VPC UUID for private networking
+          # vpc_uuid: "vpc-uuid-here"
+          autoscaler_config:
+            max_agents: 10
+            min_agents: 0
+            max_idle_agents: 1
+            min_idle_agents: 0
+            idle_decay: "1m"
+        
+        # Pool for smaller CPU-only instances (example)
+        - pool_name: "cpu-small"
+          size: "s-2vcpu-4gb"
+          image: "ubuntu-20-04-x64"
+          description: "Small CPU-only instances"
+          backups: false
+          ipv6: false
+          monitoring: false
+          autoscaler_config:
+            max_agents: 20
+            min_agents: 0
+            max_idle_agents: 2
+            min_idle_agents: 0
+            idle_decay: "5m"
+      
+      # Default autoscaler config (used if not overridden per pool)
+      # autoscaler_config:
+      #   max_agents: 10
+      #   min_agents: 0
+      #   max_idle_agents: 1
+      #   min_idle_agents: 0
+      #   idle_decay: "1m"

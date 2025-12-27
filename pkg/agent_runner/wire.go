@@ -27,7 +27,7 @@ import (
 type ShimRunner agent.AbstractPlugin
 type Pid1Runner agent.AbstractPlugin
 
-func provideShimRunner(requestPlugin *agent.SessionRequestPlugin, agentDaemonPlugin *agent.AgentDaemonPlugin, sandboxFsPlugin *agent.SandboxFsPlugin, rootfsPlugin *agent.RootfsPlugin, autofsDaemon *agent.AutoFsDaemonPlugin, sandboxPlugin *agent.LinuxNamespacePlugin, nvidiaPlugin *agent.NvidiaPlugin, pid1Plugin *agent.RunPid1Plugin) ShimRunner {
+func provideShimRunner(requestPlugin *agent.SessionRequestPlugin, agentDaemonPlugin *agent.AgentDaemonPlugin, sandboxFsPlugin *agent.SandboxFsPlugin, rootfsPlugin *agent.RootfsPlugin, autofsDaemon *agent.AutoFsDaemonPlugin, sandboxPlugin *agent.LinuxNamespacePlugin, nvidiaPlugin *agent.DevicesPlugin, pid1Plugin *agent.RunPid1Plugin) ShimRunner {
 	return agent.NewPluginRunner(
 		requestPlugin,
 		agentDaemonPlugin,

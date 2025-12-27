@@ -14,4 +14,7 @@
 
 package registry
 
-import _ "velda.io/velda/pkg/broker/backends/mithril"
+import (
+	_ "velda.io/velda/pkg/broker/backends/digitalocean"
+	_ "velda.io/velda/pkg/broker/backends/mithril"
+)
