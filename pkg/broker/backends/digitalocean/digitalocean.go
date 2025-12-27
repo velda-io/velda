@@ -24,7 +24,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	pb "google.golang.org/protobuf/proto"
@@ -47,13 +46,6 @@ type digitaloceanPoolBackend struct {
 	httpClient *http.Client
 	apiBaseURL string
 	namePrefix string
-
-	dropletMu           sync.RWMutex
-	activeDroplets      map[int]*droplet
-	creatingDroplets    map[string]chan struct{}
-	terminatingDroplets map[string]struct{}
-
-	lastOp chan struct{}
 }
 
 type droplet struct {
@@ -149,15 +141,19 @@ func NewDigitalOceanPoolBackend(cfg *proto.AutoscalerBackendDigitalOceanDroplet)
 
 	prefix := calculateDropletPrefix(cfg)
 
-	return &digitaloceanPoolBackend{
-		cfg:                 cfg,
-		httpClient:          &http.Client{Timeout: 30 * time.Second},
-		apiBaseURL:          fmt.Sprintf("%s/%s", apiEndpoint, apiVersion),
-		namePrefix:          prefix,
-		activeDroplets:      make(map[int]*droplet),
-		creatingDroplets:    make(map[string]chan struct{}),
-		terminatingDroplets: make(map[string]struct{}),
+	backend := &digitaloceanPoolBackend{
+		cfg:        cfg,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		apiBaseURL: fmt.Sprintf("%s/%s", apiEndpoint, apiVersion),
+		namePrefix: prefix,
 	}
+
+	return backends.MakeAsync(backend)
+}
+
+// GenerateWorkerName implements SyncBackend interface
+func (d *digitaloceanPoolBackend) GenerateWorkerName() string {
+	return fmt.Sprintf("%s-%s", d.namePrefix, utils.RandString(5))
 }
 
 func calculateDropletPrefix(cfg *proto.AutoscalerBackendDigitalOceanDroplet) string {
@@ -202,29 +198,13 @@ func (d *digitaloceanPoolBackend) makeRequest(ctx context.Context, method, path 
 	return resp, nil
 }
 
-func (d *digitaloceanPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
-	dropletName := fmt.Sprintf("%s-%s", d.namePrefix, utils.RandString(5))
-
-	d.dropletMu.Lock()
-	op := make(chan struct{})
-	d.lastOp = op
-	d.creatingDroplets[dropletName] = op
-	d.dropletMu.Unlock()
-
-	go func() {
-		defer func() {
-			d.dropletMu.Lock()
-			delete(d.creatingDroplets, dropletName)
-			d.dropletMu.Unlock()
-			close(op)
-		}()
-		_, err := d.createDroplet(ctx, dropletName)
-		if err != nil {
-			log.Printf("Failed to create droplet %s: %v", dropletName, err)
-		}
-	}()
-
-	return dropletName, nil
+// CreateWorker implements SyncBackend interface
+func (d *digitaloceanPoolBackend) CreateWorker(ctx context.Context, name string) (backends.WorkerInfo, error) {
+	dropletID, err := d.createDroplet(ctx, name)
+	if err != nil {
+		return backends.WorkerInfo{}, err
+	}
+	return backends.WorkerInfo{State: backends.WorkerStateActive, Data: dropletID}, nil
 }
 
 func (d *digitaloceanPoolBackend) createDroplet(ctx context.Context, dropletName string) (int, error) {
@@ -322,51 +302,22 @@ fi
 	}
 
 	log.Printf("Created DigitalOcean droplet %s (id: %d, status: %s)", dropletName, createResp.Droplet.ID, createResp.Droplet.Status)
-	d.dropletMu.Lock()
-	defer d.dropletMu.Unlock()
-	d.activeDroplets[createResp.Droplet.ID] = &createResp.Droplet
-
 	return createResp.Droplet.ID, nil
 }
 
-func (d *digitaloceanPoolBackend) RequestDelete(ctx context.Context, workerName string) error {
-	var creatingOp chan struct{}
-	d.dropletMu.Lock()
-	creatingOp = d.creatingDroplets[workerName]
-	d.terminatingDroplets[workerName] = struct{}{}
-	op := make(chan struct{})
-	d.lastOp = op
-	d.dropletMu.Unlock()
-
-	go func() {
-		defer func() {
-			d.dropletMu.Lock()
-			delete(d.terminatingDroplets, workerName)
-			d.dropletMu.Unlock()
-			close(op)
-		}()
-		if creatingOp != nil {
-			<-creatingOp
-		}
-		err := d.terminateDroplet(ctx, workerName)
-		if err != nil {
-			log.Printf("Failed to terminate droplet %s: %v", workerName, err)
-		}
-	}()
-
-	return nil
+// DeleteWorker implements SyncBackend interface
+func (d *digitaloceanPoolBackend) DeleteWorker(ctx context.Context, workerName string, activeWorker backends.WorkerInfo) error {
+	return d.terminateDroplet(ctx, workerName, activeWorker)
 }
 
-func (d *digitaloceanPoolBackend) terminateDroplet(ctx context.Context, dropletName string) error {
-	d.dropletMu.RLock()
+func (d *digitaloceanPoolBackend) terminateDroplet(ctx context.Context, dropletName string, workerInfo backends.WorkerInfo) error {
+	// Get droplet from active workers cache
 	var dropletID int
-	for id, drop := range d.activeDroplets {
-		if drop.Name == dropletName {
-			dropletID = id
-			break
-		}
+	if drop, ok := workerInfo.Data.(*droplet); ok && drop.Name == dropletName {
+		dropletID = drop.ID
+	} else {
+		return fmt.Errorf("invalid worker info for droplet %s: %v", dropletName, workerInfo)
 	}
-	d.dropletMu.RUnlock()
 
 	if dropletID == 0 {
 		return fmt.Errorf("droplet not found: %s", dropletName)
@@ -386,28 +337,11 @@ func (d *digitaloceanPoolBackend) terminateDroplet(ctx context.Context, dropletN
 	}
 
 	log.Printf("Terminated DigitalOcean droplet %s", dropletName)
-
-	d.dropletMu.Lock()
-	delete(d.activeDroplets, dropletID)
-	d.dropletMu.Unlock()
-
 	return nil
 }
 
-func (d *digitaloceanPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus, error) {
-	seen := make(map[string]struct{})
-	var res []broker.WorkerStatus
-
-	d.dropletMu.RLock()
-	for creatingDroplet := range d.creatingDroplets {
-		res = append(res, broker.WorkerStatus{Name: creatingDroplet})
-		seen[creatingDroplet] = struct{}{}
-	}
-	for terminatingDroplet := range d.terminatingDroplets {
-		seen[terminatingDroplet] = struct{}{}
-	}
-	d.dropletMu.RUnlock()
-
+// ListRemoteWorkers implements SyncBackend interface
+func (d *digitaloceanPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]backends.WorkerInfo, error) {
 	path := "/droplets?tag_name=velda"
 	resp, err := d.makeRequest(ctx, "GET", path, nil)
 	if err != nil {
@@ -425,10 +359,7 @@ func (d *digitaloceanPoolBackend) ListWorkers(ctx context.Context) ([]broker.Wor
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	d.dropletMu.Lock()
-	defer d.dropletMu.Unlock()
-
-	d.activeDroplets = make(map[int]*droplet)
+	workers := make(map[string]backends.WorkerInfo)
 	for i := range listResp.Droplets {
 		drop := &listResp.Droplets[i]
 
@@ -436,26 +367,12 @@ func (d *digitaloceanPoolBackend) ListWorkers(ctx context.Context) ([]broker.Wor
 			continue
 		}
 
-		d.activeDroplets[drop.ID] = drop
-
-		if _, exists := seen[drop.Name]; exists {
-			continue
-		}
-
 		if drop.Status == "active" || drop.Status == "new" {
-			res = append(res, broker.WorkerStatus{Name: drop.Name})
-			seen[drop.Name] = struct{}{}
+			workers[drop.Name] = backends.WorkerInfo{State: backends.WorkerStateActive, Data: drop}
 		}
 	}
 
-	return res, nil
-}
-
-func (d *digitaloceanPoolBackend) WaitForLastOperation(ctx context.Context) error {
-	if d.lastOp != nil {
-		<-d.lastOp
-	}
-	return nil
+	return workers, nil
 }
 
 func convertToIntSlice(input []int32) []int {

@@ -41,12 +41,6 @@ type nebiusPoolBackend struct {
 	instanceService computeservice.InstanceService
 	diskService     computeservice.DiskService
 
-	instanceMu        sync.RWMutex
-	creatingInstances map[string]struct{}
-	deletingInstances map[string]struct{}
-
-	lastOp chan struct{}
-
 	// Cache for available disks
 	diskPoolMu       sync.RWMutex
 	diskPool         map[string]diskInfo
@@ -62,16 +56,21 @@ func NewNebiusPoolBackend(cfg *proto.AutoscalerBackendNebiusLaunchTemplate, sdk 
 	instanceService := sdk.Services().Compute().V1().Instance()
 	diskService := sdk.Services().Compute().V1().Disk()
 
-	return &nebiusPoolBackend{
-		cfg:               cfg,
-		sdk:               sdk,
-		instanceService:   instanceService,
-		diskService:       diskService,
-		creatingInstances: make(map[string]struct{}),
-		deletingInstances: make(map[string]struct{}),
-		diskPool:          make(map[string]diskInfo),
-		lastScannedDisks:  make(map[string]diskInfo),
+	backend := &nebiusPoolBackend{
+		cfg:              cfg,
+		sdk:              sdk,
+		instanceService:  instanceService,
+		diskService:      diskService,
+		diskPool:         make(map[string]diskInfo),
+		lastScannedDisks: make(map[string]diskInfo),
 	}
+
+	return backends.MakeAsync(backend)
+}
+
+// GenerateWorkerName implements SyncBackend interface
+func (n *nebiusPoolBackend) GenerateWorkerName() string {
+	return fmt.Sprintf("%s-%s", n.cfg.InstanceNamePrefix, utils.RandString(5))
 }
 
 // getAvailableDisk retrieves and removes a disk from the pool
@@ -98,28 +97,13 @@ func (n *nebiusPoolBackend) getDiskPoolCount() int {
 	return len(n.diskPool)
 }
 
-func (n *nebiusPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
-	// Create a new instance
-	name := fmt.Sprintf("%s-%s", n.cfg.InstanceNamePrefix, utils.RandString(5))
-	n.instanceMu.Lock()
-	defer n.instanceMu.Unlock()
-	n.creatingInstances[name] = struct{}{}
-	n.lastOp = make(chan struct{})
-	op := n.lastOp
-	go func() {
-		defer func() {
-			n.instanceMu.Lock()
-			delete(n.creatingInstances, name)
-			n.instanceMu.Unlock()
-			close(op)
-		}()
-		_, err := n.createInstance(ctx, name)
-		if err != nil {
-			log.Printf("Failed to create instance %s: %v", name, err)
-		}
-	}()
-
-	return name, nil
+// CreateWorker implements SyncBackend interface
+func (n *nebiusPoolBackend) CreateWorker(ctx context.Context, name string) (backends.WorkerInfo, error) {
+	instanceID, err := n.createInstance(ctx, name)
+	if err != nil {
+		return backends.WorkerInfo{}, err
+	}
+	return backends.WorkerInfo{State: backends.WorkerStateActive, Data: instanceID}, nil
 }
 
 func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (string, error) {
@@ -284,25 +268,9 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 	return name, nil
 }
 
-func (n *nebiusPoolBackend) RequestDelete(ctx context.Context, workerName string) error {
-	n.instanceMu.Lock()
-	defer n.instanceMu.Unlock()
-	n.deletingInstances[workerName] = struct{}{}
-	op := make(chan struct{})
-	n.lastOp = op
-	go func() {
-		defer func() {
-			n.instanceMu.Lock()
-			delete(n.deletingInstances, workerName)
-			n.instanceMu.Unlock()
-			close(op)
-		}()
-		err := n.performDelete(ctx, workerName)
-		if err != nil {
-			log.Printf("Failed to delete instance %s: %v", workerName, err)
-		}
-	}()
-	return nil
+// DeleteWorker implements SyncBackend interface
+func (n *nebiusPoolBackend) DeleteWorker(ctx context.Context, workerName string, workerInfo backends.WorkerInfo) error {
+	return n.performDelete(ctx, workerName)
 }
 
 func (n *nebiusPoolBackend) performDelete(ctx context.Context, workerName string) error {
@@ -360,26 +328,13 @@ func (n *nebiusPoolBackend) performDelete(ctx context.Context, workerName string
 	return nil
 }
 
-func (n *nebiusPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus, error) {
+// ListRemoteWorkers implements SyncBackend interface
+func (n *nebiusPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]backends.WorkerInfo, error) {
 	listReq := &compute.ListInstancesRequest{
 		ParentId: n.cfg.GetParentId(),
 	}
-	seen := make(map[string]struct{})
-	var res []broker.WorkerStatus
 
-	func() {
-		n.instanceMu.RLock()
-		defer n.instanceMu.RUnlock()
-		// Add creating instances
-		for creatingInstance := range n.creatingInstances {
-			res = append(res, broker.WorkerStatus{Name: creatingInstance})
-			seen[creatingInstance] = struct{}{}
-		}
-		// Add deleting instances as seen so we include them in the list
-		for deletingInstance := range n.deletingInstances {
-			seen[deletingInstance] = struct{}{}
-		}
-	}()
+	workers := make(map[string]backends.WorkerInfo)
 	for instance, err := range n.instanceService.Filter(ctx, listReq) {
 		if err != nil {
 			log.Printf("Failed to filter instances: %v", err)
@@ -392,9 +347,7 @@ func (n *nebiusPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerSta
 		if status.GetState() == compute.InstanceStatus_DELETING {
 			continue
 		}
-		if _, exists := seen[metadata.GetName()]; exists {
-			continue
-		}
+
 		// Client-side label/tag filtering
 		if len(n.cfg.GetLabels()) > 0 {
 			instLabels := metadata.GetLabels()
@@ -411,12 +364,7 @@ func (n *nebiusPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerSta
 		}
 
 		instanceId := metadata.GetName()
-
-		name := instanceId
-
-		// Active/running instance
-		res = append(res, broker.WorkerStatus{Name: name})
-		seen[name] = struct{}{}
+		workers[instanceId] = backends.WorkerInfo{State: backends.WorkerStateActive, Data: instance}
 	}
 
 	// Scan for unattached disks to populate the disk pool
@@ -424,7 +372,7 @@ func (n *nebiusPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerSta
 		// TODO: This may have race conditions if a disk is being reused.
 		go n.scanAndUpdateDiskPool(ctx)
 	}
-	return res, nil
+	return workers, nil
 }
 
 // scanAndUpdateDiskPool scans for unattached disks and updates the disk pool
@@ -533,11 +481,6 @@ func (n *nebiusPoolBackend) scanAndUpdateDiskPool(ctx context.Context) {
 			}
 		}()
 	}
-}
-
-func (n *nebiusPoolBackend) WaitForLastOperation(ctx context.Context) error {
-	<-n.lastOp
-	return nil
 }
 
 type nebiusLaunchTemplatePoolFactory struct{}
