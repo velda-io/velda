@@ -362,13 +362,14 @@ func (p *AutoScaledPool) MarkLost(workerName string) error {
 
 	p.lastKnownTime[workerName] = time.Now()
 	oldStatus := p.workerStatus[workerName]
-	if oldStatus == WorkerStatusNone {
+	switch oldStatus {
+	case WorkerStatusNone:
 		p.logPrintf("Worker %s lost, was not in pool", workerName)
-	} else if oldStatus == WorkerStatusNeedsRestart {
+	case WorkerStatusNeedsRestart:
 		p.setWorkerStatusLocked(workerName, WorkerStatusPending, -1)
-	} else if oldStatus == WorkerStatusDeleting {
+	case WorkerStatusDeleting:
 		p.setWorkerStatusLocked(workerName, WorkerStatusDisconnected, 0)
-	} else {
+	default:
 		p.setWorkerStatusLocked(workerName, WorkerStatusLost, 0)
 		p.logPrintf("Worker %s lost, was %v", workerName, oldStatus)
 	}
@@ -607,9 +608,6 @@ func (p *AutoScaledPool) deleteOneWorkerLocked() bool {
 		}
 		p.setWorkerStatusLocked(name, WorkerStatusNotifyDeleting, -1)
 		p.logPrintf("Deleting idle worker %s, current idle size: %d", name, p.idleSizeLocked())
-		if err := p.backend.RequestDelete(p.ctx, name); err != nil {
-			p.logPrintf("Failed to delete idle worker %s: %v", name, err)
-		}
 	}
 	return true
 }

@@ -65,16 +65,16 @@ func ProvideLinuxNamespacePlugin(workDir WorkDir, sandboxConfig *agentpb.Sandbox
 	return NewLinuxNamespacePlugin(string(workDir), sandboxConfig, requestPlugin)
 }
 
-func ProvideNvidiaPlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig) *NvidiaPlugin {
-	return NewNvidiaPlugin(string(workDir), sandboxConfig)
+func ProvideNvidiaPlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig) *DevicesPlugin {
+	return NewDevicesPlugin(string(workDir), sandboxConfig)
 }
 
 func ProvideRunPid1Plugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig, agentDaemonPlugin *AgentDaemonPlugin, requestPlugin *SessionRequestPlugin) *RunPid1Plugin {
 	return NewRunPid1Plugin(string(workDir), sandboxConfig, agentDaemonPlugin, requestPlugin)
 }
 
-func ProvideCommandModifier(nvidiaPlugin *NvidiaPlugin) CommandModifier {
-	if nvidiaPlugin.HasGpu() {
+func ProvideCommandModifier(nvidiaPlugin *DevicesPlugin) CommandModifier {
+	if nvidiaPlugin.HasNvidiaGpu() {
 		return gpuModifier("/var/nvidia/lib", "/var/nvidia/bin")
 	}
 	return nil

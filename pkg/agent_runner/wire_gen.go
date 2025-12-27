@@ -24,9 +24,9 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	rootfsPlugin := agent2.ProvideRootfsPlugin(workDir, mounter, sandboxConfig, sessionRequestPlugin)
 	autoFsDaemonPlugin := agent2.ProvideAutoFsDaemonPlugin()
 	linuxNamespacePlugin := agent2.ProvideLinuxNamespacePlugin(workDir, sandboxConfig, sessionRequestPlugin)
-	nvidiaPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
+	devicesPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
 	runPid1Plugin := agent2.ProvideRunPid1Plugin(workDir, sandboxConfig, agentDaemonPlugin, sessionRequestPlugin)
-	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, rootfsPlugin, autoFsDaemonPlugin, linuxNamespacePlugin, nvidiaPlugin, runPid1Plugin)
+	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, rootfsPlugin, autoFsDaemonPlugin, linuxNamespacePlugin, devicesPlugin, runPid1Plugin)
 	return shimRunner
 }
 
@@ -39,8 +39,8 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	waiterPlugin := agent2.ProvideWaiterPlugin()
 	completionSignalPlugin := agent2.ProvideCompletionSignalPlugin()
 	agentName := agent2.ProvideAgentName(cmd)
-	nvidiaPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
-	commandModifier := agent2.ProvideCommandModifier(nvidiaPlugin)
+	devicesPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
+	commandModifier := agent2.ProvideCommandModifier(devicesPlugin)
 	sshdPlugin := agent2.ProvideSshdPlugin(agentName, authPluginType, waiterPlugin, sessionRequestPlugin, completionSignalPlugin, commandModifier)
 	reportStatusPlugin := agent2.ProvideReportStatusPlugin(sshdPlugin)
 	batchPlugin := agent2.ProvideBatchPlugin(waiterPlugin, sessionRequestPlugin, completionSignalPlugin, commandModifier)
@@ -56,7 +56,7 @@ type ShimRunner agent2.AbstractPlugin
 
 type Pid1Runner agent2.AbstractPlugin
 
-func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPlugin *agent2.AgentDaemonPlugin, sandboxFsPlugin *agent2.SandboxFsPlugin, rootfsPlugin *agent2.RootfsPlugin, autofsDaemon *agent2.AutoFsDaemonPlugin, sandboxPlugin *agent2.LinuxNamespacePlugin, nvidiaPlugin *agent2.NvidiaPlugin, pid1Plugin *agent2.RunPid1Plugin) ShimRunner {
+func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPlugin *agent2.AgentDaemonPlugin, sandboxFsPlugin *agent2.SandboxFsPlugin, rootfsPlugin *agent2.RootfsPlugin, autofsDaemon *agent2.AutoFsDaemonPlugin, sandboxPlugin *agent2.LinuxNamespacePlugin, nvidiaPlugin *agent2.DevicesPlugin, pid1Plugin *agent2.RunPid1Plugin) ShimRunner {
 	return agent2.NewPluginRunner(
 		requestPlugin,
 		agentDaemonPlugin,
