@@ -506,3 +506,93 @@ func TestCancelledDuringPending(t *testing.T) {
 		return len(backend.workers) == 0
 	}, 3*time.Second, 10*time.Millisecond)
 }
+
+func TestWorkerRestartWithSameID(t *testing.T) {
+	backend := &FakeBackend{
+		workers:            []WorkerStatus{},
+		clock:              time.Now,
+		recycleWorkerNames: true,
+	}
+
+	pool := NewAutoScaledPool("pool", AutoScaledPoolConfig{
+		Context:              context.Background(),
+		Backend:              backend,
+		MinIdle:              0,
+		MaxIdle:              0,
+		IdleDecay:            0 * time.Hour,
+		MaxSize:              2,
+		DefaultSlotsPerAgent: 1,
+	})
+
+	inspectChan := make(chan AgentStatusRequest, 100)
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case req := <-inspectChan:
+				if req.shutdown {
+					pool.MarkDeleting(req.target)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+
+	pool.ReadyForIdleMaintenance()
+	var workerName string
+
+	t.Run("Setup initial worker", func(t *testing.T) {
+		pool.RequestWorker()
+		workerName = backend.GetPending(t)
+		pool.NotifyAgentAvailable(workerName, false, inspectChan, 1)
+		assert.Equal(t, 1, len(pool.idleWorkers))
+		pool.MarkBusy(workerName, 0)
+	})
+
+	t.Run("Delete worker but keep connection alive", func(t *testing.T) {
+		err := pool.MarkIdle(workerName, 1)
+		assert.NoError(t, err)
+
+		// Verify worker is deleted from backend
+		assert.Eventually(t, func() bool {
+			return !backend.HasWorker(workerName)
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// But the connection is still alive - worker is still in pool
+		assert.Equal(t, WorkerStatusDeleting, pool.workerStatus[workerName])
+	})
+
+	t.Run("Create new instance returns same worker ID", func(t *testing.T) {
+		pool.RequestWorker()
+		// Verify the worker is back in backend
+		assert.True(t, backend.HasWorker(workerName))
+		assert.Equal(t, WorkerStatusNeedsRestart, pool.workerStatus[workerName])
+	})
+
+	t.Run("Connection drops", func(t *testing.T) {
+		// Simulate connection drop
+		pool.MarkLost(workerName)
+
+		// Worker should be in deleting -> disconnected state
+		// Or if it was idle, it should be in lost state
+		status := pool.workerStatus[workerName]
+		assert.Equal(t, WorkerStatusPending, status,
+			"Expected worker to be Lost or Disconnected, got %v", status)
+	})
+
+	t.Run("Reconnect with same ID", func(t *testing.T) {
+		// Reconnect the same worker
+		pool.NotifyAgentAvailable(workerName, false, inspectChan, 1)
+
+		// Verify worker is now active
+		assert.Equal(t, WorkerStatusIdle, pool.workerStatus[workerName])
+
+		pool.MarkBusy(workerName, 0)
+
+		// Verify no extra node was provisioned
+		assert.Equal(t, 1, len(backend.workers),
+			"No extra worker should be provisioned on reconnect")
+	})
+}
