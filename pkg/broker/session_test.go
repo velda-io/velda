@@ -87,7 +87,7 @@ func TestSessionSchedule(t *testing.T) {
 		testFunc := func() {
 			resp, err := session.Schedule(ctx)
 			if err == nil {
-				assert.Equal(t, proto.ExecutionStatus_STATUS_TERMINATED, resp.Status)
+				assert.Equal(t, proto.ExecutionStatus_STATUS_CANCELLED, resp.Status)
 			} else {
 				assert.ErrorIs(t, err, ctx.Err(), err)
 			}
@@ -100,7 +100,7 @@ func TestSessionSchedule(t *testing.T) {
 		cancel()
 		wg.Wait()
 		assert.Eventually(t, func() bool {
-			return session.Status().Status == proto.ExecutionStatus_STATUS_TERMINATED
+			return session.Status().Status == proto.ExecutionStatus_STATUS_CANCELLED
 		}, 2*time.Second, 10*time.Millisecond)
 	})
 
@@ -379,7 +379,7 @@ func TestSessionSchedule(t *testing.T) {
 
 		// Verify session is terminated
 		assert.Eventually(t, func() bool {
-			return session.Status().Status == proto.ExecutionStatus_STATUS_TERMINATED
+			return session.Status().Status == proto.ExecutionStatus_STATUS_CANCELLED
 		}, 2*time.Second, 10*time.Millisecond)
 	})
 }
