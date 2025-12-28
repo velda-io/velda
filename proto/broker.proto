@@ -222,6 +222,8 @@ message ExecutionStatus {
     STATUS_CHECKPOINTED = 6;
     // In gang-scheduling, resource has been allocated for this shard.
     STATUS_WAITING_FOR_OTHER_SHARDS = 7;
+    // Cancelled: never sent to agent or killed before started.
+    STATUS_CANCELLED = 8;
   }
 
   Status status = 3;

@@ -113,7 +113,6 @@ func NewSession(request *proto.SessionRequest, scheduler *Scheduler, helpers Ses
 		agentChan:     make(chan *Agent, 1),
 		agentResponse: make(chan AgentSessionResponse, 1),
 		cancelConfirm: make(chan struct{}, 1),
-		cancelSignal:  make(chan struct{}, 1),
 		staleTimeout:  DefaultStaleTimeout,
 		createTime:    time.Now(),
 		helpers:       helpers,
@@ -157,6 +156,7 @@ func (s *Session) Schedule(ctx context.Context) (*proto.ExecutionStatus, error) 
 				fallthrough
 			case proto.ExecutionStatus_STATUS_UNSPECIFIED:
 				s.scheduleCompletion = make(chan struct{})
+				s.cancelSignal = make(chan struct{}, 1)
 				s.status.Status = proto.ExecutionStatus_STATUS_QUEUEING
 				go s.scheduleLoop(schedulingStateCreated)
 				fallthrough
@@ -171,6 +171,8 @@ func (s *Session) Schedule(ctx context.Context) (*proto.ExecutionStatus, error) 
 				s.staleConnectionRequest = make(chan struct{})
 				return nil, s.scheduleCompletion
 			case proto.ExecutionStatus_STATUS_TERMINATED:
+				fallthrough
+			case proto.ExecutionStatus_STATUS_CANCELLED:
 				return s.status, nil
 			}
 			panic("unreachable")
@@ -475,7 +477,11 @@ func (s *Session) AddCompletion(completion func()) {
 }
 
 func (s *Session) completeLocked(finalStatus proto.SessionExecutionFinalState) {
-	s.status.Status = proto.ExecutionStatus_STATUS_TERMINATED
+	if finalStatus == proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_CANCELLED {
+		s.status.Status = proto.ExecutionStatus_STATUS_CANCELLED
+	} else {
+		s.status.Status = proto.ExecutionStatus_STATUS_TERMINATED
+	}
 	for i := len(s.completions) - 1; i >= 0; i-- {
 		s.completions[i]()
 	}

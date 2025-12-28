@@ -86,6 +86,7 @@ const (
 	FeatureSnapshot        Feature = "snapshot"
 	FeatureMultiAgent      Feature = "multi-agent"
 	FeatureBatchedSchedule Feature = "batched-schedule"
+	FeatureZeroMaxPool     Feature = "zero-max-pool"
 )
 
 type Runner interface {

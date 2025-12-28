@@ -341,4 +341,42 @@ vbatch ./test_watch.sh
 		assert.True(t, strings.Contains(output, "TASK_STATUS_RUNNING"), "Expect running status, got %s", output)
 		assert.True(t, strings.Contains(output, "TASK_STATUS_SUCCESS"), "Expect success status, got %s", output)
 	})
+
+	t.Run("CancelBeforeScheduling", func(t *testing.T) {
+		if !r.Supports(FeatureZeroMaxPool) {
+			t.Skip("Zero max pool feature is not supported")
+		}
+
+		// Submit a batch job to a pool with zero capacity (zero_max pool)
+		// This ensures the task won't get scheduled immediately
+		jobId, err := runCommandGetOutput("bash", "-c", `
+cat << EOF > cancel_before_sched.sh
+#!/bin/bash
+echo "This should never run"
+EOF
+chmod +x cancel_before_sched.sh
+vbatch -P zero_max ./cancel_before_sched.sh
+`)
+		require.NoError(t, err, "Failed to start job", jobId)
+		jobId = strings.TrimSpace(jobId)
+
+		// Verify the task is in QUEUEING status (not scheduled yet)
+		time.Sleep(500 * time.Millisecond) // Give it a moment to be registered
+		status := getTaskStatus(t, jobId)
+		assert.Equal(t, "TASK_STATUS_QUEUEING", status, "Task should be queueing, got %s", status)
+
+		// Cancel the job before it gets scheduled
+		_, err = runVeldaWithOutput("task", "cancel", jobId)
+		require.NoError(t, err, "Failed to cancel task %s", jobId)
+
+		// Verify the task is now cancelled
+		assert.Eventually(t, func() bool {
+			status := getTaskStatus(t, jobId)
+			return status == "TASK_STATUS_CANCELLED"
+		}, 10*time.Second, 500*time.Millisecond, "Task should be cancelled")
+
+		// Double check final status
+		finalStatus := getTaskStatus(t, jobId)
+		assert.Equal(t, "TASK_STATUS_CANCELLED", finalStatus)
+	})
 }

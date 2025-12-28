@@ -124,7 +124,24 @@ agent_pools:
     min_idle_agents: 0
     max_idle_agents: 3
     idle_decay: 40s
-`, suiteName, configDir, veldaBin)
+- name: "zero_max"
+  auto_scaler:
+    backend:
+     command:
+       start: |
+          name=agent-test-zero-${RANDOM}
+          docker run  -d --name $name --add-host=host.docker.internal:host-gateway  -e AGENT_NAME=$name -v %s/agent.yaml:/run/velda/velda.yaml -h $name  --mount type=volume,target=/tmp/agent --rm -v %s:/velda --privileged -q veldaio/agent:latest > /dev/null
+          echo $name
+       stop: |
+         name=$1
+         docker rm -f $name -v >/dev/null
+       list: |
+         docker ps -a --format '{{.Names}}' | egrep "agent-test-zero-[0-9]+\$" || true
+    max_agents: 0
+    min_idle_agents: 0
+    max_idle_agents: 0
+    idle_decay: 40s
+`, suiteName, configDir, veldaBin, configDir, veldaBin)
 
 	if err := os.WriteFile(configFile, []byte(config), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
@@ -181,6 +198,8 @@ func (r *LocalMiniRunner) Supports(feature cases.Feature) bool {
 		return false
 	case cases.FeatureMultiAgent:
 		return false
+	case cases.FeatureZeroMaxPool:
+		return true
 	}
 	return true
 }

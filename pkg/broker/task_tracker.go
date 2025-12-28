@@ -214,6 +214,11 @@ func (t *TaskTracker) registerSession(session *Session) bool {
 		if len(sessionInJob) == 0 {
 			delete(t.leasedSessions, jobId)
 		}
+		if _, ok := t.cancelled[jobId]; ok {
+			if err := t.db.UpdateTaskFinalResult(context.Background(), taskId, &db.BatchTaskResult{Cancelled: true}); err != nil {
+				log.Printf("Failed to mark cancelled task %s as cancelled: %v", taskId, err)
+			}
+		}
 	})
 	return true
 }

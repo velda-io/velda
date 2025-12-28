@@ -38,4 +38,5 @@ type TaskWithUser struct {
 type BatchTaskResult struct {
 	Payload   *proto.BatchTaskResult
 	StartTime time.Time
+	Cancelled bool
 }

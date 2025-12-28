@@ -645,6 +645,15 @@ func statusStrToProto(statusStr string, pendingUpstreams int) proto.TaskStatus {
 func (s *SqliteDatabase) UpdateTaskFinalResult(ctx context.Context, taskId string, result *BatchTaskResult) error {
 	fullTaskId := taskId
 	parentId, taskId := path.Split(taskId)
+	if result.Cancelled {
+		// If task was cancelled, update status to CANCELLED
+		_, err := s.db.ExecContext(ctx, `
+UPDATE tasks
+SET status = 'CANCELLED', finish_time = ?
+WHERE parent_id = ? AND task_id = ? AND status = 'LEASED'`,
+			time.Now().Format(time.RFC3339Nano), parentId, taskId)
+		return err
+	}
 
 	tx, err := s.BeginTx(ctx)
 	if err != nil {
