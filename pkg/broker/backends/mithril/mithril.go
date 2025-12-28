@@ -64,7 +64,7 @@ type spotBid struct {
 
 type launchSpecification struct {
 	Volumes           []string `json:"volumes"`
-	SSHKeys           []string `json:"ssh_keys,omitempty"`
+	SSHKeys           []string `json:"ssh_keys"`
 	StartupScript     string   `json:"startup_script,omitempty"`
 	KubernetesCluster string   `json:"kubernetes_cluster,omitempty"`
 	ImageVersion      string   `json:"image_version,omitempty"`

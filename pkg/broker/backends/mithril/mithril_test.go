@@ -24,7 +24,7 @@ import (
 )
 
 // To run test:
-// MITHRIL_API_TOKEN=<token> MITHRIL_PROJECT_ID=<project-id> go test --tags mithril -v ./pkg/broker/backends/mithril
+// MITHRIL_API_TOKEN=<token> MITHRIL_PROJECT_ID=<project-id> MITHRIL_SSH_KEY_ID=<ssh-key-id> go test --tags mithril -v ./pkg/broker/backends/mithril
 
 func TestMithrilBackend(t *testing.T) {
 	apiToken := os.Getenv("MITHRIL_API_TOKEN")
@@ -35,6 +35,11 @@ func TestMithrilBackend(t *testing.T) {
 	projectID := os.Getenv("MITHRIL_PROJECT_ID")
 	if projectID == "" {
 		t.Skip("MITHRIL_PROJECT_ID not set, skipping test")
+	}
+
+	sshKeyId := os.Getenv("MITHRIL_SSH_KEY_ID")
+	if sshKeyId == "" {
+		t.Skip("MITHRIL_SSH_KEY_ID not set")
 	}
 
 	configpb := &cfgpb.AutoscalerBackend{
@@ -49,6 +54,10 @@ func TestMithrilBackend(t *testing.T) {
 				Labels: map[string]string{
 					"velda-test": "velda",
 				},
+				SshKeyIds: []string{
+					sshKeyId,
+				},
+				MaxSuspendedBids: 1,
 			},
 		},
 	}
