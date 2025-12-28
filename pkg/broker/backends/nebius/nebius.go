@@ -265,7 +265,7 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 	}
 
 	log.Printf("Created Nebius instance %s AS %s", operation.ResourceID(), name)
-	return name, nil
+	return operation.ResourceID(), nil
 }
 
 // DeleteWorker implements SyncBackend interface
@@ -364,7 +364,7 @@ func (n *nebiusPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]b
 		}
 
 		instanceId := metadata.GetName()
-		workers[instanceId] = backends.WorkerInfo{State: backends.WorkerStateActive, Data: instance}
+		workers[instanceId] = backends.WorkerInfo{State: backends.WorkerStateActive, Data: instance.Metadata.Id}
 	}
 
 	// Scan for unattached disks to populate the disk pool

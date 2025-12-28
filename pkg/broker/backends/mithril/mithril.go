@@ -331,7 +331,6 @@ func (m *mithrilPoolBackend) terminateBid(ctx context.Context, bidName string, w
 	return nil
 }
 
-// pauseBid pauses a spot bid using PATCH API
 // SuspendWorker implements Resumable interface
 func (m *mithrilPoolBackend) SuspendWorker(ctx context.Context, name string, activeWorker backends.WorkerInfo) error {
 	var bidFID string
@@ -370,6 +369,7 @@ func (m *mithrilPoolBackend) ResumeWorker(ctx context.Context, name string, susp
 	return nil
 }
 
+// Pauses a spot bid using PATCH API
 func (m *mithrilPoolBackend) pauseBid(ctx context.Context, bidFID string) error {
 	patchBody := map[string]interface{}{
 		"paused": true,

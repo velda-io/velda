@@ -313,8 +313,8 @@ func (d *digitaloceanPoolBackend) DeleteWorker(ctx context.Context, workerName s
 func (d *digitaloceanPoolBackend) terminateDroplet(ctx context.Context, dropletName string, workerInfo backends.WorkerInfo) error {
 	// Get droplet from active workers cache
 	var dropletID int
-	if drop, ok := workerInfo.Data.(*droplet); ok && drop.Name == dropletName {
-		dropletID = drop.ID
+	if drop, ok := workerInfo.Data.(int); ok {
+		dropletID = drop
 	} else {
 		return fmt.Errorf("invalid worker info for droplet %s: %v", dropletName, workerInfo)
 	}
@@ -368,7 +368,7 @@ func (d *digitaloceanPoolBackend) ListRemoteWorkers(ctx context.Context) (map[st
 		}
 
 		if drop.Status == "active" || drop.Status == "new" {
-			workers[drop.Name] = backends.WorkerInfo{State: backends.WorkerStateActive, Data: drop}
+			workers[drop.Name] = backends.WorkerInfo{State: backends.WorkerStateActive, Data: drop.ID}
 		}
 	}
 
