@@ -73,6 +73,7 @@ type Session struct {
 	agentChan     chan *Agent
 	agentResponse chan AgentSessionResponse
 	cancelConfirm chan struct{}
+	cancelSignal  chan struct{}
 	gang          *GangCoordinator
 
 	scheduleCompletion chan struct{}
@@ -155,6 +156,7 @@ func (s *Session) Schedule(ctx context.Context) (*proto.ExecutionStatus, error) 
 				fallthrough
 			case proto.ExecutionStatus_STATUS_UNSPECIFIED:
 				s.scheduleCompletion = make(chan struct{})
+				s.cancelSignal = make(chan struct{}, 1)
 				s.status.Status = proto.ExecutionStatus_STATUS_QUEUEING
 				go s.scheduleLoop(schedulingStateCreated)
 				fallthrough
@@ -169,6 +171,8 @@ func (s *Session) Schedule(ctx context.Context) (*proto.ExecutionStatus, error) 
 				s.staleConnectionRequest = make(chan struct{})
 				return nil, s.scheduleCompletion
 			case proto.ExecutionStatus_STATUS_TERMINATED:
+				fallthrough
+			case proto.ExecutionStatus_STATUS_CANCELLED:
 				return s.status, nil
 			}
 			panic("unreachable")
@@ -241,6 +245,10 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 				nextState = schedulingStateCancelling
 				scheduler.RemoveSession(s)
 				s.schedulingErr = errors.New("all context cancelled")
+			case <-s.cancelSignal:
+				nextState = schedulingStateCancelling
+				scheduler.RemoveSession(s)
+				s.schedulingErr = errors.New("session cancelled by kill command")
 			case agent := <-s.agentChan:
 				// This should not block with buffer size 1.
 				s.agent = agent
@@ -257,20 +265,35 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 				nextState = schedulingStateSentToAgent
 			}
 		case schedulingStateSentToAgent:
-			response := <-s.agentResponse
-			if response.Error != nil {
-				// TODO: Retry scheduling?
-				s.schedulingErr = fmt.Errorf("Error from agent: %w", response.Error)
-				s.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_STARTUP_FAILURE)
+			select {
+			case <-s.cancelSignal:
+				// Session was killed while waiting for agent response
+				// We need to wait for the response to properly clean up
+				response := <-s.agentResponse
+				if response.Error == nil && s.agent != nil {
+					// Agent has already started the session, need to kill it
+					// Use a short timeout context since the session is being cancelled
+					killCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					s.agent.RequestKill(killCtx, s.Request.InstanceId, s.Request.SessionId, false)
+				}
+				nextState = schedulingStateCancelling
+				s.schedulingErr = errors.New("session cancelled by kill command")
+			case response := <-s.agentResponse:
+				if response.Error != nil {
+					// TODO: Retry scheduling?
+					s.schedulingErr = fmt.Errorf("Error from agent: %w", response.Error)
+					s.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_STARTUP_FAILURE)
+					return
+				}
+				// Successfully scheduled.
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				s.updateFromAgentResponseLocked(response)
+				s.notifyChangeLocked()
+				s.startQuotaMonitoring()
 				return
 			}
-			// Successfully scheduled.
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			s.updateFromAgentResponseLocked(response)
-			s.notifyChangeLocked()
-			s.startQuotaMonitoring()
-			return
 		case schedulingStateCancelling:
 			select {
 			case <-s.cancelConfirm:
@@ -309,6 +332,9 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 			}()
 
 			select {
+			case <-s.cancelSignal:
+				nextState = schedulingStateCancelling
+				s.schedulingErr = errors.New("session cancelled by kill command")
 			case <-ctxDone:
 				// Reevaluate ctx.
 				continue
@@ -369,6 +395,7 @@ func (s *Session) MarkStale(lastActiveTime time.Time) {
 		s.staleConnectionRequest = make(chan struct{})
 		s.staleReconnect = make(chan struct{})
 		s.scheduleCompletion = make(chan struct{})
+		s.cancelSignal = make(chan struct{}, 1)
 		if s.Request.TaskId != "" {
 			s.scheduleCtx = append(s.scheduleCtx, s.scheduler.ctx)
 		}
@@ -379,6 +406,7 @@ func (s *Session) MarkStale(lastActiveTime time.Time) {
 		// Restart the scheduling.
 		s.status.Status = proto.ExecutionStatus_STATUS_QUEUEING
 		s.scheduleCompletion = make(chan struct{})
+		s.cancelSignal = make(chan struct{}, 1)
 		if s.Request.TaskId != "" {
 			s.scheduleCtx = append(s.scheduleCtx, s.scheduler.ctx)
 		}
@@ -427,8 +455,19 @@ func (s *Session) Kill(ctx context.Context, force bool) error {
 	if s.status.Status == proto.ExecutionStatus_STATUS_RUNNING {
 		return s.agent.RequestKill(ctx, s.Request.InstanceId, s.Request.SessionId, force)
 	}
-	// TODO: Maybe remove from the queue?
-	return fmt.Errorf("Session %s is not running, cannot kill", s.id)
+	if s.status.Status == proto.ExecutionStatus_STATUS_QUEUEING ||
+		s.status.Status == proto.ExecutionStatus_STATUS_WAITING_FOR_OTHER_SHARDS ||
+		s.status.Status == proto.ExecutionStatus_STATUS_STALE {
+		// Send cancellation signal to the scheduling loop
+		select {
+		case s.cancelSignal <- struct{}{}:
+			return nil
+		default:
+			// Channel already has a signal, which is fine
+			return nil
+		}
+	}
+	return fmt.Errorf("Session %s is in state %v, cannot kill", s.id, s.status.Status)
 }
 
 func (s *Session) AddCompletion(completion func()) {
@@ -438,7 +477,11 @@ func (s *Session) AddCompletion(completion func()) {
 }
 
 func (s *Session) completeLocked(finalStatus proto.SessionExecutionFinalState) {
-	s.status.Status = proto.ExecutionStatus_STATUS_TERMINATED
+	if finalStatus == proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_CANCELLED {
+		s.status.Status = proto.ExecutionStatus_STATUS_CANCELLED
+	} else {
+		s.status.Status = proto.ExecutionStatus_STATUS_TERMINATED
+	}
 	for i := len(s.completions) - 1; i >= 0; i-- {
 		s.completions[i]()
 	}

@@ -76,15 +76,7 @@ func (r *MiniE2ERunner) Setup(t *testing.T) {
 }
 
 func (r *MiniE2ERunner) Supports(feature cases.Feature) bool {
-	switch feature {
-	case cases.FeatureImage:
-		return false
-	case cases.FeatureSnapshot:
-		return false
-	case cases.FeatureMultiAgent:
-		return false
-	}
-	return true
+	return false
 }
 
 func (r *MiniE2ERunner) CreateTestInstance(t *testing.T, namePrefix string, image string) string {

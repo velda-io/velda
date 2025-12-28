@@ -87,7 +87,7 @@ func TestSessionSchedule(t *testing.T) {
 		testFunc := func() {
 			resp, err := session.Schedule(ctx)
 			if err == nil {
-				assert.Equal(t, proto.ExecutionStatus_STATUS_TERMINATED, resp.Status)
+				assert.Equal(t, proto.ExecutionStatus_STATUS_CANCELLED, resp.Status)
 			} else {
 				assert.ErrorIs(t, err, ctx.Err(), err)
 			}
@@ -100,7 +100,7 @@ func TestSessionSchedule(t *testing.T) {
 		cancel()
 		wg.Wait()
 		assert.Eventually(t, func() bool {
-			return session.Status().Status == proto.ExecutionStatus_STATUS_TERMINATED
+			return session.Status().Status == proto.ExecutionStatus_STATUS_CANCELLED
 		}, 2*time.Second, 10*time.Millisecond)
 	})
 
@@ -348,5 +348,38 @@ func TestSessionSchedule(t *testing.T) {
 		assert.Equal(t, []string{
 			ids[4], ids[2], ids[3], ids[0], ids[1],
 		}, receivedIds)
+	})
+
+	t.Run("KillSessionDuringQueueing", func(t *testing.T) {
+		session := mustAddSession(makeRequest())
+		defer sessionDb.RemoveSession(session)
+
+		// Start scheduling the session without providing an agent
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			_, err := session.Schedule(ctx)
+			// Should fail due to cancellation
+			assert.NotNil(t, err)
+			assert.Contains(t, err.Error(), "cancelled")
+			wg.Done()
+		}()
+
+		// Wait for session to be in queueing state
+		assert.Eventually(t, func() bool {
+			return session.Status().Status == proto.ExecutionStatus_STATUS_QUEUEING
+		}, 2*time.Second, 10*time.Millisecond)
+
+		// Now kill the session
+		err := session.Kill(ctx, false)
+		assert.Nil(t, err)
+
+		// Wait for the scheduling goroutine to complete
+		wg.Wait()
+
+		// Verify session is terminated
+		assert.Eventually(t, func() bool {
+			return session.Status().Status == proto.ExecutionStatus_STATUS_CANCELLED
+		}, 2*time.Second, 10*time.Millisecond)
 	})
 }
