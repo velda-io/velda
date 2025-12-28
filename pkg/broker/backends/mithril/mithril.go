@@ -24,7 +24,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	pb "google.golang.org/protobuf/proto"
@@ -47,18 +46,6 @@ type mithrilPoolBackend struct {
 	httpClient *http.Client
 	apiBaseURL string
 	bidPrefix  string // prefix for bid names based on config hash
-
-	bidMu           sync.RWMutex
-	activeBids      map[string]*spotBid      // fid -> bid info
-	creatingBids    map[string]chan struct{} // bid names being created
-	terminatingBids map[string]struct{}      // bid names being terminated
-
-	// Cache for suspended bids
-	suspendedBidPoolMu sync.RWMutex
-	suspendedBidPool   map[string]*spotBid // fid -> paused bid info
-	lastScannedBids    map[string]*spotBid // track bids from last scan
-
-	lastOp chan struct{}
 }
 
 type spotBid struct {
@@ -77,7 +64,7 @@ type spotBid struct {
 
 type launchSpecification struct {
 	Volumes           []string `json:"volumes"`
-	SSHKeys           []string `json:"ssh_keys,omitempty"`
+	SSHKeys           []string `json:"ssh_keys"`
 	StartupScript     string   `json:"startup_script,omitempty"`
 	KubernetesCluster string   `json:"kubernetes_cluster,omitempty"`
 	ImageVersion      string   `json:"image_version,omitempty"`
@@ -114,17 +101,24 @@ func NewMithrilPoolBackend(cfg *proto.AutoscalerBackendMithrilSpotBid) broker.Re
 	// Calculate prefix hash from configuration parameters
 	prefix := calculateBidPrefix(cfg)
 
-	return &mithrilPoolBackend{
-		cfg:              cfg,
-		httpClient:       &http.Client{Timeout: 30 * time.Second},
-		apiBaseURL:       fmt.Sprintf("%s/%s", apiEndpoint, apiVersion),
-		bidPrefix:        prefix,
-		activeBids:       make(map[string]*spotBid),
-		creatingBids:     make(map[string]chan struct{}),
-		terminatingBids:  make(map[string]struct{}),
-		suspendedBidPool: make(map[string]*spotBid),
-		lastScannedBids:  make(map[string]*spotBid),
+	backend := &mithrilPoolBackend{
+		cfg:        cfg,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		apiBaseURL: fmt.Sprintf("%s/%s", apiEndpoint, apiVersion),
+		bidPrefix:  prefix,
 	}
+
+	// Use AsyncManager's suspend/resume if MaxSuspendedBids is configured
+	if cfg.MaxSuspendedBids > 0 {
+		return backends.MakeAsyncResumable(backend, int(cfg.MaxSuspendedBids))
+	}
+	return backends.MakeAsync(backend)
+}
+
+// GenerateWorkerName implements SyncBackend interface
+func (m *mithrilPoolBackend) GenerateWorkerName() string {
+	bidName := fmt.Sprintf("%s-%s", m.bidPrefix, utils.RandString(5))
+	return bidName + "-1"
 }
 
 // calculateBidPrefix generates a hash-based prefix from bid configuration
@@ -175,70 +169,21 @@ func (m *mithrilPoolBackend) makeRequest(ctx context.Context, method, path strin
 	return resp, nil
 }
 
-// getAvailableSuspendedBid retrieves and removes a suspended bid from the pool
-func (m *mithrilPoolBackend) getAvailableSuspendedBid() *spotBid {
-	m.suspendedBidPoolMu.Lock()
-	defer m.suspendedBidPoolMu.Unlock()
-
-	if len(m.suspendedBidPool) == 0 {
-		return nil
+// CreateWorker implements SyncBackend interface
+func (m *mithrilPoolBackend) CreateWorker(ctx context.Context, name string) (backends.WorkerInfo, error) {
+	// Extract the base name (remove -1 suffix) for bid name
+	bidName := name[:len(name)-2]
+	bid, err := m.createSpotBid(ctx, bidName)
+	if err != nil {
+		return backends.WorkerInfo{}, err
 	}
-
-	// Get the first available suspended bid
-	for _, bid := range m.suspendedBidPool {
-		delete(m.suspendedBidPool, bid.FID)
-		return bid
-	}
-	return nil
+	return backends.WorkerInfo{
+		State: backends.WorkerStateActive,
+		Data:  bid,
+	}, nil
 }
 
-// getSuspendedBidPoolCount returns the current count of suspended bids in the pool
-func (m *mithrilPoolBackend) getSuspendedBidPoolCount() int {
-	m.suspendedBidPoolMu.RLock()
-	defer m.suspendedBidPoolMu.RUnlock()
-	return len(m.suspendedBidPool)
-}
-
-func (m *mithrilPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
-	// Try to resume a suspended bid first
-	suspendedBid := m.getAvailableSuspendedBid()
-	if suspendedBid != nil {
-		log.Printf("Resuming suspended Mithril bid: %s (fid: %s)", suspendedBid.Name, suspendedBid.FID)
-		go func() {
-			if err := m.resumeBid(ctx, suspendedBid); err != nil {
-				log.Printf("Failed to resume bid %s: %v", suspendedBid.FID, err)
-			}
-		}()
-		return suspendedBid.Name + "-1", nil
-	}
-
-	// Generate a unique bid name with prefix
-	bidName := fmt.Sprintf("%s-%s", m.bidPrefix, utils.RandString(5))
-
-	m.bidMu.Lock()
-	op := make(chan struct{})
-	m.lastOp = op
-	m.creatingBids[bidName] = op
-	m.bidMu.Unlock()
-
-	go func() {
-		defer func() {
-			m.bidMu.Lock()
-			delete(m.creatingBids, bidName)
-			m.bidMu.Unlock()
-			close(op)
-		}()
-		_, err := m.createSpotBid(ctx, bidName)
-		if err != nil {
-			log.Printf("Failed to create spot bid %s: %v", bidName, err)
-		}
-	}()
-
-	// The name is always suffixed with a sequence number. Since we create one at a time, use "-1".
-	return bidName + "-1", nil
-}
-
-func (m *mithrilPoolBackend) createSpotBid(ctx context.Context, bidName string) (string, error) {
+func (m *mithrilPoolBackend) createSpotBid(ctx context.Context, bidName string) (*spotBid, error) {
 	// Prepare bash startup script
 	agentConfig := m.cfg.AgentConfigContent
 	version := m.cfg.AgentVersionOverride
@@ -319,7 +264,7 @@ fi
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	log.Printf("Creating Mithril spot bid: %s (instance_type: %s, region: %s, limit_price: %s)",
@@ -327,93 +272,48 @@ fi
 
 	resp, err := m.makeRequest(ctx, "POST", "/spot/bids", strings.NewReader(string(bodyBytes)))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to create spot bid: status %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("failed to create spot bid: status %d, body: %s", resp.StatusCode, string(body))
 	}
 
 	var createResp createBidResponse
 	if err := json.NewDecoder(resp.Body).Decode(&createResp); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	log.Printf("Created Mithril spot bid %s (fid: %s, status: %s)", bidName, createResp.FID, createResp.Status)
-	m.bidMu.Lock()
-	defer m.bidMu.Unlock()
-	m.activeBids[createResp.FID] = &spotBid{
+
+	// Return spotBid structure
+	bid := &spotBid{
 		FID:    createResp.FID,
 		Name:   bidName,
 		Status: createResp.Status,
 	}
-
-	return createResp.FID, nil
+	return bid, nil
 }
 
-func (m *mithrilPoolBackend) RequestDelete(ctx context.Context, workerName string) error {
-	var creatingOp chan struct{}
-	m.bidMu.Lock()
-	creatingOp = m.creatingBids[workerName[:len(workerName)-2]]
-	m.terminatingBids[workerName] = struct{}{}
-	op := make(chan struct{})
-	m.lastOp = op
-	m.bidMu.Unlock()
-
-	go func() {
-		defer func() {
-			m.bidMu.Lock()
-			delete(m.terminatingBids, workerName)
-			m.bidMu.Unlock()
-			close(op)
-		}()
-		if creatingOp != nil {
-			<-creatingOp
-		}
-		err := m.terminateBid(ctx, workerName)
-		if err != nil {
-			log.Printf("Failed to terminate bid %s: %v", workerName, err)
-		}
-	}()
-
-	return nil
+// DeleteWorker implements SyncBackend interface
+func (m *mithrilPoolBackend) DeleteWorker(ctx context.Context, workerName string, workerInfo backends.WorkerInfo) error {
+	return m.terminateBid(ctx, workerName, workerInfo)
 }
 
-func (m *mithrilPoolBackend) terminateBid(ctx context.Context, bidName string) error {
-	// Find the bid FID from the bid name
-	m.bidMu.RLock()
+func (m *mithrilPoolBackend) terminateBid(ctx context.Context, bidName string, workerInfo backends.WorkerInfo) error {
 	var bidFID string
-	var bid *spotBid
-	for fid, b := range m.activeBids {
-		if b.Name+"-1" == bidName {
-			bidFID = fid
-			bid = b
-			break
-		}
+	if b, ok := workerInfo.Data.(*spotBid); ok && b.Name+"-1" == bidName {
+		bidFID = b.FID
+	} else {
+		return fmt.Errorf("invalid worker info for bid %s: %v", bidName, workerInfo)
 	}
-	m.bidMu.RUnlock()
 
 	if bidFID == "" {
 		return fmt.Errorf("bid not found: %s", bidName)
 	}
 
-	// Try to pause the bid if we have room in the pool
-	if m.cfg.MaxSuspendedBids > 0 && int32(m.getSuspendedBidPoolCount()) < m.cfg.MaxSuspendedBids {
-		log.Printf("Pausing Mithril spot bid %s (fid: %s) for reuse", bidName, bidFID)
-		if err := m.pauseBid(ctx, bidFID); err != nil {
-			log.Printf("Failed to pause bid %s, will terminate instead: %v", bidFID, err)
-		} else {
-			// Add to suspended pool
-			m.suspendedBidPoolMu.Lock()
-			m.suspendedBidPool[bidFID] = bid
-			m.suspendedBidPoolMu.Unlock()
-			return nil
-		}
-	}
-
-	// Either pooling is disabled or pool is full, terminate the bid
 	log.Printf("Terminating Mithril spot bid %s (fid: %s)", bidName, bidFID)
 
 	resp, err := m.makeRequest(ctx, "DELETE", fmt.Sprintf("/spot/bids/%s", bidFID), nil)
@@ -431,7 +331,45 @@ func (m *mithrilPoolBackend) terminateBid(ctx context.Context, bidName string) e
 	return nil
 }
 
-// pauseBid pauses a spot bid using PATCH API
+// SuspendWorker implements Resumable interface
+func (m *mithrilPoolBackend) SuspendWorker(ctx context.Context, name string, activeWorker backends.WorkerInfo) error {
+	var bidFID string
+	if b, ok := activeWorker.Data.(*spotBid); ok && b.Name+"-1" == name {
+		bidFID = b.FID
+	} else {
+		return fmt.Errorf("invalid worker info for bid %s: %v", name, activeWorker)
+	}
+
+	if bidFID == "" {
+		return fmt.Errorf("bid not found: %s", name)
+	}
+
+	log.Printf("Suspending Mithril spot bid %s (fid: %s) for reuse", name, bidFID)
+	if err := m.pauseBid(ctx, bidFID); err != nil {
+		return fmt.Errorf("failed to pause bid %s: %w", bidFID, err)
+	}
+
+	return nil
+}
+
+// ResumeWorker implements Resumable interface
+func (m *mithrilPoolBackend) ResumeWorker(ctx context.Context, name string, suspendedWorker backends.WorkerInfo) error {
+	var bid *spotBid
+	if b, ok := suspendedWorker.Data.(*spotBid); ok && b.Name+"-1" == name {
+		bid = b
+	} else {
+		return fmt.Errorf("invalid worker info for bid %s: %v", name, suspendedWorker)
+	}
+
+	log.Printf("Resuming suspended Mithril bid: %s (fid: %s)", bid.Name, bid.FID)
+	if err := m.resumeBid(ctx, bid); err != nil {
+		return fmt.Errorf("failed to resume bid %s: %w", bid.FID, err)
+	}
+
+	return nil
+}
+
+// Pauses a spot bid using PATCH API
 func (m *mithrilPoolBackend) pauseBid(ctx context.Context, bidFID string) error {
 	patchBody := map[string]interface{}{
 		"paused": true,
@@ -479,29 +417,12 @@ func (m *mithrilPoolBackend) resumeBid(ctx context.Context, bid *spotBid) error 
 		return fmt.Errorf("failed to resume bid: status %d, body: %s", resp.StatusCode, string(body))
 	}
 
-	m.bidMu.Lock()
-	defer m.bidMu.Unlock()
-	m.activeBids[bidFID] = bid
-
 	log.Printf("Successfully resumed bid %s", bidFID)
 	return nil
 }
 
-func (m *mithrilPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerStatus, error) {
-	seen := make(map[string]struct{})
-	var res []broker.WorkerStatus
-
-	// Add creating bids
-	m.bidMu.RLock()
-	for creatingBid := range m.creatingBids {
-		res = append(res, broker.WorkerStatus{Name: creatingBid + "-1"})
-		seen[creatingBid] = struct{}{}
-	}
-	for terminatingBid := range m.terminatingBids {
-		seen[terminatingBid] = struct{}{}
-	}
-	m.bidMu.RUnlock()
-
+// ListRemoteWorkers implements SyncBackend interface
+func (m *mithrilPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]backends.WorkerInfo, error) {
 	// List all spot bids
 	path := fmt.Sprintf("/spot/bids?project=%s", m.cfg.GetProjectId())
 	resp, err := m.makeRequest(ctx, "GET", path, nil)
@@ -520,11 +441,7 @@ func (m *mithrilPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerSt
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// Update active bids cache and collect workers
-	m.bidMu.Lock()
-	defer m.bidMu.Unlock()
-
-	m.activeBids = make(map[string]*spotBid)
+	workers := make(map[string]backends.WorkerInfo)
 	for i := range listResp.Data {
 		bid := &listResp.Data[i]
 
@@ -538,134 +455,25 @@ func (m *mithrilPoolBackend) ListWorkers(ctx context.Context) ([]broker.WorkerSt
 			continue
 		}
 
-		// Handle paused bids separately
+		// Add paused bids as suspended workers
 		if bid.Status == "Paused" {
-			// Track paused bids for pool management
-			continue
-		}
-
-		m.activeBids[bid.FID] = bid
-
-		// Skip if already seen
-		if _, exists := seen[bid.Name]; exists {
-			continue
-		}
-
-		// Add allocated/open bids as workers
-		if bid.Status == "Allocated" || bid.Status == "Open" {
-			res = append(res, broker.WorkerStatus{Name: bid.Name + "-1"})
-			seen[bid.Name] = struct{}{}
-		}
-	}
-
-	// Scan for paused bids to populate the suspended bid pool
-	if m.cfg.MaxSuspendedBids > 0 {
-		go m.scanAndUpdateSuspendedBidPool(ctx)
-	}
-
-	return res, nil
-}
-
-// scanAndUpdateSuspendedBidPool scans for paused bids and updates the suspended bid pool
-func (m *mithrilPoolBackend) scanAndUpdateSuspendedBidPool(ctx context.Context) {
-	bidsFound := make(map[string]*spotBid)
-	bidsToTerminate := make([]string, 0)
-
-	// List all spot bids
-	path := fmt.Sprintf("/spot/bids?project=%s&status=Paused", m.cfg.GetProjectId())
-	resp, err := m.makeRequest(ctx, "GET", path, nil)
-	if err != nil {
-		log.Printf("Failed to list paused bids: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Failed to list paused bids: status %d", resp.StatusCode)
-		return
-	}
-
-	var listResp listBidsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
-		log.Printf("Failed to decode paused bids response: %v", err)
-		return
-	}
-
-	// Find paused bids matching our prefix
-	for i := range listResp.Data {
-		bid := &listResp.Data[i]
-
-		// Filter by prefix - only consider bids from this configuration
-		if !strings.HasPrefix(bid.Name, m.bidPrefix) {
-			continue
-		}
-
-		// Only consider paused bids
-		if bid.Status != "Paused" {
-			continue
-		}
-
-		bidsFound[bid.FID] = bid
-	}
-
-	// Update suspended bid pool
-	m.suspendedBidPoolMu.Lock()
-	defer m.suspendedBidPoolMu.Unlock()
-
-	// Add new found paused bids to the pool
-	for fid, bid := range bidsFound {
-		_, inPool := m.suspendedBidPool[fid]
-		if inPool {
-			continue
-		}
-		_, existInLastScan := m.lastScannedBids[fid]
-		if existInLastScan {
-			// Was previously scanned, may already be used
-			continue
-		}
-		if len(m.suspendedBidPool) >= int(m.cfg.MaxSuspendedBids) {
-			log.Printf("Max suspended bid pool size reached (%d), terminating bid %s", m.cfg.MaxSuspendedBids, fid)
-			bidsToTerminate = append(bidsToTerminate, fid)
-			continue
-		}
-		log.Printf("Adding paused bid %s (%s) to suspended pool", bid.Name, fid)
-		m.suspendedBidPool[fid] = bid
-	}
-
-	// Remove bids from pool that are no longer paused
-	for fid := range m.suspendedBidPool {
-		_, found := bidsFound[fid]
-		if !found {
-			log.Printf("Removing bid %s from suspended pool (no longer paused)", fid)
-			delete(m.suspendedBidPool, fid)
-		}
-	}
-
-	m.lastScannedBids = bidsFound
-
-	// Terminate excess bids outside the lock
-	if len(bidsToTerminate) > 0 {
-		go func() {
-			for _, bidFID := range bidsToTerminate {
-				resp, err := m.makeRequest(ctx, "DELETE", fmt.Sprintf("/spot/bids/%s", bidFID), nil)
-				if err != nil {
-					log.Printf("Failed to terminate excess bid %s: %v", bidFID, err)
-					continue
-				}
-				resp.Body.Close()
-				if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-					log.Printf("Failed to terminate excess bid %s: status %d", bidFID, resp.StatusCode)
-				}
+			workers[bid.Name+"-1"] = backends.WorkerInfo{
+				State: backends.WorkerStateSuspended,
+				Data:  bid,
 			}
-		}()
-	}
-}
+			continue
+		}
 
-func (m *mithrilPoolBackend) WaitForLastOperation(ctx context.Context) error {
-	if m.lastOp != nil {
-		<-m.lastOp
+		// Add allocated/open bids as active workers
+		if bid.Status == "Allocated" || bid.Status == "Open" {
+			workers[bid.Name+"-1"] = backends.WorkerInfo{
+				State: backends.WorkerStateActive,
+				Data:  bid,
+			}
+		}
 	}
-	return nil
+
+	return workers, nil
 }
 
 type mithrilSpotBidPoolFactory struct{}
