@@ -29,7 +29,7 @@ func testBatch(t *testing.T, r Runner) {
 	instanceName := r.CreateTestInstance(t, "ubuntu-batch", "ubuntu")
 	defer func() {
 		// Clean up the instance after tests
-		//_ = runVelda("instance", "delete", instanceName)
+		_ = runVelda("instance", "delete", instanceName)
 	}()
 
 	// TODO: remove -s "" for testing. There's a race where returning a svc while being terminated.

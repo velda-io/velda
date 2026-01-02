@@ -17,7 +17,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// AgentCmd represents the agent command
 var ClusterCmd = &cobra.Command{
 	Use:   "cluster",
 	Short: "Manage velda cluster",

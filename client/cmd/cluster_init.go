@@ -29,7 +29,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 
-	"velda.io/velda/misc"
 	"velda.io/velda/pkg/broker/backends"
 	"velda.io/velda/pkg/clientlib"
 	configpb "velda.io/velda/pkg/proto/config"
@@ -91,11 +90,6 @@ The sandbox-dir will be the path to the directory where the velda environment wi
 		if err := startCluster(cmd, sandboxDir); err != nil {
 			return fmt.Errorf("failed to start velda cluster: %w", err)
 		}
-		/*
-			if err := initSandbox(cmd); err != nil {
-				return fmt.Errorf("failed to initialize sandbox: %w", err)
-			}
-		*/
 		printClusterInstruction(cmd)
 		return nil
 	},
@@ -334,23 +328,6 @@ func initSshKey(cmd *cobra.Command, sandboxDir string) error {
 	c = exec.Command("sudo", "cp", path.Join(sandboxDir, "ssh_key.pub"), path.Join(rootfs, "authorized_keys"))
 	if output, err := c.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to move SSH public key: %w\nOutput: %s", err, output)
-	}
-	return nil
-}
-
-func initSandbox(cmd *cobra.Command) error {
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %w", err)
-	}
-	c := exec.Command(executable, "run", "-u", "root", "bash")
-	c.Stdin = strings.NewReader(misc.InitSandbox)
-	cmd.PrintErrf("%sInitializing sandbox...%s\n%s", utils.ColorBold, utils.ColorReset, utils.ColorLightGray)
-	defer cmd.Print(utils.ColorReset)
-	c.Stdout = os.Stderr
-	c.Stderr = os.Stderr
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("failed to run sandbox initialization script: %w", err)
 	}
 	return nil
 }

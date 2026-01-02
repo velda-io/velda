@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// SSH key related features are being re-worked.
 func TestConfigSshAppends(t *testing.T) {
 	t.Skip("Skipping ssh config tests temporarily")
 	tmp := t.TempDir()

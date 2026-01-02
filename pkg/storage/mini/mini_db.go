@@ -123,12 +123,9 @@ func (c *dummyCommitter) Rollback() error {
 
 func (d *MiniInstanceDb) CreateInstance(ctx context.Context, in *proto.Instance) (*proto.Instance, db.Committer, error) {
 	d.mu.Lock()
-	// Auto-assign instance ID if not provided or is 0
-	if in.Id == 0 {
-		in.Id = d.nextInstanceId
-		d.nextInstanceId++
-	}
-	instanceId := in.Id
+	// Auto-assign instance ID
+	instanceId := d.nextInstanceId
+	d.nextInstanceId++
 	d.mu.Unlock()
 
 	// Create the instance in storage

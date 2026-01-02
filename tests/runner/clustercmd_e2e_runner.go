@@ -68,12 +68,10 @@ func (r *ClusterCmdE2ERunner) Setup(t *testing.T) {
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("Failed to clean up cluster client: %v, output: %s", err, output)
 		}
-		/*
-			cmd = exec.Command("sudo", "rm", "-rf", rootDir)
-			if output, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("Failed to clean up root directory: %v, output: %s", err, output)
-			}
-		*/
+		cmd = exec.Command("sudo", "rm", "-rf", rootDir)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("Failed to clean up root directory: %v, output: %s", err, output)
+		}
 	})
 
 	r.veldaBin = veldaBin
