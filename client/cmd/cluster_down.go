@@ -24,9 +24,9 @@ import (
 	"velda.io/velda/pkg/utils"
 )
 
-var miniDownCmd = &cobra.Command{
+var clusterDownCmd = &cobra.Command{
 	Use:   "down sandbox-dir",
-	Short: "Bring down a mini-Velda cluster",
+	Short: "Bring down a velda cluster",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sandboxDir, _ := cmd.Flags().GetString("sandbox-dir")
 		if sandboxDir == "" {
@@ -47,26 +47,26 @@ var miniDownCmd = &cobra.Command{
 		if stat, err := os.Stat(sandboxDir); err != nil || !stat.IsDir() {
 			return fmt.Errorf("sandbox directory %s does not exist or is not a directory: %w", sandboxDir, err)
 		}
-		return stopMini(cmd, sandboxDir)
+		return stopCluster(cmd, sandboxDir)
 	},
 }
 
 func init() {
-	MiniCmd.AddCommand(miniDownCmd)
-	miniDownCmd.Flags().String("sandbox-dir", "", "Path to the sandbox directory")
+	ClusterCmd.AddCommand(clusterDownCmd)
+	clusterDownCmd.Flags().String("sandbox-dir", "", "Path to the sandbox directory")
 }
 
-func stopMini(cmd *cobra.Command, sandboxDir string) error {
-	stopMiniAgent(cmd)
-	if err := stopMiniApiserver(sandboxDir); err != nil {
+func stopCluster(cmd *cobra.Command, sandboxDir string) error {
+	stopLocalAgent(cmd)
+	if err := stopVeldaApiserver(sandboxDir); err != nil {
 		return err
 	}
 	os.Remove(currentSandboxLinkLocation)
-	cmd.PrintErrf("%s%sMini-velda cluster stopped successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
+	cmd.PrintErrf("%s%sVelda cluster stopped successfully%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
 	return nil
 }
 
-func stopMiniApiserver(sandboxDir string) error {
+func stopVeldaApiserver(sandboxDir string) error {
 	pidfile := filepath.Join(sandboxDir, "apiserver.pid")
 	pidBytes, err := os.ReadFile(pidfile)
 	if os.IsNotExist(err) {

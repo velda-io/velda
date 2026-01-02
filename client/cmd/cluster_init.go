@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -37,21 +36,18 @@ import (
 	"velda.io/velda/pkg/utils"
 )
 
-var miniInitCmd = &cobra.Command{
+var clusterInitCmd = &cobra.Command{
 	Use:   "init sandbox-dir",
-	Short: "Initialize a mini-velda sandbox",
+	Short: "Initialize a velda Cluster",
 	Long: `
-This command initialize a mini-velda development sandbox from a docker image, and start a single-instance cluster.
+This command initialize a new velda cluster from the current machine.
 
-The sandbox-dir will be the path to the directory where the mini-velda environment will be stored, including config and sandbox data.
+The sandbox-dir will be the path to the directory where the velda environment will be stored, including config and sandbox data.
 `,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			cmd.PrintErrln("Usage: velda mini init <sandbox-dir>")
-			return fmt.Errorf("sandbox directory must be specified")
-		}
 		if p, err := os.Readlink(currentSandboxLinkLocation); err == nil {
-			return fmt.Errorf("A sandbox at %s may be already running. Use velda mini down to stop it. If this is in error, remove %s", p, currentSandboxLinkLocation)
+			return fmt.Errorf("A cluster at %s may be already running. Use velda cluster down to stop it. If this is in error, remove %s", p, currentSandboxLinkLocation)
 		}
 		if err := checkEnv(cmd); err != nil {
 			return err
@@ -71,20 +67,13 @@ The sandbox-dir will be the path to the directory where the mini-velda environme
 		if _, err := os.Stat(sandboxDir); !os.IsNotExist(err) {
 			return fmt.Errorf("sandbox directory %s already exists", sandboxDir)
 		}
-		if err := initMiniConfig(cmd, sandboxDir); err != nil {
-			return fmt.Errorf("failed to initialize mini config: %w", err)
+		if err := initClusterConfig(cmd, sandboxDir); err != nil {
+			return fmt.Errorf("failed to initialize cluster config: %w", err)
 		}
-		if err := initMiniSandbox(cmd, sandboxDir); err != nil {
-			return fmt.Errorf("failed to initialize mini: %w", err)
-		}
-		if err := initSshKey(cmd, sandboxDir); err != nil {
-			return fmt.Errorf("failed to initialize SSH key: %w", err)
-		}
-		profile := "mini"
+		profile := "velda"
 		var profileCfg *clientlib.Configs
-		if cfg, err := clientlib.LoadConfigs("mini"); err == nil {
+		if cfg, err := clientlib.LoadConfigs("velda"); err == nil {
 			profileCfg = cfg
-			cfg.SetConfig("identity-file", path.Join(sandboxDir, "ssh_key"))
 		} else {
 			_, cfg, err := clientlib.InitCurrentConfig("localhost:50051", true)
 			profileCfg = cfg
@@ -94,36 +83,31 @@ The sandbox-dir will be the path to the directory where the mini-velda environme
 			if err := cfg.RenameConfig(profile); err != nil {
 				return fmt.Errorf("Error renaming config: %w", err)
 			}
-			// There's only one instance.
-			cfg.SetConfig("default-instance", "1")
-			cfg.SetConfig("identity-file", path.Join(sandboxDir, "ssh_key"))
 		}
 		if err := profileCfg.MakeCurrent(); err != nil {
 			return fmt.Errorf("Error making config current: %w", err)
 		}
-		if err := configSsh(cmd); err != nil {
-			// This is a warning.
-			cmd.PrintErrln("Failed to configure SSH client for mini cluster")
+		cmd.PrintErrf("%s%sInitialized velda config%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
+		if err := startCluster(cmd, sandboxDir); err != nil {
+			return fmt.Errorf("failed to start velda cluster: %w", err)
 		}
-		cmd.PrintErrf("%s%sInitialized mini config%s\n", utils.ColorBold, utils.ColorGreen, utils.ColorReset)
-		if err := startMini(cmd, sandboxDir); err != nil {
-			return fmt.Errorf("failed to start mini cluster: %w", err)
-		}
-		if err := initSandbox(cmd); err != nil {
-			return fmt.Errorf("failed to initialize sandbox: %w", err)
-		}
+		/*
+			if err := initSandbox(cmd); err != nil {
+				return fmt.Errorf("failed to initialize sandbox: %w", err)
+			}
+		*/
 		printClusterInstruction(cmd)
 		return nil
 	},
 }
 
 func init() {
-	MiniCmd.AddCommand(miniInitCmd)
-	miniInitCmd.Flags().String("base-image", "ubuntu:24.04", "The docker image to initialize the sandbox")
-	miniInitCmd.Flags().StringSlice("backends", []string{"all"}, "The backends to enable (comma-separated list, e.g., 'aws,gce')")
+	ClusterCmd.AddCommand(clusterInitCmd)
+	clusterInitCmd.Flags().String("base-image", "ubuntu:24.04", "The docker image to initialize the sandbox")
+	clusterInitCmd.Flags().StringSlice("backends", []string{"all"}, "The backends to enable (comma-separated list, e.g., 'aws,gce')")
 }
 
-func initMiniConfig(cmd *cobra.Command, sandboxDir string) error {
+func initClusterConfig(cmd *cobra.Command, sandboxDir string) error {
 	config := &configpb.Config{
 		Server: &configpb.Server{
 			GrpcAddress: ":50051",
@@ -164,65 +148,6 @@ func initMiniConfig(cmd *cobra.Command, sandboxDir string) error {
 	}
 	if err := os.WriteFile(cfgFile, cfgYaml, 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
-	}
-	return nil
-}
-
-func initMiniSandbox(cmd *cobra.Command, sandboxDir string) error {
-	// Create the sandbox directory if it doesn't exist
-	rootDir := path.Join(sandboxDir, "root", "0", "1")
-	stat, err := os.Stat(rootDir)
-
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to stat root directory: %w", err)
-	}
-	if err == nil && !stat.IsDir() {
-		return fmt.Errorf("root directory %s exists but is not a directory", rootDir)
-	}
-	if err == nil {
-		return nil
-	}
-	baseImage, _ := cmd.Flags().GetString("base-image")
-	log.Printf("Creating dev-sandbox from docker image %s", baseImage)
-	// Initialize the root directory
-	if err := os.MkdirAll(rootDir, 0755); err != nil {
-		return fmt.Errorf("failed to create root directory: %w", err)
-	}
-	createCmd := exec.Command(
-		"docker", "create", "--platform", "linux/amd64", baseImage,
-	)
-	createCmd.Stderr = os.Stderr
-	container, err := createCmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to create base image container: %w", err)
-	}
-	containerID := string(container[:len(container)-1]) // Remove trailing newline
-	defer func() {
-		exec.Command("docker", "rm", containerID).Run()
-	}()
-	exportCmd := exec.Command(
-		"docker", "export", containerID,
-	)
-
-	exportCmd.Stderr = os.Stderr
-	p, err := exportCmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	unpackCmd := exec.Command("sudo", "tar", "-xf", "-", "-C", rootDir)
-	unpackCmd.Stdin = p
-	unpackCmd.Stdout = os.Stdout
-	unpackCmd.Stderr = os.Stderr
-	if err := exportCmd.Start(); err != nil {
-		return fmt.Errorf("failed to start export command: %w", err)
-	}
-	if err := unpackCmd.Run(); err != nil {
-		return fmt.Errorf("failed to unpack tar: %w", err)
-	}
-
-	if err := exportCmd.Wait(); err != nil {
-		return fmt.Errorf("failed to wait for export command: %w", err)
 	}
 	return nil
 }

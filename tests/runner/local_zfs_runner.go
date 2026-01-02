@@ -69,7 +69,6 @@ func (r *LocalZfsRunner) Setup(t *testing.T) {
 			t.Errorf("Failed to start detached process to destroy ZFS dataset %s: %v", suiteName, err)
 		}
 	})
-	initializeImages(t, r.zfsRoot, suiteName)
 	configDir := t.TempDir()
 
 	agentConfig := (`

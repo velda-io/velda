@@ -17,13 +17,10 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"path"
-	"strconv"
 	"syscall"
 
 	"velda.io/velda/pkg/proto"
 	agentpb "velda.io/velda/pkg/proto/agent"
-	"velda.io/velda/pkg/utils"
 )
 
 type SimpleMounter struct {
@@ -37,12 +34,10 @@ func NewSimpleMounter(sandboxConfig *agentpb.SandboxConfig) *SimpleMounter {
 }
 
 func (m *SimpleMounter) Mount(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
-	shardId := strconv.FormatInt(session.InstanceId>>utils.ShardOffset, 16)
-	instanceId := strconv.FormatInt(session.InstanceId, 10)
 	switch s := m.sandboxConfig.GetDiskSource().GetSource().(type) {
 	case *agentpb.AgentDiskSource_MountedDiskSource_:
 		// Mount disk to workspace
-		disk := path.Join(s.MountedDiskSource.LocalPath, shardId, instanceId)
+		disk := fmt.Sprintf("%s/%d/root", s.MountedDiskSource.GetLocalPath(), session.InstanceId)
 
 		if err := syscall.Mount(disk, workspaceDir, "bind", syscall.MS_BIND, ""); err != nil {
 			return nil, fmt.Errorf("Mount bind disk: %w", err)

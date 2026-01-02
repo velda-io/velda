@@ -22,6 +22,8 @@ var runSlowTests = flag.Bool("run-slow-tests", false, "Run slow tests")
 
 func RunAllTests(t *testing.T, runner Runner) {
 	runner.Setup(t)
+	// Instance from docker image
+	testInstanceFromDocker(t, runner)
 	t.Run("SCPCommand", func(t *testing.T) {
 		testScpCommand(t, runner)
 	})
@@ -32,16 +34,9 @@ func RunAllTests(t *testing.T, runner Runner) {
 		testInstanceClone(t, runner)
 	})
 	t.Run("Ubuntu", func(t *testing.T) {
-		if !runner.Supports("ubuntu") {
-			t.Skip("Ubuntu tests are not supported by this runner")
-		}
 		testUbuntu(t, runner)
 	})
 
-	// Instance from docker image
-	t.Run("InstanceFromDocker", func(t *testing.T) {
-		testInstanceFromDocker(t, runner)
-	})
 	t.Run("Batch", func(t *testing.T) {
 		testBatch(t, runner)
 	})
