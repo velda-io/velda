@@ -19,8 +19,9 @@ import (
 )
 
 var ApiServerCmd = &cobra.Command{
-	Use:   "apiserver",
-	Short: "Start API server",
+	Use:    "apiserver",
+	Short:  "Start API server",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		apiserver.Main(apiserver.RunAllService, cmd.Flags())
 		return nil

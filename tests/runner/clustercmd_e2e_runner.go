@@ -19,20 +19,22 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 
-	"velda.io/velda/pkg/storage/mini"
+	"github.com/stretchr/testify/require"
 	"velda.io/velda/tests/cases"
 )
 
-type MiniE2ERunner struct {
+type ClusterCmdE2ERunner struct {
+	veldaBin string
 }
 
-func NewMiniE2ERunner() *MiniE2ERunner {
-	return &MiniE2ERunner{}
+func NewClusterCmdE2ERunner() *ClusterCmdE2ERunner {
+	return &ClusterCmdE2ERunner{}
 }
 
 // Run executes a command in the local runner environment.
-func (r *MiniE2ERunner) Setup(t *testing.T) {
+func (r *ClusterCmdE2ERunner) Setup(t *testing.T) {
 	// Start API server
 	bindir := os.Getenv("VELDA_BIN_DIR")
 	if bindir == "" {
@@ -56,29 +58,46 @@ func (r *MiniE2ERunner) Setup(t *testing.T) {
 	os.Setenv("VELDA", veldaBin)
 	os.Setenv("VELDA_CONFIG_DIR", configDir)
 
-	cmd := exec.Command(veldaBin, "mini", "init", dataDir, "--backends=")
+	cmd := exec.Command("sudo", "-E", veldaBin, "cluster", "init", dataDir, "--backends=")
 	cmd.Stderr = os.Stderr
 	if output, err := cmd.Output(); err != nil {
-		t.Fatalf("Failed to initialize mini client: %v, output: %s", err, output)
+		t.Fatalf("Failed to initialize cluster client: %v, output: %s", err, output)
 	}
 	t.Cleanup(func() {
-		cmd := exec.Command(veldaBin, "mini", "down", dataDir)
+		cmd := exec.Command("sudo", "-E", veldaBin, "cluster", "down", dataDir)
 		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("Failed to clean up mini client: %v, output: %s", err, output)
+			t.Fatalf("Failed to clean up cluster client: %v, output: %s", err, output)
 		}
-		/*
-			cmd = exec.Command("sudo", "rm", "-rf", rootDir)
-			if output, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("Failed to clean up root directory: %v, output: %s", err, output)
-			}
-		*/
+		cmd = exec.Command("sudo", "rm", "-rf", rootDir)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("Failed to clean up root directory: %v, output: %s", err, output)
+		}
 	})
+
+	r.veldaBin = veldaBin
 }
 
-func (r *MiniE2ERunner) Supports(feature cases.Feature) bool {
+func (r *ClusterCmdE2ERunner) Supports(feature cases.Feature) bool {
+	switch feature {
+	case cases.FeatureImage:
+		return true
+	case cases.FeatureSnapshot:
+		return false
+	case cases.FeatureMultiAgent:
+		return false
+	case cases.FeatureZeroMaxPool:
+		return false
+	}
 	return false
 }
 
-func (r *MiniE2ERunner) CreateTestInstance(t *testing.T, namePrefix string, image string) string {
-	return mini.InstanceName
+func (r *ClusterCmdE2ERunner) CreateTestInstance(t *testing.T, namePrefix string, image string) string {
+	instanceName := fmt.Sprintf("%s-%d", namePrefix, time.Now().Unix())
+	args := []string{"instance", "create", instanceName}
+	if image != "" {
+		args = append(args, "--image", image)
+	}
+	o, e := exec.Command(r.veldaBin, args...).CombinedOutput()
+	require.NoError(t, e, "Failed to create test instance: %s", o)
+	return instanceName
 }

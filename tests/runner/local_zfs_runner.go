@@ -22,7 +22,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
@@ -69,7 +68,6 @@ func (r *LocalZfsRunner) Setup(t *testing.T) {
 			t.Errorf("Failed to start detached process to destroy ZFS dataset %s: %v", suiteName, err)
 		}
 	})
-	initializeImages(t, r.zfsRoot, suiteName)
 	configDir := t.TempDir()
 
 	agentConfig := (`
@@ -222,32 +220,6 @@ agent_pools:
 		t.Fatalf("Failed to initialize Velda client: %v", err)
 	}
 	r.veldaBin = veldaBin
-}
-
-func initializeImages(t *testing.T, zfsRoot, target string) {
-	if out, err := exec.Command("sudo", "zfs", "create", fmt.Sprintf("%s/images", target)).CombinedOutput(); err != nil {
-		t.Fatalf("Failed to create ZFS images dataset: %v (output: %s)", err, out)
-	}
-	imagesOut, err := exec.Command("sudo", "zfs", "list", "-H", "-d1", "-o", "name", fmt.Sprintf("%s/seed", zfsRoot)).Output()
-	require.NoError(t, err, "Failed to list ZFS images")
-	images := strings.Split(string(imagesOut), "\n")
-	for _, image := range images {
-		if !strings.HasPrefix(image, fmt.Sprintf("%s/seed/", zfsRoot)) {
-			continue
-		}
-		imageName := strings.TrimPrefix(image, fmt.Sprintf("%s/seed/", zfsRoot))
-		// Create a clone for each image
-		if out, err := exec.Command("sudo", "zfs", "clone",
-			fmt.Sprintf("%s@image", image),
-			fmt.Sprintf("%s/images/%s", target, imageName)).CombinedOutput(); err != nil {
-			t.Fatalf("Failed to clone image %s: %v (output: %s)", imageName, err, out)
-		}
-		// Create image snapshot
-		if out, err := exec.Command("sudo", "zfs", "snapshot",
-			fmt.Sprintf("%s/images/%s@image", target, imageName)).CombinedOutput(); err != nil {
-			t.Fatalf("Failed to create snapshot for image %s: %v (output: %s)", imageName, err, out)
-		}
-	}
 }
 
 func (r *LocalZfsRunner) Supports(feature cases.Feature) bool {
