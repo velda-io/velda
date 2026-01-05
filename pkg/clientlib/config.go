@@ -92,7 +92,7 @@ func InitConfig() {
 		if err := utils.LoadProto(systemConfigPath, agentConfig); err != nil {
 			log.Printf("Failed to load agent config: %v", err)
 		}
-		brokerAddrFlag = agentConfig.Broker.Address
+		brokerAddrFlag = agentConfig.Broker.GetAddress()
 	} else {
 		// User login.
 		if configDir == "" {

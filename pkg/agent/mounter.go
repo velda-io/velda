@@ -16,7 +16,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path"
 	"syscall"
 
 	"velda.io/velda/pkg/proto"
@@ -34,6 +36,37 @@ func NewSimpleMounter(sandboxConfig *agentpb.SandboxConfig) *SimpleMounter {
 }
 
 func (m *SimpleMounter) Mount(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
+	if m.sandboxConfig.GetDiskSource().CasConfig != nil {
+		dataDir := path.Join(path.Dir(workspaceDir), "worksource_base")
+
+		if err := os.Mkdir(dataDir, 0755); err != nil && !os.IsExist(err) {
+			return nil, fmt.Errorf("Mkdir workspace: %w", err)
+		}
+		cleanup, err := m.mount(ctx, session, dataDir)
+		if err != nil {
+			return nil, err
+		}
+
+		// Mount CAS driver on top of dataDir
+		newCleanup, err := m.runVeldafsWrapper(ctx, dataDir, fmt.Sprintf("instance-%d", session.InstanceId), workspaceDir)
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("Mount veldafs: %w", err)
+		}
+		if cleanup != nil {
+			return func() {
+				newCleanup()
+				cleanup()
+			}, nil
+		} else {
+			return newCleanup, nil
+		}
+	} else {
+		return m.mount(ctx, session, workspaceDir)
+	}
+}
+
+func (m *SimpleMounter) mount(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
 	switch s := m.sandboxConfig.GetDiskSource().GetSource().(type) {
 	case *agentpb.AgentDiskSource_MountedDiskSource_:
 		// Mount disk to workspace
@@ -68,4 +101,45 @@ func (m *SimpleMounter) Mount(ctx context.Context, session *proto.SessionRequest
 	default:
 		return nil, fmt.Errorf("Unsupported oss disk source: %T", s)
 	}
+}
+
+func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, workspaceDir string) (cleanup func(), err error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("Get executable: %w", err)
+	}
+	fuseCmd := exec.Command(
+		executable,
+		"agent",
+		"sandboxfs",
+		"--readyfd=3",
+		"--cache-dir",
+		m.sandboxConfig.GetDiskSource().GetCasConfig().GetCasCacheDir(),
+		"--name",
+		name,
+		disk,
+		workspaceDir)
+	fuseCmd.Stderr = os.Stderr
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("Pipe: %w", err)
+	}
+	fuseCmd.ExtraFiles = []*os.File{pw}
+	if err := fuseCmd.Start(); err != nil {
+		return nil, fmt.Errorf("Start fuse: %w", err)
+	}
+	pw.Close()
+	_, err = pr.Read(make([]byte, 1))
+	if err != nil {
+		fuseCmd.Process.Kill()
+		return nil, fmt.Errorf("Read readyfd: %w", err)
+	}
+	if err := syscall.Mount("", workspaceDir, "", syscall.MS_REC|syscall.MS_SHARED, ""); err != nil {
+		fuseCmd.Process.Kill()
+		return nil, fmt.Errorf("Remount workspace: %w", err)
+	}
+	return func() {
+		fuseCmd.Process.Signal(syscall.SIGTERM)
+		fuseCmd.Wait()
+	}, nil
 }
