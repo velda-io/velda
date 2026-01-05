@@ -25,6 +25,10 @@ message HostMount {
   bool read_write = 3; // Whether the mount is read-write.
 }
 
+message CasConfig {
+  string cas_cache_dir = 1; // The directory to use for CAS cache.
+}
+
 message AgentDiskSource {
   message MountedDiskSource {
     string local_path = 1;
@@ -39,6 +43,8 @@ message AgentDiskSource {
         1; // The disk source is pre-mounted on the host.
     NfsMountSource nfs_mount_source = 2; // The disk source is an NFS mount.
   };
+
+  CasConfig cas_config = 3;
 }
 
 message SandboxConfig {

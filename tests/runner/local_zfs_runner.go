@@ -78,6 +78,8 @@ sandbox_config:
   disk_source:
     nfs_mount_source: 
       mount_options: nolock,acregmax=5,acregmin=1,acdirmax=5,acdirmin=1
+    cas_config:
+      cas_cache_dir: /tmp/velda_cas_cache
 daemon_config:
 pool: shell
 `)
@@ -110,7 +112,7 @@ agent_pools:
       command:
         start: |
           name=agent-test-${RANDOM}
-          docker run  -d --name $name --add-host=host.docker.internal:host-gateway  -e AGENT_NAME=$name -v %s/agent.yaml:/run/velda/velda.yaml -h $name  --mount type=volume,target=/tmp/agent --rm -v %s:/velda --privileged -q veldaio/agent:latest > /dev/null
+          docker run -d --platform linux/amd64 --name $name --add-host=host.docker.internal:host-gateway  -e AGENT_NAME=$name -v %s/agent.yaml:/run/velda/velda.yaml -h $name  --mount type=volume,target=/tmp/agent --rm -v %s:/velda --privileged -q veldaio/agent:latest > /dev/null
           echo $name
         stop: |
           name=$1
