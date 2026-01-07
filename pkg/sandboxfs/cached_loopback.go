@@ -21,6 +21,7 @@ package sandboxfs
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,35 +47,41 @@ const (
 )
 
 // encodeCacheXattr encodes SHA256 hash and mtime into xattr format: "version:sha256:mtime_sec.mtime_nsec"
-func encodeCacheXattr(sha256sum string, mtime time.Time) string {
-	return fmt.Sprintf("1:%s:%d.%d", sha256sum, mtime.Unix(), mtime.Nanosecond())
+func encodeCacheXattr(sha256sum string, mtime time.Time, size int64) string {
+	return fmt.Sprintf("1:%s:%d.%d:%d", sha256sum, mtime.Unix(), mtime.Nanosecond(), size)
 }
 
 // decodeCacheXattr decodes xattr value into SHA256 hash and mtime
-func decodeCacheXattr(xattrValue string) (sha256sum string, mtime time.Time, ok bool) {
+func decodeCacheXattr(xattrValue string) (sha256sum string, mtime time.Time, size int64, ok bool) {
 	parts := strings.Split(xattrValue, ":")
-	if len(parts) != 3 || len(parts[1]) != 64 || parts[0] != "1" {
-		return "", time.Time{}, false
+	if len(parts) != 4 || len(parts[1]) != 64 || parts[0] != "1" {
+		return "", time.Time{}, 0, false
 	}
 
 	sha256sum = parts[1]
 	timeParts := strings.Split(parts[2], ".")
 	if len(timeParts) != 2 {
-		return "", time.Time{}, false
+		return "", time.Time{}, 0, false
 	}
 
 	sec, err := strconv.ParseInt(timeParts[0], 10, 64)
 	if err != nil {
-		return "", time.Time{}, false
+		return "", time.Time{}, 0, false
 	}
 
 	nsec, err := strconv.ParseInt(timeParts[1], 10, 64)
 	if err != nil {
-		return "", time.Time{}, false
+		return "", time.Time{}, 0, false
 	}
 
 	mtime = time.Unix(sec, nsec)
-	return sha256sum, mtime, true
+
+	size, err = strconv.ParseInt(parts[3], 10, 64)
+	if err != nil {
+		return "", time.Time{}, 0, false
+	}
+
+	return sha256sum, mtime, size, true
 }
 
 // NewCachedLoopbackRoot creates a new cached loopback root node
@@ -221,6 +228,50 @@ func (n *CachedLoopbackNode) preserveOwner(ctx context.Context, path string) err
 	return syscall.Lchown(path, int(caller.Uid), int(caller.Gid))
 }
 
+// eagerFetchAndCache reads the entire file and caches it, returning the cached file descriptor
+// This is used when we want to immediately populate the cache for read-only access
+func (n *CachedLoopbackNode) eagerFetchAndCache(fullPath string, st *syscall.Stat_t) (cachedFd int, cachedPath string, sha256sum string, err error) {
+	// Open the original file for reading
+	f, err := os.Open(fullPath)
+	if err != nil {
+		return -1, "", "", err
+	}
+	defer f.Close()
+
+	// Create a cache writer
+	cw, err := n.cache.CreateTemp()
+	if err != nil {
+		return -1, "", "", err
+	}
+
+	io.Copy(io.Writer(cw), f)
+
+	// Commit the cache
+	committedSHA, err := cw.Commit()
+	if err != nil || committedSHA == "" {
+		return -1, "", "", err
+	}
+
+	// Set xattr with SHA256 and mtime
+	fileMtime := time.Unix(st.Mtim.Unix())
+	xattrValue := encodeCacheXattr(committedSHA, fileMtime, st.Size)
+	unix.Setxattr(fullPath, xattrCacheName, []byte(xattrValue), 0)
+
+	// Look up the cached file path
+	cachedPath, err = n.cache.Lookup(committedSHA)
+	if err != nil || cachedPath == "" {
+		return -1, "", "", fmt.Errorf("failed to lookup cached file: %w", err)
+	}
+
+	// Open the cached file for reading
+	cachedFd, err = syscall.Open(cachedPath, syscall.O_RDONLY, 0)
+	if err != nil {
+		return -1, "", "", err
+	}
+
+	return cachedFd, cachedPath, committedSHA, nil
+}
+
 // Open handles file opening with cache redirection
 func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
 	p := filepath.Join(n.Path(n.Root()))
@@ -254,12 +305,12 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 	fileMtime := time.Unix(st.Mtim.Unix())
 
 	// Try to read xattr with SHA256 and mtime
-	var xattrBuf [128]byte // Enough for "sha256:mtime_sec.mtime_nsec"
+	var xattrBuf [128]byte // Enough for "sha256:mtime_sec.mtime_nsec:size"
 	sz, err := unix.Getxattr(fullPath, xattrCacheName, xattrBuf[:])
 	if err == nil && sz > 0 {
 		xattrValue := string(xattrBuf[:sz])
-		cachedSHA, cachedMtime, ok := decodeCacheXattr(xattrValue)
-		if ok && cachedMtime.Equal(fileMtime) {
+		cachedSHA, cachedMtime, cachedSize, ok := decodeCacheXattr(xattrValue)
+		if ok && cachedMtime.Equal(fileMtime) && cachedSize == st.Size {
 			// Mtime matches, try to use cache
 			cachedPath, err := n.cache.Lookup(cachedSHA)
 			if err == nil && cachedPath != "" {
@@ -287,19 +338,56 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 				GlobalCacheMetrics.CacheMiss.Inc()
 			}
 			//log.Printf("Cache miss for %s (cache file not found)", fullPath)
+
+			// Eager fetch if mtime is older than 1 day
+			if time.Since(fileMtime) > 24*time.Hour {
+				// File is old, eagerly fetch and cache
+				if cachedFd, _, _, eagerErr := n.eagerFetchAndCache(fullPath, &st); eagerErr == nil {
+					if GlobalCacheMetrics != nil {
+						GlobalCacheMetrics.CacheFetched.Inc()
+					}
+					// Successfully fetched and cached
+					return &CachedFileHandle{
+						fd:         cachedFd,
+						path:       fullPath,
+						cache:      n.cache,
+						isWrite:    false,
+						fromCache:  true,
+						cachedStat: &st,
+					}, fuse.FOPEN_KEEP_CACHE, 0
+				}
+				// Fall through if eager fetch failed
+			}
 		} else if ok {
 			// SHA found but mtime doesn't match - CACHE MISS
 			if GlobalCacheMetrics != nil {
-				GlobalCacheMetrics.CacheMiss.Inc()
+				GlobalCacheMetrics.CacheStale.Inc()
 			}
 			//log.Printf("Cache miss for %s (mtime mismatch: cached=%v, current=%v)", fullPath, cachedMtime, fileMtime)
 		}
 	} else {
-		// No xattr - file not cached
+		// No xattr - file not cached - CACHE MISS
 		if GlobalCacheMetrics != nil {
 			GlobalCacheMetrics.CacheNotExist.Inc()
 		}
 		//log.Printf("Cache not exist for %s", fullPath)
+
+		// Eager fetch: immediately cache the file for read-only access
+		if cachedFd, _, _, eagerErr := n.eagerFetchAndCache(fullPath, &st); eagerErr == nil {
+			// Successfully fetched and cached
+			if GlobalCacheMetrics != nil {
+				GlobalCacheMetrics.CacheFetched.Inc()
+			}
+			return &CachedFileHandle{
+				fd:         cachedFd,
+				path:       fullPath,
+				cache:      n.cache,
+				isWrite:    false,
+				fromCache:  true,
+				cachedStat: &st,
+			}, fuse.FOPEN_KEEP_CACHE, 0
+		}
+		// Fall through if eager fetch failed
 	}
 
 	//log.Printf("Opening file %s for reading (no cache)", fullPath)
@@ -484,6 +572,19 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	// Since Flush() may be called for each dup'd fd, we don't
+	// want to really close the file, we just want to flush. This
+	// is achieved by closing a dup'd fd.
+	newFd, err := syscall.Dup(f.fd)
+
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+	err = syscall.Close(newFd)
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+
 	// Mark as flushed
 	f.flushed = true
 
@@ -497,7 +598,7 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 			if statErr := syscall.Fstat(f.fd, &st); statErr == nil {
 				fileMtime := time.Unix(st.Mtim.Unix())
 				// Encode SHA256 and mtime into xattr
-				xattrValue := encodeCacheXattr(committedSHA, fileMtime)
+				xattrValue := encodeCacheXattr(committedSHA, fileMtime, st.Size)
 				unix.Setxattr(f.path, xattrCacheName, []byte(xattrValue), 0)
 				//log.Printf("Set xattr for %s: SHA=%s, mtime=%v, err=%v", f.path, committedSHA, fileMtime, setErr)
 				f.cacheFlushed = true
@@ -513,7 +614,7 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 			var st syscall.Stat_t
 			if statErr := syscall.Fstat(f.fd, &st); statErr == nil {
 				fileMtime := time.Unix(st.Mtim.Unix())
-				xattrValue := encodeCacheXattr(committedSHA, fileMtime)
+				xattrValue := encodeCacheXattr(committedSHA, fileMtime, st.Size)
 				unix.Setxattr(f.path, xattrCacheName, []byte(xattrValue), 0)
 				//log.Printf("Set xattr for %s after read: SHA=%s, mtime=%v", f.path, sha256sum, fileMtime)
 			}
