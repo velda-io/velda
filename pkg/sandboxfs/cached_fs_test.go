@@ -30,6 +30,7 @@ import (
 
 func disallowOther(options *fs.Options) {
 	options.MountOptions.AllowOther = false
+	//options.Debug = true
 }
 
 // testEnv holds the test environment directories
@@ -214,6 +215,9 @@ func TestCacheMetrics(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, testContent, content)
 
+	// Wait for background eager fetch to complete
+	time.Sleep(100 * time.Millisecond)
+
 	newNotExist := getCounterValue(GlobalCacheMetrics.CacheNotExist)
 	newFetched := getCounterValue(GlobalCacheMetrics.CacheFetched)
 	assert.Equal(t, initialNotExist+1, newNotExist, "CacheNotExist should increase by 1")
@@ -265,6 +269,9 @@ func TestEagerFetch(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, testContent, content)
 
+		// Wait a bit for background worker to complete
+		time.Sleep(100 * time.Millisecond)
+
 		// Verify metrics
 		newNotExist := getCounterValue(GlobalCacheMetrics.CacheNotExist)
 		newFetched := getCounterValue(GlobalCacheMetrics.CacheFetched)
@@ -303,6 +310,9 @@ func TestEagerFetch(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, testContent, content)
 
+		// Wait a bit for background worker to complete
+		time.Sleep(100 * time.Millisecond)
+
 		// Verify metrics
 		newMiss := getCounterValue(GlobalCacheMetrics.CacheMiss)
 		newFetched := getCounterValue(GlobalCacheMetrics.CacheFetched)
@@ -318,8 +328,12 @@ func TestEagerFetch(t *testing.T) {
 	})
 
 	t.Run("no eager fetch on recent file with missing cache", func(t *testing.T) {
+		// Create a subdirectory to isolate this test from prefetching sibling files
+		testDir := filepath.Join(env.srcDir, "eager3-dir")
+		require.NoError(t, os.Mkdir(testDir, 0755))
+
 		// Create test file with recent mtime (1 hour ago)
-		testFile := filepath.Join(env.srcDir, "eager3.txt")
+		testFile := filepath.Join(testDir, "eager3.txt")
 		testContent := []byte("Eager fetch content 3")
 		require.NoError(t, os.WriteFile(testFile, testContent, 0644))
 
@@ -332,7 +346,7 @@ func TestEagerFetch(t *testing.T) {
 		xattrValue := encodeCacheXattr(fakeSHA, recentTime, int64(len(testContent)))
 		require.NoError(t, unix.Setxattr(testFile, xattrCacheName, []byte(xattrValue), 0))
 
-		mountedFile := filepath.Join(env.mountDir, "eager3.txt")
+		mountedFile := filepath.Join(env.mountDir, "eager3-dir", "eager3.txt")
 
 		initialMiss := getCounterValue(GlobalCacheMetrics.CacheMiss)
 		initialFetched := getCounterValue(GlobalCacheMetrics.CacheFetched)
@@ -621,4 +635,86 @@ func TestReadRefillCacheKey(t *testing.T) {
 
 	newHit := getCounterValue(GlobalCacheMetrics.CacheHit)
 	assert.Equal(t, initialHit+1, newHit, "CacheHit should increase by 1 on second read")
+}
+
+// TestListDirectories tests directory listing functionality
+func TestListDirectories(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping FUSE test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create test directory structure
+	subDir := filepath.Join(env.srcDir, "subdir")
+	require.NoError(t, os.MkdirAll(subDir, 0755))
+
+	// Create some files in root
+	require.NoError(t, os.WriteFile(filepath.Join(env.srcDir, "file1.txt"), []byte("content1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(env.srcDir, "file2.txt"), []byte("content2"), 0644))
+
+	// Create files in subdirectory
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "subfile1.txt"), []byte("subcontent1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "subfile2.txt"), []byte("subcontent2"), 0644))
+
+	server, err := MountWorkDir(env.srcDir, env.mountDir, env.cacheDir, disallowOther)
+	require.NoError(t, err)
+	defer server.Unmount()
+
+	t.Run("list root directory", func(t *testing.T) {
+		entries, err := os.ReadDir(env.mountDir)
+		require.NoError(t, err)
+		require.Len(t, entries, 3, "Should have 2 files and 1 directory")
+
+		names := make(map[string]bool)
+		for _, entry := range entries {
+			names[entry.Name()] = entry.IsDir()
+		}
+
+		isDir, exists := names["file1.txt"]
+		assert.True(t, exists, "Should contain file1.txt")
+		assert.False(t, isDir, "file1.txt should not be a directory")
+
+		isDir, exists = names["file2.txt"]
+		assert.True(t, exists, "Should contain file2.txt")
+		assert.False(t, isDir, "file2.txt should not be a directory")
+
+		isDir, exists = names["subdir"]
+		assert.True(t, exists, "Should contain subdir")
+		assert.True(t, isDir, "subdir should be a directory")
+	})
+
+	t.Run("list subdirectory", func(t *testing.T) {
+		entries, err := os.ReadDir(filepath.Join(env.mountDir, "subdir"))
+		require.NoError(t, err)
+		require.Len(t, entries, 2, "Should have 2 files in subdirectory")
+
+		names := make(map[string]bool)
+		for _, entry := range entries {
+			names[entry.Name()] = entry.IsDir()
+		}
+
+		isDir, exists := names["subfile1.txt"]
+		assert.True(t, exists, "Should contain subfile1.txt")
+		assert.False(t, isDir, "subfile1.txt should not be a directory")
+
+		isDir, exists = names["subfile2.txt"]
+		assert.True(t, exists, "Should contain subfile2.txt")
+		assert.False(t, isDir, "subfile2.txt should not be a directory")
+	})
+
+	t.Run("list empty directory", func(t *testing.T) {
+		emptyDir := filepath.Join(env.mountDir, "emptydir")
+		require.NoError(t, os.Mkdir(emptyDir, 0755))
+
+		entries, err := os.ReadDir(emptyDir)
+		require.NoError(t, err)
+		assert.Len(t, entries, 0, "Empty directory should have no entries")
+	})
+
+	t.Run("list non-existent directory", func(t *testing.T) {
+		_, err := os.ReadDir(filepath.Join(env.mountDir, "nonexistent"))
+		assert.Error(t, err, "Should return error for non-existent directory")
+		assert.True(t, os.IsNotExist(err), "Error should be os.ErrNotExist")
+	})
 }

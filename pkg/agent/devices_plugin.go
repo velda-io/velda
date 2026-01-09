@@ -59,6 +59,9 @@ func copyNod(src, dst string) error {
 	if err := os.Chmod(dst, stat.Mode()&fs.ModePerm); err != nil {
 		return err
 	}
+	if err := os.Chown(dst, int(sysStat.Uid), int(sysStat.Gid)); err != nil {
+		return err
+	}
 
 	return nil
 }
