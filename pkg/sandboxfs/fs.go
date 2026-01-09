@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 package sandboxfs
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -30,6 +31,7 @@ type MountOptions func(*fs.Options)
 type VeldaServer struct {
 	*fuse.Server
 	Cache *DirectoryCacheManager
+	Root  *CachedLoopbackNode
 }
 
 // MountWorkDir mounts a workspace directory with caching support
@@ -49,9 +51,15 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 	}
 
 	// Create cached loopback root
-	root, err := NewCachedLoopbackRoot(baseDir, cache)
+	rootNode, err := NewCachedLoopbackRoot(baseDir, cache)
 	if err != nil {
 		return nil, err
+	}
+
+	// Type assert to get the actual root node for worker management
+	cachedRoot, ok := rootNode.(*CachedLoopbackNode)
+	if !ok {
+		return nil, fmt.Errorf("failed to assert root node type")
 	}
 
 	timeout := 60 * time.Second
@@ -74,7 +82,7 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 		opt(option)
 	}
 
-	server, err := fs.Mount(workspaceDir, root, option)
+	server, err := fs.Mount(workspaceDir, rootNode, option)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +92,7 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 	veldaServer := &VeldaServer{
 		Server: server,
 		Cache:  cache,
+		Root:   cachedRoot,
 	}
 
 	go func() {

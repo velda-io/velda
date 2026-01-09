@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,6 +26,8 @@ type CacheMetrics struct {
 	CacheHit      prometheus.Counter
 	CacheMiss     prometheus.Counter
 	CacheNotExist prometheus.Counter
+	CacheFetched  prometheus.Counter
+	CacheStale    prometheus.Counter
 
 	// Write operations (after file close)
 	CacheSaved   prometheus.Counter
@@ -48,6 +50,14 @@ func NewCacheMetrics() *CacheMetrics {
 		CacheMiss: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "velda_cache_miss_total",
 			Help: "Number of cache misses (xattr exists but cache file missing)",
+		}),
+		CacheFetched: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "velda_cache_fetched_total",
+			Help: "Number of files fetched from the original source during open",
+		}),
+		CacheStale: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "velda_cache_stale_total",
+			Help: "Number of cache entries that were stale (xattr exists but mtime doesn't match)",
 		}),
 		CacheNotExist: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "velda_cache_not_exist_total",
@@ -73,6 +83,8 @@ func (m *CacheMetrics) Register() {
 	prometheus.MustRegister(m.CacheHit)
 	prometheus.MustRegister(m.CacheMiss)
 	prometheus.MustRegister(m.CacheNotExist)
+	prometheus.MustRegister(m.CacheFetched)
+	prometheus.MustRegister(m.CacheStale)
 	prometheus.MustRegister(m.CacheSaved)
 	prometheus.MustRegister(m.CacheDup)
 	prometheus.MustRegister(m.CacheAborted)
@@ -83,6 +95,8 @@ func (m *CacheMetrics) Unregister() {
 	prometheus.Unregister(m.CacheHit)
 	prometheus.Unregister(m.CacheMiss)
 	prometheus.Unregister(m.CacheNotExist)
+	prometheus.Unregister(m.CacheFetched)
+	prometheus.Unregister(m.CacheStale)
 	prometheus.Unregister(m.CacheSaved)
 	prometheus.Unregister(m.CacheDup)
 	prometheus.Unregister(m.CacheAborted)

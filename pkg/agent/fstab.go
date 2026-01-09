@@ -16,7 +16,6 @@ package agent
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 )
@@ -91,6 +90,5 @@ func ParseFstab(path string) (map[string]*FstabEntry, error) {
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	log.Printf("mountPointMap: %v", mountPointMap)
 	return mountPointMap, nil
 }
