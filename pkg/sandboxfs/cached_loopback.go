@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// This file also contains fork of https://github.com/hanwen/go-fuse/blob/master/fs/files.go
-// authored by Go-FUSE authors, licensed under the BSD 3-Clause License.
-
-// TODO: Refactor their implementation to make extension easier.
 package sandboxfs
 
 import (
@@ -366,11 +362,11 @@ func (n *CachedLoopbackNode) Create(ctx context.Context, name string, flags uint
 	// Create file handle with caching enabled for writes
 	//log.Printf("Created file %s, enabling write caching", fullPath)
 	fh := &CachedFileHandle{
-		fd:       fd,
-		path:     fullPath,
-		cache:    n.mountCtx.cache,
-		isWrite:  true,
-		cacheOps: true,
+		LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+		path:         fullPath,
+		cache:        n.mountCtx.cache,
+		isWrite:      true,
+		cacheOps:     true,
 	}
 
 	return ch, fh, 0, 0
@@ -453,11 +449,11 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 
 		//log.Printf("Opened file %s for writing", fullPath)
 		return &CachedFileHandle{
-			fd:       fd,
-			path:     fullPath,
-			cache:    n.mountCtx.cache,
-			isWrite:  true,
-			cacheOps: cacheEnabled, // Start with cache ops enabled if truncating or creating
+			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+			path:         fullPath,
+			cache:        n.mountCtx.cache,
+			isWrite:      true,
+			cacheOps:     cacheEnabled, // Start with cache ops enabled if truncating or creating
 		}, 0, 0
 	}
 
@@ -487,12 +483,12 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 					}
 					//log.Printf("Cache hit for %s (mtime match)", fullPath)
 					return &CachedFileHandle{
-						fd:         fd,
-						path:       fullPath,
-						cache:      n.mountCtx.cache,
-						isWrite:    false,
-						fromCache:  true,
-						cachedStat: &st,
+						LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+						path:         fullPath,
+						cache:        n.mountCtx.cache,
+						isWrite:      false,
+						fromCache:    true,
+						cachedStat:   &st,
 					}, fuse.FOPEN_KEEP_CACHE, 0
 				}
 				// Fall through if cached file can't be opened
@@ -513,11 +509,11 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 
 				// Create file handle with real fd
 				fh := &CachedFileHandle{
-					fd:       fd,
-					path:     fullPath,
-					cache:    n.mountCtx.cache,
-					isWrite:  false,
-					cacheOps: false, // Disable lazy caching since we'll eager fetch
+					LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+					path:         fullPath,
+					cache:        n.mountCtx.cache,
+					isWrite:      false,
+					cacheOps:     false, // Disable lazy caching since we'll eager fetch
 				}
 
 				// Submit eager fetch job to front of queue (high priority)
@@ -568,11 +564,11 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 
 		// Create file handle with real fd
 		fh := &CachedFileHandle{
-			fd:       fd,
-			path:     fullPath,
-			cache:    n.mountCtx.cache,
-			isWrite:  false,
-			cacheOps: false, // Disable lazy caching since we'll eager fetch
+			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+			path:         fullPath,
+			cache:        n.mountCtx.cache,
+			isWrite:      false,
+			cacheOps:     false, // Disable lazy caching since we'll eager fetch
 		}
 
 		// Submit eager fetch job to front of queue (high priority)
@@ -625,11 +621,11 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 
 	// For sequential reads, we'll cache the content
 	return &CachedFileHandle{
-		fd:       fd,
-		path:     fullPath,
-		cache:    n.mountCtx.cache,
-		isWrite:  false,
-		cacheOps: true,
+		LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+		path:         fullPath,
+		cache:        n.mountCtx.cache,
+		isWrite:      false,
+		cacheOps:     true,
 	}, 0, 0
 }
 
@@ -836,7 +832,7 @@ func (n *CachedLoopbackNode) Removexattr(ctx context.Context, attr string) sysca
 
 // CachedFileHandle wraps a file descriptor with caching capabilities
 type CachedFileHandle struct {
-	fd         int
+	*fs.LoopbackFile
 	path       string
 	cache      CacheManager
 	isWrite    bool
@@ -859,14 +855,14 @@ func (f *CachedFileHandle) switchToCachedFd(cachedFd int, st *syscall.Stat_t) {
 	defer f.mu.Unlock()
 
 	// Only switch if we haven't already switched, we're not writing, not closed, and no bytes have been written
-	if f.isWrite || f.fd == -1 {
+	if f.isWrite || f.LoopbackFile == nil {
 		syscall.Close(cachedFd) // Close the cached fd if we can't use it
 		return
 	}
 
 	// Store original fd and switch to cached
-	originalFd := f.fd
-	f.fd = cachedFd
+	originalFile := f.LoopbackFile
+	f.LoopbackFile = fs.NewLoopbackFile(cachedFd).(*fs.LoopbackFile)
 	f.fromCache = true
 	f.cachedStat = st
 	f.cacheOps = false // Disable further caching since we're now using cache
@@ -875,7 +871,7 @@ func (f *CachedFileHandle) switchToCachedFd(cachedFd int, st *syscall.Stat_t) {
 	}
 
 	// Close the original fd
-	syscall.Close(originalFd)
+	originalFile.Release(nil)
 }
 
 var _ = (fs.FileHandle)((*CachedFileHandle)(nil))
@@ -896,8 +892,8 @@ var _ = (fs.FileAllocater)((*CachedFileHandle)(nil))
 func (f *CachedFileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-
-	n, err := syscall.Pread(f.fd, dest, off)
+	fd, _ := f.PassthroughFd()
+	n, err := syscall.Pread(fd, dest, off)
 	if err != nil {
 		return nil, fs.ToErrno(err)
 	}
@@ -932,9 +928,9 @@ func (f *CachedFileHandle) Write(ctx context.Context, data []byte, off int64) (u
 		f.abortCaching()
 	}
 
-	n, err := syscall.Pwrite(f.fd, data, off)
-	if err != nil {
-		return 0, fs.ToErrno(err)
+	n, errno := f.LoopbackFile.Write(ctx, data, off)
+	if errno != 0 {
+		return 0, errno
 	}
 
 	// If caching is enabled, write to cache as well
@@ -972,31 +968,18 @@ func (f *CachedFileHandle) Lseek(ctx context.Context, off uint64, whence uint32)
 	// Any seek aborts caching
 	f.abortCaching()
 
-	newOff, err := unix.Seek(f.fd, int64(off), int(whence))
-	if err != nil {
-		return 0, fs.ToErrno(err)
-	}
-
-	return uint64(newOff), 0
+	return f.LoopbackFile.Lseek(ctx, off, whence)
 }
 
 // Flush implements FileFlusher - commits cache on flush
 func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-
-	// Since Flush() may be called for each dup'd fd, we don't
-	// want to really close the file, we just want to flush. This
-	// is achieved by closing a dup'd fd.
-	newFd, err := syscall.Dup(f.fd)
-
-	if err != nil {
-		return fs.ToErrno(err)
+	errno := f.LoopbackFile.Flush(ctx)
+	if errno != 0 {
+		return errno
 	}
-	err = syscall.Close(newFd)
-	if err != nil {
-		return fs.ToErrno(err)
-	}
+	fd, _ := f.PassthroughFd()
 
 	// Mark as flushed
 	f.flushed = true
@@ -1008,7 +991,7 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 		if err == nil && committedSHA != "" {
 			// Get mtime from file after flush
 			var st syscall.Stat_t
-			if statErr := syscall.Fstat(f.fd, &st); statErr == nil {
+			if statErr := syscall.Fstat(fd, &st); statErr == nil {
 				fileMtime := time.Unix(st.Mtim.Unix())
 				// Encode SHA256 and mtime into xattr
 				xattrValue := encodeCacheXattr(committedSHA, fileMtime, st.Size)
@@ -1022,7 +1005,7 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 	} else if f.cacheOps && !f.isWrite && f.cacheWrite != nil && f.bytesWritten > 0 {
 		// Get current mtime & size
 		var st syscall.Stat_t
-		if statErr := syscall.Fstat(f.fd, &st); statErr == nil && f.bytesWritten == st.Size {
+		if statErr := syscall.Fstat(fd, &st); statErr == nil && f.bytesWritten == st.Size {
 			// For reads, compute SHA256 and set xattr with mtime
 			committedSHA, err := f.cacheWrite.Commit()
 			if err == nil && committedSHA != "" {
@@ -1056,10 +1039,9 @@ func (f *CachedFileHandle) Release(ctx context.Context) syscall.Errno {
 		f.cacheWrite.Abort()
 		f.cacheWrite = nil
 	}
-	fd := f.fd
-	f.fd = -1
-
-	return fs.ToErrno(syscall.Close(fd))
+	oldfile := f.LoopbackFile
+	f.LoopbackFile = nil
+	return oldfile.Release(ctx)
 }
 
 // abortCaching disables caching for this file handle
@@ -1073,208 +1055,4 @@ func (f *CachedFileHandle) abortCaching() {
 		f.cacheWrite = nil
 	}
 	f.cacheOps = false
-}
-
-// Getlk implements FileGetlker - get file lock
-func (f *CachedFileHandle) Getlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	flk := syscall.Flock_t{}
-	lk.ToFlockT(&flk)
-	errno := fs.ToErrno(syscall.FcntlFlock(uintptr(f.fd), _OFD_GETLK, &flk))
-	out.FromFlockT(&flk)
-	return errno
-}
-
-// Setlk implements FileSetlker - set file lock (non-blocking)
-func (f *CachedFileHandle) Setlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
-	return f.setLock(ctx, owner, lk, flags, false)
-}
-
-// Setlkw implements FileSetlkwer - set file lock (blocking)
-func (f *CachedFileHandle) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
-	return f.setLock(ctx, owner, lk, flags, true)
-}
-
-// setLock is the common implementation for Setlk and Setlkw
-func (f *CachedFileHandle) setLock(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32, blocking bool) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	if (flags & fuse.FUSE_LK_FLOCK) != 0 {
-		var op int
-		switch lk.Typ {
-		case syscall.F_RDLCK:
-			op = syscall.LOCK_SH
-		case syscall.F_WRLCK:
-			op = syscall.LOCK_EX
-		case syscall.F_UNLCK:
-			op = syscall.LOCK_UN
-		default:
-			return syscall.EINVAL
-		}
-		if !blocking {
-			op |= syscall.LOCK_NB
-		}
-		return fs.ToErrno(syscall.Flock(f.fd, op))
-	} else {
-		flk := syscall.Flock_t{}
-		lk.ToFlockT(&flk)
-		var op int
-		if blocking {
-			op = _OFD_SETLKW
-		} else {
-			op = _OFD_SETLK
-		}
-		return fs.ToErrno(syscall.FcntlFlock(uintptr(f.fd), op, &flk))
-	}
-}
-
-func (f *CachedFileHandle) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	if errno := f.setAttr(ctx, in); errno != 0 {
-		return errno
-	}
-
-	return f.Getattr(ctx, out)
-}
-
-func (f *CachedFileHandle) fchmod(mode uint32) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return fs.ToErrno(syscall.Fchmod(f.fd, mode))
-}
-
-func (f *CachedFileHandle) fchown(uid, gid int) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return fs.ToErrno(syscall.Fchown(f.fd, uid, gid))
-}
-
-func (f *CachedFileHandle) ftruncate(sz uint64) syscall.Errno {
-	return fs.ToErrno(syscall.Ftruncate(f.fd, int64(sz)))
-}
-
-func (f *CachedFileHandle) setAttr(ctx context.Context, in *fuse.SetAttrIn) syscall.Errno {
-	var errno syscall.Errno
-	if mode, ok := in.GetMode(); ok {
-		if errno := f.fchmod(mode); errno != 0 {
-			return errno
-		}
-	}
-
-	uid32, uOk := in.GetUID()
-	gid32, gOk := in.GetGID()
-	if uOk || gOk {
-		uid := -1
-		gid := -1
-
-		if uOk {
-			uid = int(uid32)
-		}
-		if gOk {
-			gid = int(gid32)
-		}
-		if errno := f.fchown(uid, gid); errno != 0 {
-			return errno
-		}
-	}
-
-	mtime, mok := in.GetMTime()
-	atime, aok := in.GetATime()
-
-	if mok || aok {
-		ap := &atime
-		mp := &mtime
-		if !aok {
-			ap = nil
-		}
-		if !mok {
-			mp = nil
-		}
-		errno = f.utimens(ap, mp)
-		if errno != 0 {
-			return errno
-		}
-	}
-
-	if sz, ok := in.GetSize(); ok {
-		if errno := f.ftruncate(sz); errno != 0 {
-			return errno
-		}
-	}
-	return fs.OK
-}
-
-func (f *CachedFileHandle) Getattr(ctx context.Context, a *fuse.AttrOut) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.fromCache && f.cachedStat != nil {
-		a.FromStat(f.cachedStat)
-		return fs.OK
-	}
-	st := syscall.Stat_t{}
-	err := syscall.Fstat(f.fd, &st)
-	if err != nil {
-		return fs.ToErrno(err)
-	}
-	a.FromStat(&st)
-
-	return fs.OK
-}
-
-func (f *CachedFileHandle) Fsync(ctx context.Context, flags uint32) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	err := syscall.Fsync(f.fd)
-	if err != nil {
-		return fs.ToErrno(err)
-	}
-	return fs.OK
-}
-
-func (f *CachedFileHandle) Allocate(ctx context.Context, off uint64, sz uint64, mode uint32) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	err := unix.Fallocate(f.fd, mode, int64(off), int64(sz))
-	if err != nil {
-		return fs.ToErrno(err)
-	}
-	return fs.OK
-}
-
-func (f *CachedFileHandle) Ioctl(ctx context.Context, cmd uint32, arg uint64, input []byte, output []byte) (result int32, errno syscall.Errno) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	argWord := uintptr(arg)
-	iot := (cmd >> 30) & 3
-	switch iot {
-	case 1: // IOT_READ
-		argWord = uintptr(unsafe.Pointer(&input[0]))
-	case 2: // IOT_WRITE
-		argWord = uintptr(unsafe.Pointer(&output[0]))
-	}
-
-	res, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(f.fd), uintptr(cmd), argWord)
-	return int32(res), fs.ToErrno(errno)
-}
-
-// Utimens - file handle based version of loopbackFileSystem.Utimens()
-func (f *CachedFileHandle) utimens(a *time.Time, m *time.Time) syscall.Errno {
-	var ts [2]syscall.Timespec
-	ts[0] = fuse.UtimeToTimespec(a)
-	ts[1] = fuse.UtimeToTimespec(m)
-	err := futimens(int(f.fd), &ts)
-	return fs.ToErrno(err)
-}
-
-// futimens - futimens(3) calls utimensat(2) with "pathname" set to null and
-// "flags" set to zero
-func futimens(fd int, times *[2]syscall.Timespec) (err error) {
-	_, _, e1 := syscall.Syscall6(syscall.SYS_UTIMENSAT, uintptr(fd), 0, uintptr(unsafe.Pointer(times)), uintptr(0), 0, 0)
-	if e1 != 0 {
-		err = syscall.Errno(e1)
-	}
-	return
 }
