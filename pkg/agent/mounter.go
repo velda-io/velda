@@ -36,71 +36,168 @@ func NewSimpleMounter(sandboxConfig *agentpb.SandboxConfig) *SimpleMounter {
 }
 
 func (m *SimpleMounter) Mount(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
-	if m.sandboxConfig.GetDiskSource().CasConfig != nil {
-		dataDir := path.Join(path.Dir(workspaceDir), "worksource_base")
+	defer func() {
+		if err == nil {
+			if remountErr := syscall.Mount("", workspaceDir, "", syscall.MS_REC|syscall.MS_SHARED, ""); remountErr != nil {
+				err = fmt.Errorf("Remount workspace: %w", remountErr)
+				if cleanup != nil {
+					cleanup()
+				}
+			}
+		}
+	}()
+	// If snapshot is specified, use overlay approach
+	if session.SnapshotName != "" {
+		return m.mountWithSnapshot(ctx, session, workspaceDir)
+	}
 
-		if err := os.Mkdir(dataDir, 0755); err != nil && !os.IsExist(err) {
-			return nil, fmt.Errorf("Mkdir workspace: %w", err)
-		}
-		cleanup, err := m.mount(ctx, session, dataDir)
-		if err != nil {
-			return nil, err
+	// Otherwise, mount the current version
+	return m.mountInternal(ctx, session, workspaceDir, mountTypeCurrent, "", "")
+}
+
+// mountType specifies the type of mount operation to perform
+type mountType int
+
+const (
+	mountTypeCurrent  mountType = iota // Mount current version
+	mountTypeSnapshot                  // Mount snapshot
+)
+
+// mountInternal is a unified function for mounting with optional veldafs wrapper
+// Parameters:
+//   - ctx: context for the operation
+//   - session: session request containing mount information
+//   - targetDir: directory where the filesystem should be mounted
+//   - mType: type of mount (current or snapshot)
+//   - snapshotName: name of snapshot (only used when mType is mountTypeSnapshot)
+//   - instanceSuffix: suffix for instance name when using veldafs (e.g., "current", "snapshot")
+func (m *SimpleMounter) mountInternal(ctx context.Context, session *proto.SessionRequest, targetDir string, mType mountType, snapshotName, instanceSuffix string) (cleanup func(), err error) {
+	useCAS := m.sandboxConfig.GetDiskSource().CasConfig != nil
+
+	if useCAS {
+		// Mount with veldafs wrapper
+		dataDir := path.Join(path.Dir(targetDir), path.Base(targetDir)+"_data")
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			return nil, fmt.Errorf("mkdir %s: %w", dataDir, err)
 		}
 
-		// Mount CAS driver on top of dataDir
-		newCleanup, err := m.runVeldafsWrapper(ctx, dataDir, fmt.Sprintf("instance-%d", session.InstanceId), workspaceDir)
-		if err != nil {
-			cleanup()
-			return nil, fmt.Errorf("Mount veldafs: %w", err)
-		}
-		if cleanup != nil {
-			return func() {
-				newCleanup()
-				cleanup()
-			}, nil
+		var baseCleanup func()
+		var mountErr error
+
+		if mType == mountTypeSnapshot {
+			baseCleanup, mountErr = m.mountDirect(ctx, session, dataDir, true, snapshotName)
 		} else {
-			return newCleanup, nil
+			baseCleanup, mountErr = m.mountDirect(ctx, session, dataDir, false, "")
 		}
+
+		if mountErr != nil {
+			return nil, mountErr
+		}
+
+		// Mount CAS driver on top
+		instanceName := fmt.Sprintf("instance-%d", session.InstanceId)
+		if instanceSuffix != "" {
+			instanceName = fmt.Sprintf("instance-%d-%s", session.InstanceId, instanceSuffix)
+		}
+
+		casCleanup, err := m.runVeldafsWrapper(ctx, dataDir, instanceName, targetDir)
+		if err != nil {
+			if baseCleanup != nil {
+				baseCleanup()
+			}
+			return nil, fmt.Errorf("mount veldafs: %w", err)
+		}
+
+		return func() {
+			if casCleanup != nil {
+				casCleanup()
+			}
+			if baseCleanup != nil {
+				baseCleanup()
+			}
+		}, nil
 	} else {
-		return m.mount(ctx, session, workspaceDir)
+		// Direct mount without CAS
+		if mType == mountTypeSnapshot {
+			return m.mountDirect(ctx, session, targetDir, true, snapshotName)
+		}
+		return m.mountDirect(ctx, session, targetDir, false, "")
 	}
 }
 
-func (m *SimpleMounter) mount(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
+// mountDirect mounts the filesystem directly without veldafs wrapper
+// Parameters:
+//   - isSnapshot: if true, mount a snapshot; if false, mount current version
+//   - snapshotName: name of snapshot (only used when isSnapshot is true)
+func (m *SimpleMounter) mountDirect(ctx context.Context, session *proto.SessionRequest, targetDir string, isSnapshot bool, snapshotName string) (cleanup func(), err error) {
 	switch s := m.sandboxConfig.GetDiskSource().GetSource().(type) {
 	case *agentpb.AgentDiskSource_MountedDiskSource_:
-		// Mount disk to workspace
-		disk := fmt.Sprintf("%s/%d/root", s.MountedDiskSource.GetLocalPath(), session.InstanceId)
-
-		if err := syscall.Mount(disk, workspaceDir, "bind", syscall.MS_BIND, ""); err != nil {
-			return nil, fmt.Errorf("Mount bind disk: %w", err)
+		var sourcePath string
+		if isSnapshot {
+			disk := fmt.Sprintf("%s/%d/root", s.MountedDiskSource.GetLocalPath(), session.InstanceId)
+			sourcePath = path.Join(disk, ".zfs/snapshot", snapshotName)
+		} else {
+			sourcePath = fmt.Sprintf("%s/%d/root", s.MountedDiskSource.GetLocalPath(), session.InstanceId)
 		}
-		if err := syscall.Mount("", workspaceDir, "", syscall.MS_REC|syscall.MS_SHARED, ""); err != nil {
-			return nil, fmt.Errorf("Remount workspace: %w", err)
+
+		mountFlags := uintptr(syscall.MS_BIND)
+		if isSnapshot {
+			mountFlags |= syscall.MS_RDONLY
+		}
+
+		if err := syscall.Mount(sourcePath, targetDir, "bind", mountFlags, ""); err != nil {
+			if isSnapshot {
+				return nil, fmt.Errorf("mount snapshot: %w", err)
+			}
+			return nil, fmt.Errorf("mount bind disk: %w", err)
+		}
+
+		if isSnapshot {
+			return func() {
+				syscall.Unmount(targetDir, syscall.MNT_DETACH)
+			}, nil
 		}
 		return nil, nil
 
 	case *agentpb.AgentDiskSource_NfsMountSource_:
-		// Mount NFS disk to workspace
 		nfsSource := s.NfsMountSource
 		nfsMount := session.AgentSessionInfo.GetNfsMount()
 		if nfsMount == nil {
 			return nil, fmt.Errorf("NFS mount info is not provided in session request")
 		}
-		nfsPath := fmt.Sprintf("%s:%s", nfsMount.NfsServer, nfsMount.NfsPath)
-		option := nfsSource.MountOptions
-		cmd := exec.CommandContext(ctx, "mount", "-t", "nfs", "-o", option, nfsPath, workspaceDir)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("Mount NFS disk: %v, output: %s", err, output)
+
+		var nfsPath string
+		if isSnapshot {
+			nfsPathWithSnapshot := path.Join(nfsMount.NfsPath, ".zfs/snapshot", snapshotName)
+			nfsPath = fmt.Sprintf("%s:%s", nfsMount.NfsServer, nfsPathWithSnapshot)
+		} else {
+			nfsPath = fmt.Sprintf("%s:%s", nfsMount.NfsServer, nfsMount.NfsPath)
 		}
-		if err := syscall.Mount("", workspaceDir, "", syscall.MS_REC|syscall.MS_SHARED, ""); err != nil {
-			return nil, fmt.Errorf("Remount workspace: %w", err)
+
+		option := nfsSource.MountOptions
+		cmd := exec.CommandContext(ctx, "mount", "-t", "nfs", "-o", option, nfsPath, targetDir)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			if isSnapshot {
+				return nil, fmt.Errorf("mount NFS snapshot: %v, output: %s", err, output)
+			}
+			return nil, fmt.Errorf("mount NFS disk: %v, output: %s", err, output)
+		}
+
+		if isSnapshot {
+			return func() {
+				syscall.Unmount(targetDir, syscall.MNT_DETACH)
+			}, nil
 		}
 		return nil, nil
 
 	default:
-		return nil, fmt.Errorf("Unsupported oss disk source: %T", s)
+		return nil, fmt.Errorf("unsupported disk source: %T", s)
 	}
+}
+
+// mount wraps mountInternal for backward compatibility
+func (m *SimpleMounter) mount(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
+	return m.mountInternal(ctx, session, workspaceDir, mountTypeCurrent, "", "")
 }
 
 func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, workspaceDir string) (cleanup func(), err error) {
@@ -141,5 +238,133 @@ func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, works
 	return func() {
 		fuseCmd.Process.Signal(syscall.SIGTERM)
 		fuseCmd.Wait()
+	}, nil
+}
+
+// mountWithSnapshot mounts the filesystem with snapshot support using overlayfs
+func (m *SimpleMounter) mountWithSnapshot(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
+	agentDir := path.Dir(workspaceDir)
+	baseDir := path.Join(agentDir, "base")
+	curDir := path.Join(agentDir, "cur")
+	upperDir := path.Join(agentDir, "upper")
+	workDir := path.Join(agentDir, "work")
+
+	var cleanupFuncs []func()
+	defer func() {
+		if err != nil {
+			// Cleanup on error
+			for i := len(cleanupFuncs) - 1; i >= 0; i-- {
+				cleanupFuncs[i]()
+			}
+		}
+	}()
+
+	// Create necessary directories
+	for _, dir := range []string{baseDir, curDir, upperDir, workDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("mkdir %s: %w", dir, err)
+		}
+	}
+
+	// Step 1: Mount snapshot as base
+	baseCleanup, err := m.mountInternal(ctx, session, baseDir, mountTypeSnapshot, session.SnapshotName, "snapshot")
+	if err != nil {
+		return nil, fmt.Errorf("mount base snapshot: %w", err)
+	}
+	if baseCleanup != nil {
+		cleanupFuncs = append(cleanupFuncs, baseCleanup)
+	}
+
+	// Step 2: Mount current version as cur
+	curCleanup, err := m.mountInternal(ctx, session, curDir, mountTypeCurrent, "", "current")
+	if err != nil {
+		return nil, fmt.Errorf("mount current version: %w", err)
+	}
+	if curCleanup != nil {
+		cleanupFuncs = append(cleanupFuncs, curCleanup)
+	}
+
+	// Step 3: Mount overlay of base to workspace
+	overlayOpts := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", baseDir, upperDir, workDir)
+	if err := syscall.Mount("overlay", workspaceDir, "overlay", 0, overlayOpts); err != nil {
+		return nil, fmt.Errorf("mount overlay: %w", err)
+	}
+	cleanupFuncs = append(cleanupFuncs, func() {
+		syscall.Unmount(workspaceDir, syscall.MNT_DETACH)
+	})
+
+	if err := syscall.Mount("", workspaceDir, "", syscall.MS_REC|syscall.MS_SHARED, ""); err != nil {
+		return nil, fmt.Errorf("remount workspace: %w", err)
+	}
+
+	// Step 4: Bind mount each writable subdir from cur to workspace
+	if len(session.WritableDirs) > 0 {
+		bindCleanup, err := m.bindWritableDirs(session, workspaceDir, curDir)
+		if err != nil {
+			return nil, fmt.Errorf("bind writable dirs: %w", err)
+		}
+		if bindCleanup != nil {
+			cleanupFuncs = append(cleanupFuncs, bindCleanup)
+		}
+	}
+
+	return func() {
+		for i := len(cleanupFuncs) - 1; i >= 0; i-- {
+			cleanupFuncs[i]()
+		}
+		// Clean up temporary directories
+		os.RemoveAll(upperDir)
+		os.RemoveAll(workDir)
+	}, nil
+}
+
+// bindWritableDirs bind mounts writable directories from cur to workspace
+func (m *SimpleMounter) bindWritableDirs(session *proto.SessionRequest, workspaceDir, curDir string) (cleanup func(), err error) {
+	var cleanupFuncs []func()
+	defer func() {
+		if err != nil {
+			// Cleanup on error
+			for i := len(cleanupFuncs) - 1; i >= 0; i-- {
+				cleanupFuncs[i]()
+			}
+		}
+	}()
+
+	for _, writableDir := range session.WritableDirs {
+		// Skip root directory
+		if writableDir == "/" {
+			continue
+		}
+
+		// Source path in cur
+		source := path.Join(curDir, writableDir)
+
+		// Target path in workspace
+		target := path.Join(workspaceDir, writableDir)
+
+		// Ensure source directory exists
+		if err := os.MkdirAll(source, 0755); err != nil {
+			return nil, fmt.Errorf("mkdir source %s: %w", source, err)
+		}
+
+		// Ensure target directory exists
+		if err := os.MkdirAll(target, 0755); err != nil {
+			return nil, fmt.Errorf("mkdir target %s: %w", target, err)
+		}
+
+		// Bind mount the writable directory from cur
+		if err := syscall.Mount(source, target, "bind", syscall.MS_BIND, ""); err != nil {
+			return nil, fmt.Errorf("mount bind %s to %s: %w", source, target, err)
+		}
+
+		cleanupFuncs = append(cleanupFuncs, func() {
+			syscall.Unmount(target, syscall.MNT_DETACH)
+		})
+	}
+
+	return func() {
+		for i := len(cleanupFuncs) - 1; i >= 0; i-- {
+			cleanupFuncs[i]()
+		}
 	}, nil
 }

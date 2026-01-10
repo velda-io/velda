@@ -68,7 +68,7 @@ func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, se
 
 // exportNFS is a helper function to handle NFS export logic using exportfs command
 func exportNFS(path, host string, session *Session) error {
-	cmd := exec.Command("sudo", "sh", "-c", "echo '"+path+" "+host+"(rw,async,no_root_squash,no_subtree_check)' > "+exportFile(session))
+	cmd := exec.Command("sudo", "sh", "-c", "echo '"+path+" "+host+"(rw,crossmnt,async,no_root_squash,no_subtree_check)' > "+exportFile(session))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to write NFS export file for %s: %s", host, out)
