@@ -100,7 +100,7 @@ func (m *SimpleMounter) mountInternal(ctx context.Context, session *proto.Sessio
 			instanceName = fmt.Sprintf("instance-%d-%s", session.InstanceId, instanceSuffix)
 		}
 
-		casCleanup, err := m.runVeldafsWrapper(ctx, dataDir, instanceName, targetDir)
+		casCleanup, err := m.runVeldafsWrapper(ctx, dataDir, instanceName, targetDir, mType)
 		if err != nil {
 			if baseCleanup != nil {
 				baseCleanup()
@@ -166,15 +166,16 @@ func (m *SimpleMounter) mountDirect(ctx context.Context, session *proto.SessionR
 			return nil, fmt.Errorf("NFS mount info is not provided in session request")
 		}
 
-		var nfsPath string
+		var nfsPath, option string
 		if isSnapshot {
 			nfsPathWithSnapshot := path.Join(nfsMount.NfsPath, ".zfs/snapshot", snapshotName)
 			nfsPath = fmt.Sprintf("%s:%s", nfsMount.NfsServer, nfsPathWithSnapshot)
+			option = nfsSource.SnapshotMountOptions
 		} else {
+			option = nfsSource.MountOptions
 			nfsPath = fmt.Sprintf("%s:%s", nfsMount.NfsServer, nfsMount.NfsPath)
 		}
 
-		option := nfsSource.MountOptions
 		cmd := exec.CommandContext(ctx, "mount", "-t", "nfs", "-o", option, nfsPath, targetDir)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			if isSnapshot {
@@ -200,13 +201,13 @@ func (m *SimpleMounter) mount(ctx context.Context, session *proto.SessionRequest
 	return m.mountInternal(ctx, session, workspaceDir, mountTypeCurrent, "", "")
 }
 
-func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, workspaceDir string) (cleanup func(), err error) {
+func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, workspaceDir string, mode mountType) (cleanup func(), err error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("Get executable: %w", err)
 	}
-	fuseCmd := exec.Command(
-		executable,
+
+	args := []string{
 		"agent",
 		"sandboxfs",
 		"--readyfd=3",
@@ -214,8 +215,16 @@ func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, works
 		m.sandboxConfig.GetDiskSource().GetCasConfig().GetCasCacheDir(),
 		"--name",
 		name,
-		disk,
-		workspaceDir)
+	}
+
+	// Add --snapshot flag if in snapshot mode
+	if mode == mountTypeSnapshot {
+		args = append(args, "--snapshot")
+	}
+
+	args = append(args, disk, workspaceDir)
+
+	fuseCmd := exec.Command(executable, args...)
 	fuseCmd.Stderr = os.Stderr
 	pr, pw, err := os.Pipe()
 	if err != nil {

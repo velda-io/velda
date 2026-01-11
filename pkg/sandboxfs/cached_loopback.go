@@ -79,6 +79,7 @@ type MountContext struct {
 	workersDone     chan struct{}
 	workersWg       sync.WaitGroup
 	statWorkersWg   sync.WaitGroup
+	SnapshotMode    bool // When true, maximize caching for read-only snapshot workloads
 }
 
 // encodeCacheXattr encodes SHA256 hash and mtime into xattr format: "version:sha256:mtime_sec.mtime_nsec"
@@ -120,7 +121,7 @@ func decodeCacheXattr(xattrValue string) (sha256sum string, mtime time.Time, siz
 }
 
 // NewCachedLoopbackRoot creates a new cached loopback root node
-func NewCachedLoopbackRoot(rootPath string, cache CacheManager) (fs.InodeEmbedder, error) {
+func NewCachedLoopbackRoot(rootPath string, cache CacheManager, snapshotMode bool) (fs.InodeEmbedder, error) {
 	var st syscall.Stat_t
 	err := syscall.Stat(rootPath, &st)
 	if err != nil {
@@ -140,6 +141,7 @@ func NewCachedLoopbackRoot(rootPath string, cache CacheManager) (fs.InodeEmbedde
 		eagerFetchQueue: make(chan *eagerFetchJob, 1000), // Buffered channel for job queue
 		statQueue:       make(chan *statJob, 1000),       // Buffered channel for stat jobs
 		workersDone:     make(chan struct{}),
+		SnapshotMode:    snapshotMode,
 	}
 
 	// Create the root node using the mount context
@@ -239,7 +241,9 @@ func (n *CachedLoopbackNode) statWorker() {
 // processEagerFetch processes a single eager fetch job
 func (n *CachedLoopbackNode) processEagerFetch(job *eagerFetchJob, buf []byte) {
 	// Fetch and cache the file
-	cachedFd, _, sha256sum, err := n.eagerFetchAndCacheSync(job.fullPath, &job.st, n.mountCtx.cache, buf)
+	// In snapshot mode, skip if no cache key exists
+	skipIfNoKey := n.mountCtx.SnapshotMode
+	cachedFd, _, sha256sum, err := n.eagerFetchAndCacheSync(job.fullPath, &job.st, n.mountCtx.cache, buf, skipIfNoKey)
 	if err != nil {
 		// Failed to fetch, file handle continues using real fd (if exists)
 		return
@@ -386,7 +390,41 @@ func (n *CachedLoopbackNode) preserveOwner(ctx context.Context, path string) err
 
 // eagerFetchAndCacheSync reads the entire file and caches it, returning the cached file descriptor
 // This is the synchronous version used by background workers
-func (n *CachedLoopbackNode) eagerFetchAndCacheSync(fullPath string, st *syscall.Stat_t, cache CacheManager, buf []byte) (cachedFd int, cachedPath string, sha256sum string, err error) {
+// If skipIfNoKey is true, skip fetching when the file has no existing cache key (xattr)
+func (n *CachedLoopbackNode) eagerFetchAndCacheSync(fullPath string, st *syscall.Stat_t, cache CacheManager, buf []byte, skipIfNoKey bool) (cachedFd int, cachedPath string, sha256sum string, err error) {
+	// First, check if file already has a valid cache key
+	var xattrBuf [128]byte
+	sz, xattrErr := unix.Lgetxattr(fullPath, xattrCacheName, xattrBuf[:])
+	if xattrErr == nil && sz > 0 {
+		xattrValue := string(xattrBuf[:sz])
+		cachedSHA, cachedMtime, cachedSize, ok := decodeCacheXattr(xattrValue)
+		fileMtime := time.Unix(st.Mtim.Unix())
+
+		if ok && cachedMtime.Equal(fileMtime) && cachedSize == st.Size {
+			// Mtime and size match, check if cache exists
+			cachedPath, lookupErr := cache.Lookup(cachedSHA)
+			if lookupErr == nil && cachedPath != "" {
+				// Cache already exists and is valid, try to open it
+				cachedFd, openErr := syscall.Open(cachedPath, syscall.O_RDONLY, 0)
+				if openErr == nil {
+					// Successfully opened cached file - no need to fetch again
+					return cachedFd, cachedPath, cachedSHA, nil
+				}
+				// Fall through if cached file can't be opened
+			}
+			// Fall through if cache lookup failed - will re-fetch and update
+		}
+		if skipIfNoKey {
+			return -1, "", "", fmt.Errorf("cache key exists but is invalid (mtime or size mismatch)")
+		}
+	} else {
+		// No xattr exists
+		if skipIfNoKey {
+			// Skip fetching when no cache key exists (snapshot mode)
+			return -1, "", "", fmt.Errorf("no cache key and skipIfNoKey=true")
+		}
+	}
+
 	// Open the original file for reading
 	f, err := os.Open(fullPath)
 	if err != nil {
@@ -555,46 +593,50 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 		}
 		//log.Printf("Cache not exist for %s", fullPath)
 
-		// Eager fetch: submit to background queue for caching
-		// Open the real file for now
-		fd, err := syscall.Open(fullPath, int(flags), 0)
-		if err != nil {
-			return nil, 0, fs.ToErrno(err)
-		}
-
-		// Create file handle with real fd
-		fh := &CachedFileHandle{
-			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-			path:         fullPath,
-			cache:        n.mountCtx.cache,
-			isWrite:      false,
-			cacheOps:     false, // Disable lazy caching since we'll eager fetch
-		}
-
-		// Submit eager fetch job to front of queue (high priority)
-		job := &eagerFetchJob{
-			fullPath:   fullPath,
-			st:         st,
-			fileHandle: fh,
-		}
-
-	queue2:
-		for {
-			// Try to add to front of queue (non-blocking)
-			select {
-			case n.mountCtx.eagerFetchQueue <- job:
-				break queue2
-				// Job queued successfully
-			default:
-				select {
-				case <-n.mountCtx.eagerFetchQueue: // Queue full, discard an old job and try again
-				default:
-				}
-				// Queue full, continue with normal operation
+		// In snapshot mode, skip eager fetch for files without cache key
+		// because we cannot write xattr to track the cached state
+		if !n.mountCtx.SnapshotMode {
+			// Eager fetch: submit to background queue for caching
+			// Open the real file for now
+			fd, err := syscall.Open(fullPath, int(flags), 0)
+			if err != nil {
+				return nil, 0, fs.ToErrno(err)
 			}
-		}
 
-		return fh, 0, 0
+			// Create file handle with real fd
+			fh := &CachedFileHandle{
+				LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+				path:         fullPath,
+				cache:        n.mountCtx.cache,
+				isWrite:      false,
+				cacheOps:     false, // Disable lazy caching since we'll eager fetch
+			}
+
+			// Submit eager fetch job to front of queue (high priority)
+			job := &eagerFetchJob{
+				fullPath:   fullPath,
+				st:         st,
+				fileHandle: fh,
+			}
+
+		queue2:
+			for {
+				// Try to add to front of queue (non-blocking)
+				select {
+				case n.mountCtx.eagerFetchQueue <- job:
+					break queue2
+					// Job queued successfully
+				default:
+					select {
+					case <-n.mountCtx.eagerFetchQueue: // Queue full, discard an old job and try again
+					default:
+					}
+					// Queue full, continue with normal operation
+				}
+			}
+
+			return fh, 0, 0
+		}
 	}
 
 	//log.Printf("Opening file %s for reading (no cache)", fullPath)

@@ -45,10 +45,19 @@ var sandboxfsCmd = &cobra.Command{
 		base := args[0]
 		target := args[1]
 		cacheDir, _ := cmd.Flags().GetString("cache-dir")
-		server, err := sandboxfs.MountWorkDir(base, target, cacheDir, func(opt *fs.Options) {
+		snapshotMode, _ := cmd.Flags().GetBool("snapshot")
+
+		var mountOpts []sandboxfs.MountOptions
+		mountOpts = append(mountOpts, func(opt *fs.Options) {
 			opt.FsName, _ = cmd.Flags().GetString("name")
 			opt.Debug = clientlib.Debug
 		})
+
+		if snapshotMode {
+			mountOpts = append(mountOpts, sandboxfs.WithSnapshotMode())
+		}
+
+		server, err := sandboxfs.MountWorkDir(base, target, cacheDir, mountOpts...)
 		cobra.CheckErr(err)
 		readyfd, _ := cmd.Flags().GetInt("readyfd")
 		if readyfd != 0 {
@@ -72,4 +81,5 @@ func init() {
 	sandboxfsCmd.Flags().Int("readyfd", 0, "File descriptor to signal when the mount is ready")
 	sandboxfsCmd.Flags().String("name", "", "Name of the mount")
 	sandboxfsCmd.Flags().String("cache-dir", "/tmp/velda_cas_cache", "Directory for caching")
+	sandboxfsCmd.Flags().Bool("snapshot", false, "Enable snapshot mode for maximum IO performance (aggressive caching)")
 }

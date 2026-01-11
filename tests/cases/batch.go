@@ -15,8 +15,6 @@ package cases
 
 import (
 	"log"
-	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -166,10 +164,6 @@ vbatch ./script_rec.sh testfile_rec
 		assert.True(t, strings.Contains(output, "TASK_STATUS_SUCCESS"), "Expect success status, got %s", output)
 
 	})
-	c := exec.Command("sudo", "zfs", "list")
-	c.Stderr = os.Stderr
-	c.Stdout = os.Stdout
-	c.Run()
 	t.Run("Sharded", func(t *testing.T) {
 		// Setup test scripts
 		require.NoError(t, runCommand("sh", "-c", `
@@ -201,10 +195,6 @@ vbatch -N 2 ./script.sh testfile_sharded
 			return true
 		}, 30*time.Second, 1000*time.Millisecond)
 	})
-	c = exec.Command("sudo", "zfs", "list")
-	c.Stderr = os.Stderr
-	c.Stdout = os.Stdout
-	c.Run()
 	t.Run("Gang", func(t *testing.T) {
 		if !r.Supports(FeatureMultiAgent) {
 			t.Skip("Multi-agent feature is not supported")
@@ -214,7 +204,7 @@ vbatch -N 2 ./script.sh testfile_sharded
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			// Occoupy one worker with a long running job to delay the gang job from starting
+			// Occupy one worker with a long running job to delay the gang job from starting
 			require.NoError(t, runCommand("sh", "-c", "touch gang.start; sleep 1"))
 			completed = true
 			wg.Done()

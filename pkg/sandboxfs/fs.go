@@ -27,6 +27,22 @@ import (
 
 type MountOptions func(*fs.Options)
 
+// WithSnapshotMode enables snapshot mode for maximum IO performance.
+// In snapshot mode, all caching is maximized:
+// - Infinite entry and attribute timeouts
+// - All file content, stats, and symlinks are aggressively cached
+// - Best suited for read-only snapshot workloads where data doesn't change
+func WithSnapshotMode() MountOptions {
+	return func(opts *fs.Options) {
+		// Set to mark snapshot mode - will be used in MountWorkDir
+		// We use a negative timeout as a sentinel value
+		sentinel := -1 * time.Second
+		opts.EntryTimeout = &sentinel
+		opts.EnableSymlinkCaching = true
+		opts.ExplicitDataCacheControl = true
+	}
+}
+
 // VeldaServer wraps a FUSE server and provides access to cache manager for testing
 type VeldaServer struct {
 	*fuse.Server
@@ -50,8 +66,20 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 		GlobalCacheMetrics = cacheMetrics
 	}
 
+	// Detect snapshot mode from options
+	snapshotMode := false
+	for _, opt := range options {
+		// Create a temporary options struct to detect snapshot mode
+		tempOpts := &fs.Options{}
+		opt(tempOpts)
+		if tempOpts.EntryTimeout != nil && *tempOpts.EntryTimeout < 0 {
+			snapshotMode = true
+			break
+		}
+	}
+
 	// Create cached loopback root
-	rootNode, err := NewCachedLoopbackRoot(baseDir, cache)
+	rootNode, err := NewCachedLoopbackRoot(baseDir, cache, snapshotMode)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +92,15 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 
 	timeout := 60 * time.Second
 	negativeTimeout := 10 * time.Second
+
+	// In snapshot mode, use infinite timeouts for maximum caching
+	if snapshotMode {
+		// Use very large timeout (effectively infinite)
+		infiniteTimeout := 365 * 24 * time.Hour // 1 year
+		timeout = infiniteTimeout
+		negativeTimeout = infiniteTimeout
+	}
+
 	option := &fs.Options{
 		EntryTimeout:    &timeout,
 		AttrTimeout:     &timeout,
@@ -80,6 +117,12 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 	}
 	for _, opt := range options {
 		opt(option)
+	}
+
+	// Reset sentinel value to actual infinite timeout
+	if snapshotMode && option.EntryTimeout != nil && *option.EntryTimeout < 0 {
+		infiniteTimeout := 365 * 24 * time.Hour
+		option.EntryTimeout = &infiniteTimeout
 	}
 
 	server, err := fs.Mount(workspaceDir, rootNode, option)
