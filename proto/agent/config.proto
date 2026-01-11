@@ -37,6 +37,7 @@ message AgentDiskSource {
   message NfsMountSource {
     // Server & location will be provided by the broker.
     string mount_options = 1; // Additional mount options.
+    string snapshot_mount_options = 2; // Mount options for snapshot mounts.
   }
   oneof source {
     MountedDiskSource mounted_disk_source =
