@@ -15,6 +15,8 @@ package cases
 
 import (
 	"log"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -164,6 +166,10 @@ vbatch ./script_rec.sh testfile_rec
 		assert.True(t, strings.Contains(output, "TASK_STATUS_SUCCESS"), "Expect success status, got %s", output)
 
 	})
+	c := exec.Command("sudo", "zfs", "list")
+	c.Stderr = os.Stderr
+	c.Stdout = os.Stdout
+	c.Run()
 	t.Run("Sharded", func(t *testing.T) {
 		// Setup test scripts
 		require.NoError(t, runCommand("sh", "-c", `
@@ -195,6 +201,10 @@ vbatch -N 2 ./script.sh testfile_sharded
 			return true
 		}, 30*time.Second, 1000*time.Millisecond)
 	})
+	c = exec.Command("sudo", "zfs", "list")
+	c.Stderr = os.Stderr
+	c.Stdout = os.Stdout
+	c.Run()
 	t.Run("Gang", func(t *testing.T) {
 		if !r.Supports(FeatureMultiAgent) {
 			t.Skip("Multi-agent feature is not supported")
@@ -204,6 +214,7 @@ vbatch -N 2 ./script.sh testfile_sharded
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
+			// Occoupy one worker with a long running job to delay the gang job from starting
 			require.NoError(t, runCommand("sh", "-c", "touch gang.start; sleep 1"))
 			completed = true
 			wg.Done()
@@ -378,5 +389,112 @@ vbatch -P zero_max ./cancel_before_sched.sh
 		// Double check final status
 		finalStatus := getTaskStatus(t, jobId)
 		assert.Equal(t, "TASK_STATUS_CANCELLED", finalStatus)
+	})
+
+	t.Run("OverlayNonWritableNotPersisted", func(t *testing.T) {
+		if !r.Supports(FeatureSnapshot) {
+			t.Skip("Snapshot is required to use writable overlay directories")
+		}
+		// Test that writes to non-writable directories are not persisted
+		// and not visible in other sessions
+
+		// Create a snapshot first
+		require.NoError(t, runCommand("sh", "-c", `
+# Create a test file in a non-writable location
+mkdir -p /opt/testdata
+echo "original" > /opt/testdata/file.txt
+`))
+
+		// Run a job with snapshot and writable dir (only /tmp is writable)
+		jobId, err := runBatchJob("--writable-dir", "/tmp",
+			"sh", "-c", `
+# Try to modify the non-writable directory
+cat /proc/self/mountinfo > /opt/testdata/file.txt
+# Write to writable directory
+echo "writable-data" > /tmp/writable.txt
+`)
+		require.NoError(t, err, "Failed to start job")
+		jobId = strings.TrimSpace(jobId)
+
+		// Wait for job completion
+		assert.Eventually(t, func() bool {
+			status := getTaskStatus(t, jobId)
+			return status == "TASK_STATUS_SUCCESS" || status == "TASK_STATUS_FAILURE"
+		}, 30*time.Second, 500*time.Millisecond)
+
+		// Verify the modification to /opt/testdata is NOT persisted
+		output, err := runCommandGetOutput("cat", "/opt/testdata/file.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "original\n", output, "Non-writable directory should not persist changes")
+
+		// Verify writes to /tmp are visible (since it's writable)
+		output, err = runCommandGetOutput("cat", "/tmp/writable.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "writable-data\n", output, "Writable directory should persist changes")
+	})
+
+	t.Run("OverlayWritableDirShared", func(t *testing.T) {
+		if !r.Supports(FeatureSnapshot) {
+			t.Skip("Snapshot is required to use writable overlay directories")
+		}
+		// Test that writes to writable directories are visible to other jobs
+
+		// Create a snapshot
+		snapshotName := "overlay-shared-snapshot"
+		require.NoError(t, runCommand("sh", "-c", `
+# Create initial data
+mkdir -p /var/shared
+echo "initial" > /var/shared/data.txt
+`))
+
+		// Create snapshot
+		_, err := runVeldaWithOutput("instance", "snapshot", instanceName, snapshotName)
+		require.NoError(t, err, "Failed to create snapshot")
+
+		// Job 1: Write to writable directory
+		job1Id, err := runBatchJob("--writable-dir", "/var/shared", "sh", "-c", `
+echo "job1-data" > /var/shared/job1.txt
+sleep 2
+`)
+		require.NoError(t, err, "Failed to start job 1")
+		job1Id = strings.TrimSpace(job1Id)
+
+		// Wait a moment for job1 to write
+		time.Sleep(1 * time.Second)
+
+		// Job 2: Read from writable directory
+		job2Id, err := runBatchJob("--writable-dir", "/var/shared", "sh", "-c", `
+# Wait for job1 to complete
+sleep 2
+# Check if we can see job1's write
+if [ -f /var/shared/job1.txt ]; then
+  cat /var/shared/job1.txt > /var/shared/job2-saw-job1.txt
+  echo "success" > /var/shared/job2-result.txt
+else
+  echo "failure" > /var/shared/job2-result.txt
+fi
+`)
+		require.NoError(t, err, "Failed to start job 2")
+		job2Id = strings.TrimSpace(job2Id)
+
+		// Wait for both jobs to complete
+		assert.Eventually(t, func() bool {
+			status1 := getTaskStatus(t, job1Id)
+			status2 := getTaskStatus(t, job2Id)
+			return (status1 == "TASK_STATUS_SUCCESS" || status1 == "TASK_STATUS_FAILURE") &&
+				(status2 == "TASK_STATUS_SUCCESS" || status2 == "TASK_STATUS_FAILURE")
+		}, 30*time.Second, 500*time.Millisecond)
+
+		// Verify job2 saw job1's write
+		output, err := runCommandGetOutput("cat", "/var/shared/job2-result.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "success\n", output, "Job 2 should see job 1's writes to writable directory")
+
+		output, err = runCommandGetOutput("cat", "/var/shared/job2-saw-job1.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "job1-data\n", output, "Job 2 should be able to read job 1's data")
+
+		// Clean up snapshot
+		_ = runVelda("instance", "snapshot", "delete", instanceName, snapshotName)
 	})
 }

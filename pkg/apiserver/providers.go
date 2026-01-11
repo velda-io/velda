@@ -186,9 +186,9 @@ func ProvideSchedulers(ctx context.Context, cfg *configpb.Config, brokerInfo *ag
 
 var ProvideSessionDb = broker.NewSessionDatabase
 
-func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler *broker.SchedulerSet, sessiondb *broker.SessionDatabase, taskdb broker.TaskQueueDb, _ ProvisionRunner, watcher *broker.Watcher, regionId RegionId) *broker.TaskTracker {
+func ProvideTaskTracker(config *configpb.Config, ctx context.Context, scheduler *broker.SchedulerSet, sessiondb *broker.SessionDatabase, taskdb broker.TaskQueueDb, _ ProvisionRunner, watcher *broker.Watcher, regionId RegionId, storage storage.Storage) *broker.TaskTracker {
 	taskTrackerId := uuid.New().String()
-	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId, watcher, int(regionId))
+	tracker := broker.NewTaskTracker(scheduler, sessiondb, taskdb, taskTrackerId, watcher, int(regionId), storage)
 
 	// Start task trackers for each pool
 	go func() {
@@ -220,12 +220,16 @@ func ProvideTaskLogDb(s storage.Storage) tasks.TaskLogDb {
 	return storage.NewLocalStorageLogDb(s)
 }
 
+func ProvideStorageManager(s storage.Storage) broker.StorageManager {
+	return s
+}
+
 func ProvideQuotaChecker() broker.QuotaChecker {
 	return &broker.AlwaysAllowQuotaChecker{}
 }
 
-func ProvideBrokerServer(grpcServer *grpc.Server, mux *runtime.ServeMux, schedulers *broker.SchedulerSet, sessions *broker.SessionDatabase, permissions rbac.Permissions, taskTracker *broker.TaskTracker, auth broker.AuthHelper, taskdb broker.TaskDb) proto.BrokerServiceServer {
-	s := broker.NewBrokerServer(schedulers, sessions, permissions, taskTracker, auth, taskdb)
+func ProvideBrokerServer(grpcServer *grpc.Server, mux *runtime.ServeMux, schedulers *broker.SchedulerSet, sessions *broker.SessionDatabase, permissions rbac.Permissions, taskTracker *broker.TaskTracker, auth broker.AuthHelper, taskdb broker.TaskDb, storage broker.StorageManager) proto.BrokerServiceServer {
+	s := broker.NewBrokerServer(schedulers, sessions, permissions, taskTracker, auth, taskdb, storage)
 	proto.RegisterBrokerServiceServer(grpcServer, s)
 	proto.RegisterBrokerServiceHandlerServer(context.Background(), mux, s)
 	return s

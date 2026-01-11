@@ -62,6 +62,12 @@ message Workload {
   // If set, will ignore uid/gid/groups and initialize the environment with
   // the default environment variables of the user.
   string login_user = 13;
+
+  // For batch jobs with snapshots: writable directories where changes persist
+  repeated string writable_dirs = 14;
+
+  // For batch jobs with snapshots: the snapshot name to use as base
+  string snapshot_name = 15;
 }
 
 message BatchTaskResult {

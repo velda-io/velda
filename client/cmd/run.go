@@ -156,6 +156,8 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		}
 		sessionReq.TaskId = cmd.Flag("name").Value.String()
 		sessionReq.Workload = workload
+		writableDirs, _ := cmd.Flags().GetStringSlice("writable-dir")
+		sessionReq.WritableDirs = writableDirs
 		after, _ := cmd.Flags().GetStringSlice("after")
 		for _, task := range after {
 			sessionReq.Dependencies = append(sessionReq.Dependencies, &proto.Dependency{
@@ -486,6 +488,7 @@ func init() {
 	runCmd.Flags().Bool("gang", false, "Enable gang scheduling for the task. Ignored if total shard is 0")
 	runCmd.Flags().Duration("keep-alive-time", 0, "How long to keep the session alive after all connections are closed. Default to 0, which means no keep-alive.")
 	runCmd.Flags().StringSliceP("env", "e", nil, "Environment variables to pass to the batch job in KEY=VALUE or KEY form. If VALUE is omitted, use current system value. Only valid for batch mode outside of session.")
+	runCmd.Flags().StringSlice("writable-dir", []string{"/"}, "Writable directories for the batch job. If not \"/\", a snapshot will be created for the job. Batch job only.")
 	runCmd.Flags().SetInterspersed(false)
 }
 

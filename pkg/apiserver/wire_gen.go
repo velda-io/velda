@@ -57,14 +57,15 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		return nil, err
 	}
 	regionId := ProvideRegionId()
-	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase, provisionRunner, watcher, regionId)
+	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase, provisionRunner, watcher, regionId, storage)
 	localDiskProvider := ProvideLocalDiskStorage(storage)
 	nfsExportAuth, err := broker.NewNfsExportAuth(localDiskProvider)
 	if err != nil {
 		return nil, err
 	}
 	brokerAuth := NewBrokerAuth(nfsExportAuth)
-	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, brokerAuth, apiserverDatabase)
+	storageManager := ProvideStorageManager(storage)
+	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, brokerAuth, apiserverDatabase, storageManager)
 	taskLogDb := ProvideTaskLogDb(storage)
 	taskServiceServer := ProvideTaskService(context, server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
 	poolManagerServiceServer := ProvidePoolService(server, runtimeServeMux, schedulerSet)

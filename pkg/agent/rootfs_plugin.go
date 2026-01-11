@@ -101,7 +101,7 @@ func doUmountAll(dir string) error {
 	}
 	// Unmount all mounts
 	for i := len(mounts) - 1; i >= 0; i-- {
-		if err := syscall.Unmount(mounts[i], 0); err != nil {
+		if err := syscall.Unmount(mounts[i], syscall.MNT_DETACH); err != nil {
 			return fmt.Errorf("failed to unmount %s: %w", mounts[i], err)
 		}
 	}

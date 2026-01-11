@@ -51,6 +51,7 @@ type TaskQueueDb interface {
 	RenewLeaser(ctx context.Context, leaserIdentity string, now time.Time) error
 	ReconnectTask(ctx context.Context, taskId string, leaserIdentity string) error
 	UpdateTaskFinalResult(ctx context.Context, taskId string, result *db.BatchTaskResult) error
+	GetTask(ctx context.Context, taskId string) (*proto.Task, error)
 }
 
 type TaskTracker struct {
@@ -61,6 +62,7 @@ type TaskTracker struct {
 
 	db       TaskQueueDb
 	identity string
+	storage  StorageManager
 	gangMu   sync.Mutex
 	gangs    map[string]*GangCoordinator
 
@@ -70,7 +72,7 @@ type TaskTracker struct {
 	lastCleanup    time.Time
 }
 
-func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db TaskQueueDb, identity string, watcher *Watcher, regionId int) *TaskTracker {
+func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db TaskQueueDb, identity string, watcher *Watcher, regionId int, storage StorageManager) *TaskTracker {
 	result := &TaskTracker{
 		scheduler:      schedulerSet,
 		sessions:       sessions,
@@ -78,6 +80,7 @@ func NewTaskTracker(schedulerSet *SchedulerSet, sessions *SessionDatabase, db Ta
 		identity:       identity,
 		watcher:        watcher,
 		regionId:       regionId,
+		storage:        storage,
 		gangs:          make(map[string]*GangCoordinator),
 		leasedSessions: make(map[string]map[string]*Session),
 		cancelled:      make(map[string]time.Time),
@@ -113,6 +116,28 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 				InstanceId: task.InstanceId,
 				Priority:   task.Priority,
 			}
+
+			// Fetch root task to get writable_dirs and snapshot_name
+			rootTaskId := strings.Split(task.Id, "/")[0]
+			if rootTaskId != task.Id {
+				// This is a child task, fetch the root task
+				rootTask, err := t.db.GetTask(ctx, rootTaskId)
+				if err != nil {
+					log.Printf("Failed to fetch root task %s for task %s: %v", rootTaskId, task.Id, err)
+				} else if rootTask.Workload != nil {
+					// Copy writable_dirs and snapshot_name from root task
+					req.WritableDirs = rootTask.Workload.WritableDirs
+					req.SnapshotName = rootTask.Workload.SnapshotName
+					// Also update the workload for consistency
+					req.Workload.WritableDirs = rootTask.Workload.WritableDirs
+					req.Workload.SnapshotName = rootTask.Workload.SnapshotName
+				}
+			} else {
+				// This is a root task, use workload's writable_dirs and snapshot_name
+				req.WritableDirs = task.Workload.WritableDirs
+				req.SnapshotName = task.Workload.SnapshotName
+			}
+
 			if task.Task.Workload.TotalShards > 0 && task.Task.Workload.ShardIndex < 0 {
 				startTime := time.Now()
 				if task.Task.Workload.ShardScheduling == proto.Workload_SHARD_SCHEDULING_GANG {
@@ -218,6 +243,18 @@ func (t *TaskTracker) registerSession(session *Session) bool {
 			if err := t.db.UpdateTaskFinalResult(context.Background(), taskId, &db.BatchTaskResult{Cancelled: true}); err != nil {
 				log.Printf("Failed to mark cancelled task %s as cancelled: %v", taskId, err)
 			}
+		}
+
+		// Delete per-job snapshot if this is a root task and a snapshot was used
+		// Delete after 5 mins to avoid the snapshot being busy immediately after the task finishes
+		if taskId == jobId && session.Request.SnapshotName != "" && t.storage != nil {
+			time.AfterFunc(5*time.Minute, func() {
+				if err := t.storage.DeleteSnapshot(context.Background(), session.Request.InstanceId, session.Request.SnapshotName); err != nil {
+					log.Printf("Failed to delete snapshot %s for instance %d: %v", session.Request.SnapshotName, session.Request.InstanceId, err)
+				} else {
+					log.Printf("Deleted snapshot %s for instance %d after job completion", session.Request.SnapshotName, session.Request.InstanceId)
+				}
+			})
 		}
 	})
 	return true
