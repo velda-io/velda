@@ -169,7 +169,7 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 	if _, err := exec.LookPath("docker"); err != nil {
 		return fmt.Errorf("docker is not installed or not in the PATH")
 	}
-	createCmd := exec.Command("docker", "create", "--platform", "linux/amd64", dockerImage)
+	createCmd := exec.Command("docker", "create", dockerImage)
 	var createStderr bytes.Buffer
 	if quiet {
 		createCmd.Stderr = &createStderr
