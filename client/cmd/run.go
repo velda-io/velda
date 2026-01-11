@@ -149,6 +149,14 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	sessionReq.Priority = priority
 
 	batch, _ := cmd.Flags().GetBool("batch")
+	// Handle writable-dirs and snapshot for both batch and non-batch modes
+	writableDirs, _ := cmd.Flags().GetStringSlice("writable-dir")
+	snapshotName, _ := cmd.Flags().GetString("snapshot")
+	if snapshotName != "" {
+		sessionReq.SnapshotName = snapshotName
+	}
+	sessionReq.WritableDirs = writableDirs
+
 	if batch {
 		workload, err := getWorkload(cmd, args)
 		if err != nil {
@@ -156,8 +164,6 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		}
 		sessionReq.TaskId = cmd.Flag("name").Value.String()
 		sessionReq.Workload = workload
-		writableDirs, _ := cmd.Flags().GetStringSlice("writable-dir")
-		sessionReq.WritableDirs = writableDirs
 		after, _ := cmd.Flags().GetStringSlice("after")
 		for _, task := range after {
 			sessionReq.Dependencies = append(sessionReq.Dependencies, &proto.Dependency{
@@ -488,7 +494,8 @@ func init() {
 	runCmd.Flags().Bool("gang", false, "Enable gang scheduling for the task. Ignored if total shard is 0")
 	runCmd.Flags().Duration("keep-alive-time", 0, "How long to keep the session alive after all connections are closed. Default to 0, which means no keep-alive.")
 	runCmd.Flags().StringSliceP("env", "e", nil, "Environment variables to pass to the batch job in KEY=VALUE or KEY form. If VALUE is omitted, use current system value. Only valid for batch mode outside of session.")
-	runCmd.Flags().StringSlice("writable-dir", []string{"/"}, "Writable directories for the batch job. If not \"/\", a snapshot will be created for the job. Batch job only.")
+	runCmd.Flags().StringSlice("writable-dir", []string{}, "Writable directories. If not set, the entire filesystem will be writable if snapshot is not set, otherwise it will be read-only. If set, the session will be created with a snapshot of the current disk, and the specified directories will be writable and sync with the current version.")
+	runCmd.Flags().String("snapshot", "", "Snapshot name to use. If provided, uses an existing snapshot; if not provided and writable-dirs are specified, a new snapshot will be created.")
 	runCmd.Flags().SetInterspersed(false)
 }
 

@@ -141,4 +141,93 @@ func testUbuntu(t *testing.T, r Runner) {
 		assert.NoError(t, runCommand("touch", "testfile3"), "Failed to read test file")
 		wg.Wait()
 	})
+
+	t.Run("VrunSnapshotModeAutoCreate", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
+		if !r.Supports(FeatureSnapshot) {
+			t.Skip("Snapshot is required to use writable overlay directories")
+		}
+		// Test vrun with snapshot mode (auto-created snapshot) and writable-dir
+		// This tests that non-writable directories are not persisted
+
+		// Create initial data
+		require.NoError(t, runCommand("sh", "-c", `
+mkdir -p /opt/vrun-test
+echo "original-data" > /opt/vrun-test/file.txt
+`))
+
+		// Run vrun with writable-dir (only /tmp is writable)
+		// This should auto-create a snapshot and use overlay filesystem
+		output, err := runCommandGetOutput("vrun", "--writable-dir", "/tmp", "sh", "-c", `
+# Modify non-writable directory (should not persist)
+echo "modified-data" > /opt/vrun-test/file.txt
+# Write to writable directory (should persist)
+echo "vrun-writable" > /tmp/vrun-test.txt
+# Verify write succeeded in session
+cat /opt/vrun-test/file.txt
+`)
+		require.NoError(t, err, "vrun command should succeed")
+		assert.Equal(t, "modified-data\n", output, "Modification should be visible within the session")
+
+		// Verify the modification to non-writable directory is NOT persisted
+		output, err = runCommandGetOutput("cat", "/opt/vrun-test/file.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "original-data\n", output, "Non-writable directory should not persist changes")
+
+		// Verify writes to /tmp persisted
+		output, err = runCommandGetOutput("cat", "/tmp/vrun-test.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "vrun-writable\n", output, "Writable directory should persist changes")
+	})
+
+	t.Run("VrunSnapshotModeWithExistingSnapshot", func(t *testing.T) {
+		if !r.Supports(FeatureMultiAgent) {
+			t.Skip("Multi-agent feature is not supported")
+		}
+		if !r.Supports(FeatureSnapshot) {
+			t.Skip("Snapshot is required to use writable overlay directories")
+		}
+		// Test vrun with an existing snapshot and writable-dir
+
+		snapshotName := "vrun-test-snapshot"
+
+		// Create initial data and a snapshot
+		require.NoError(t, runCommand("sh", "-c", `
+mkdir -p /data/vrun-snapshot-test
+echo "snapshot-data" > /data/vrun-snapshot-test/file.txt
+`))
+
+		// Create snapshot
+		_, err := runVeldaWithOutput("snapshot", "create", snapshotName, "-i", instanceName)
+		require.NoError(t, err, "Failed to create snapshot")
+
+		// Modify the data after snapshot creation
+		require.NoError(t, runCommand("sh", "-c", `
+echo "modified-after-snapshot" > /data/vrun-snapshot-test/file.txt
+`))
+
+		// Run vrun with the existing snapshot (should see original snapshot data)
+		output, err := runCommandGetOutput("vrun", "--snapshot", snapshotName, "--writable-dir", "/tmp", "sh", "-c", `
+cat /data/vrun-snapshot-test/file.txt
+`)
+		require.NoError(t, err, "vrun command should succeed")
+		assert.Equal(t, "snapshot-data\n", output, "Should see data from snapshot, not current state")
+
+		// Run vrun with the existing snapshot, but mount the modified data as well (should see modified data)
+		output, err = runCommandGetOutput("vrun", "--snapshot", snapshotName, "--writable-dir", "/data", "sh", "-c", `
+cat /data/vrun-snapshot-test/file.txt
+`)
+		require.NoError(t, err, "vrun command should succeed")
+		assert.Equal(t, "modified-after-snapshot\n", output, "Should see modified data when mounted as writable")
+
+		// Verify current state is unchanged (still has the modified data)
+		output, err = runCommandGetOutput("cat", "/data/vrun-snapshot-test/file.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "modified-after-snapshot\n", output, "Current state should be unaffected")
+
+		// Clean up snapshot
+		_ = runVelda("snapshot", "delete", snapshotName, "-i", instanceName)
+	})
 }

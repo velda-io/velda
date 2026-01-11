@@ -471,6 +471,7 @@ func (n *CachedLoopbackNode) eagerFetchAndCacheSync(fullPath string, st *syscall
 
 // Open handles file opening with cache redirection
 func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
+	flags &^= syscall.O_APPEND | fuse.FMODE_EXEC // Remove O_APPEND flag as per loopback implementation
 	p := filepath.Join(n.Path(n.Root()))
 	fullPath := filepath.Join(n.RootData.Path, p)
 
@@ -872,6 +873,37 @@ func (n *CachedLoopbackNode) Removexattr(ctx context.Context, attr string) sysca
 	return fs.ToErrno(err)
 }
 
+func (n *CachedLoopbackNode) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+	p := filepath.Join(n.Path(n.Root()))
+	fullPath := filepath.Join(n.RootData.Path, p)
+
+	// Get all xattrs first
+	sz, err := unix.Llistxattr(fullPath, dest)
+	if err != nil {
+		return 0, fs.ToErrno(err)
+	}
+
+	// Filter out xattrCacheName from the list
+	if sz > 0 && sz <= len(dest) {
+		names := dest[:sz]
+		filtered := make([]byte, 0, sz)
+		start := 0
+		for i := 0; i < len(names); i++ {
+			if names[i] == 0 {
+				name := string(names[start:i])
+				if name != xattrCacheName {
+					filtered = append(filtered, names[start:i+1]...)
+				}
+				start = i + 1
+			}
+		}
+		copy(dest, filtered)
+		return uint32(len(filtered)), 0
+	}
+
+	return uint32(sz), 0
+}
+
 // CachedFileHandle wraps a file descriptor with caching capabilities
 type CachedFileHandle struct {
 	*fs.LoopbackFile
@@ -929,6 +961,28 @@ var _ = (fs.FileFlusher)((*CachedFileHandle)(nil))
 var _ = (fs.FileFsyncer)((*CachedFileHandle)(nil))
 var _ = (fs.FileSetattrer)((*CachedFileHandle)(nil))
 var _ = (fs.FileAllocater)((*CachedFileHandle)(nil))
+
+// Disable passthrough to allow redirecting to cached file descriptor when available
+func (f *CachedFileHandle) PassthroughFd() (int, error) {
+	fd, _ := f.LoopbackFile.PassthroughFd()
+	return fd, syscall.EIO
+}
+
+// Getattr implements FileGetattrer
+// Returns the original stat obtained during open when using cached file
+func (f *CachedFileHandle) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Errno {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// If we're using a cached file, return the original stat
+	if f.fromCache && f.cachedStat != nil {
+		out.FromStat(f.cachedStat)
+		return 0
+	}
+
+	// Otherwise, delegate to the underlying LoopbackFile
+	return f.LoopbackFile.Getattr(ctx, out)
+}
 
 // Read implements FileReader
 func (f *CachedFileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {

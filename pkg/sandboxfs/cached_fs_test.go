@@ -718,3 +718,86 @@ func TestListDirectories(t *testing.T) {
 		assert.True(t, os.IsNotExist(err), "Error should be os.ErrNotExist")
 	})
 }
+
+// TestCachedFileHandleReturnsOriginalStat verifies that when using a cached file,
+// the file handle returns the original stat obtained during open, not the stat of
+// the cache file.
+func TestCachedFileHandleReturnsOriginalStat(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping FUSE test in short mode")
+	}
+
+	env := setupTestEnv(t)
+
+	// Create test file with specific content
+	testFile := filepath.Join(env.srcDir, "stattest.txt")
+	testContent := []byte("Test content for stat verification")
+	require.NoError(t, os.WriteFile(testFile, testContent, 0644))
+
+	// Get the original stat before mounting
+	var originalStat os.FileInfo
+	originalStat, err := os.Stat(testFile)
+	require.NoError(t, err)
+
+	// Mount with cache
+	server, err := MountWorkDir(env.srcDir, env.mountDir, env.cacheDir, disallowOther)
+	require.NoError(t, err)
+	defer server.Unmount()
+
+	mountedFile := filepath.Join(env.mountDir, "stattest.txt")
+
+	// First read - populate the cache
+	content, err := os.ReadFile(mountedFile)
+	require.NoError(t, err)
+	assert.Equal(t, testContent, content)
+
+	// Wait for eager fetch to complete and cache to be populated
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify cache hit metric increased (cache should be populated)
+	initialHit := getCounterValue(GlobalCacheMetrics.CacheHit)
+
+	// Second read - should use cached file
+	content, err = os.ReadFile(mountedFile)
+	require.NoError(t, err)
+	assert.Equal(t, testContent, content)
+
+	newHit := getCounterValue(GlobalCacheMetrics.CacheHit)
+	assert.Greater(t, newHit, initialHit, "Should get cache hit on second read")
+
+	// Now stat the mounted file - should return original file's stat, not cache file's stat
+	mountedStat, err := os.Stat(mountedFile)
+	require.NoError(t, err)
+
+	// Verify that the stat matches the original file, not the cache file
+	assert.Equal(t, originalStat.Size(), mountedStat.Size(), "Size should match original file")
+	assert.Equal(t, originalStat.Mode(), mountedStat.Mode(), "Mode should match original file")
+	// Note: ModTime might differ slightly due to precision, so we check they're close
+	timeDiff := originalStat.ModTime().Sub(mountedStat.ModTime())
+	assert.Less(t, timeDiff, time.Second, "ModTime should be close to original file")
+	assert.Greater(t, timeDiff, -time.Second, "ModTime should be close to original file")
+
+	// Verify that the inode is different from the cache file
+	// (the cached file will be in a different location with different inode)
+	cache, err := NewDirectoryCacheManager(env.cacheDir)
+	require.NoError(t, err)
+
+	// Read xattr to get SHA and find cache file
+	var buf [128]byte
+	sz, err := unix.Getxattr(testFile, xattrCacheName, buf[:])
+	require.NoError(t, err)
+	assert.Greater(t, sz, 0, "xattr should be set")
+
+	xattrValue := string(buf[:sz])
+	cachedSHA, _, _, ok := decodeCacheXattr(xattrValue)
+	require.True(t, ok, "Should decode xattr successfully")
+
+	cachedPath, err := cache.Lookup(cachedSHA)
+	require.NoError(t, err)
+	assert.NotEmpty(t, cachedPath, "Should find cached file")
+
+	// The mounted file should NOT report the cache file's inode/dev
+	// Instead it should report the original file's attributes
+	// This is important for tools that rely on inode numbers
+	assert.Equal(t, originalStat.Size(), mountedStat.Size(), "Mounted stat should match original, not cache")
+}

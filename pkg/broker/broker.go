@@ -147,10 +147,39 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 		return nil, err
 	}
 
+	user := rbac.UserFromContext(ctx)
+	sessionUser, ok := user.(rbac.SessionUser)
+	inBatch := ok && sessionUser.TaskId() != ""
+	// Create snapshot if needed for top-level jobs
+	if !inBatch && (len(req.WritableDirs) > 0 || req.SnapshotName != "") {
+		// Check if "/" is in writable dirs
+		hasRoot := false
+		for _, dir := range req.WritableDirs {
+			if dir == "/" {
+				hasRoot = true
+				break
+			}
+		}
+		// Create snapshot if "/" is not in writable dirs
+		if !hasRoot && s.storage != nil && req.SnapshotName == "" {
+			snapshotName := req.TaskId
+			if snapshotName == "" {
+				snapshotName = fmt.Sprintf("snapshot-%s", uuid.NewString())
+			}
+			if err := s.storage.CreateSnapshot(ctx, req.InstanceId, snapshotName); err != nil {
+				log.Printf("Failed to create snapshot %s for instance %d: %v", snapshotName, req.InstanceId, err)
+				// Continue even if snapshot creation fails
+			} else {
+				req.SnapshotName = snapshotName
+				log.Printf("Created snapshot %s for instance %d", snapshotName, req.InstanceId)
+			}
+		}
+	}
 	if req.Workload != nil {
-		user := rbac.UserFromContext(ctx)
-		sessionUser, ok := user.(rbac.SessionUser)
-		inBatch := ok && sessionUser.TaskId() != ""
+		req.WritableDirs = append(req.WritableDirs, "/.velda_tasks")
+		// Save writable_dirs and snapshot_name to workload for root task
+		req.Workload.WritableDirs = req.WritableDirs
+		req.Workload.SnapshotName = req.SnapshotName
 		// Assign & fixup task ID
 		if inBatch {
 			if strings.Contains(req.TaskId, "/") {
@@ -177,33 +206,6 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 		req.Labels = append(req.Labels, s.permissions.SearchKeys(ctx)...)
 		if req.Workload.TotalShards > 0 {
 			req.Workload.ShardIndex = -1
-		}
-
-		// Create snapshot if needed for top-level jobs
-		if !inBatch && len(req.WritableDirs) > 0 {
-			// Check if "/" is in writable dirs
-			hasRoot := false
-			for _, dir := range req.WritableDirs {
-				if dir == "/" {
-					hasRoot = true
-					break
-				}
-			}
-			req.WritableDirs = append(req.WritableDirs, "/.velda_tasks")
-			// Create snapshot if "/" is not in writable dirs
-			if !hasRoot && s.storage != nil {
-				snapshotName := req.TaskId
-				if err := s.storage.CreateSnapshot(ctx, req.InstanceId, snapshotName); err != nil {
-					log.Printf("Failed to create snapshot %s for instance %d: %v", snapshotName, req.InstanceId, err)
-					// Continue even if snapshot creation fails
-				} else {
-					req.SnapshotName = snapshotName
-					log.Printf("Created snapshot %s for instance %d", snapshotName, req.InstanceId)
-				}
-			}
-			// Save writable_dirs and snapshot_name to workload for root task
-			req.Workload.WritableDirs = req.WritableDirs
-			req.Workload.SnapshotName = req.SnapshotName
 		}
 
 		taskid, _, err := s.db.CreateTask(ctx, req)
