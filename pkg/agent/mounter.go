@@ -211,17 +211,18 @@ func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, works
 		"agent",
 		"sandboxfs",
 		"--readyfd=3",
-		"--cache-dir",
-		m.sandboxConfig.GetDiskSource().GetCasConfig().GetCasCacheDir(),
 		"--name",
 		name,
 	}
 
-	// Add --snapshot flag if in snapshot mode
-	if mode == mountTypeSnapshot {
-		args = append(args, "--snapshot")
+	if m.sandboxConfig.GetDiskSource().GetCasConfig().GetCasCacheDir() != "" {
+		args = append(args, "--cache-dir", m.sandboxConfig.GetDiskSource().GetCasConfig().GetCasCacheDir())
+		if mode == mountTypeSnapshot {
+			args = append(args, "--snapshot")
+		}
+	} else {
+		args = append(args, "--nocache")
 	}
-
 	args = append(args, disk, workspaceDir)
 
 	fuseCmd := exec.Command(executable, args...)

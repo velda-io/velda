@@ -21,7 +21,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 
-	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 
@@ -48,13 +47,18 @@ var sandboxfsCmd = &cobra.Command{
 		snapshotMode, _ := cmd.Flags().GetBool("snapshot")
 
 		var mountOpts []sandboxfs.MountOptions
-		mountOpts = append(mountOpts, func(opt *fs.Options) {
-			opt.FsName, _ = cmd.Flags().GetString("name")
-			opt.Debug = clientlib.Debug
+		mountOpts = append(mountOpts, func(opt *sandboxfs.VeldaMountOptions) {
+			opt.FuseOptions.FsName, _ = cmd.Flags().GetString("name")
+			opt.FuseOptions.Debug = clientlib.Debug
 		})
 
 		if snapshotMode {
 			mountOpts = append(mountOpts, sandboxfs.WithSnapshotMode())
+		}
+
+		noCacheMode, _ := cmd.Flags().GetBool("nocache")
+		if noCacheMode {
+			mountOpts = append(mountOpts, sandboxfs.WithNoCacheMode())
 		}
 
 		server, err := sandboxfs.MountWorkDir(base, target, cacheDir, mountOpts...)
@@ -82,4 +86,5 @@ func init() {
 	sandboxfsCmd.Flags().String("name", "", "Name of the mount")
 	sandboxfsCmd.Flags().String("cache-dir", "/tmp/velda_cas_cache", "Directory for caching")
 	sandboxfsCmd.Flags().Bool("snapshot", false, "Enable snapshot mode for maximum IO performance (aggressive caching)")
+	sandboxfsCmd.Flags().Bool("nocache", false, "Enable no-cache mode to disable caching")
 }

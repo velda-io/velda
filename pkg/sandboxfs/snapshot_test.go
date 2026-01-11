@@ -24,9 +24,9 @@ func TestSnapshotMode(t *testing.T) {
 	}
 
 	// Mount with snapshot mode
-	disallowOther := func(options *fs.Options) {
+	disallowOther := WithFuseOption(func(options *fs.Options) {
 		options.MountOptions.AllowOther = false
-	}
+	})
 	server, err := MountWorkDir(srcDir, mountDir, cacheDir, disallowOther, WithSnapshotMode())
 	if err != nil {
 		t.Fatal(err)
