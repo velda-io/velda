@@ -157,13 +157,16 @@ message SessionRequest {
   // Additional information for the agent to execute the session.
   AgentSessionInfo agent_session_info = 17;
 
-  // For batch workload: The writable directories for the job.
-  // Default to ["/"] which means the entire filesystem is writable.
-  // If not "/", a snapshot will be created for the job.
+  // The writable directories for the job.
+  // If unset, it will be read-only if snapshot_name is set, otherwise it will
+  // be read-write for the entire filesystem.
+  // If set, the session will be created with a snapshot of the current disk,
+  // and the specified directories will be writable and sync with the latest.
   repeated string writable_dirs = 20;
 
-  // For batch workload: The snapshot name to use.
-  // This is set by the broker when creating a snapshot for the job.
+  // The snapshot name to use.
+  // If not set, the snapshot will be created with a default name if
+  // writable_dirs is set.
   string snapshot_name = 21;
 
   reserved 7, 32 to 63;
