@@ -16,12 +16,11 @@ package sandboxfs
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -34,9 +33,6 @@ import (
 )
 
 const (
-	// xattrCacheName is the extended attribute name used to store SHA256 hash and mtime
-	xattrCacheName = "user.veldafs.cache"
-
 	// OFD (Open File Description) lock constants for fcntl
 	_OFD_GETLK  = 36
 	_OFD_SETLK  = 37
@@ -80,48 +76,11 @@ type MountContext struct {
 	workersWg       sync.WaitGroup
 	statWorkersWg   sync.WaitGroup
 	SnapshotMode    bool // When true, maximize caching for read-only snapshot workloads
-}
-
-// encodeCacheXattr encodes SHA256 hash and mtime into xattr format: "version:sha256:mtime_sec.mtime_nsec"
-func encodeCacheXattr(sha256sum string, mtime time.Time, size int64) string {
-	return fmt.Sprintf("1:%s:%d.%d:%d", sha256sum, mtime.Unix(), mtime.Nanosecond(), size)
-}
-
-// decodeCacheXattr decodes xattr value into SHA256 hash and mtime
-func decodeCacheXattr(xattrValue string) (sha256sum string, mtime time.Time, size int64, ok bool) {
-	parts := strings.Split(xattrValue, ":")
-	if len(parts) != 4 || len(parts[1]) != 64 || parts[0] != "1" {
-		return "", time.Time{}, 0, false
-	}
-
-	sha256sum = parts[1]
-	timeParts := strings.Split(parts[2], ".")
-	if len(timeParts) != 2 {
-		return "", time.Time{}, 0, false
-	}
-
-	sec, err := strconv.ParseInt(timeParts[0], 10, 64)
-	if err != nil {
-		return "", time.Time{}, 0, false
-	}
-
-	nsec, err := strconv.ParseInt(timeParts[1], 10, 64)
-	if err != nil {
-		return "", time.Time{}, 0, false
-	}
-
-	mtime = time.Unix(sec, nsec)
-
-	size, err = strconv.ParseInt(parts[3], 10, 64)
-	if err != nil {
-		return "", time.Time{}, 0, false
-	}
-
-	return sha256sum, mtime, size, true
+	NoCacheMode     bool // When true, only set cache keys during write, do not read/write cache data
 }
 
 // NewCachedLoopbackRoot creates a new cached loopback root node
-func NewCachedLoopbackRoot(rootPath string, cache CacheManager, snapshotMode bool) (fs.InodeEmbedder, error) {
+func NewCachedLoopbackRoot(rootPath string, cache CacheManager, snapshotMode bool, noCacheMode bool) (fs.InodeEmbedder, error) {
 	var st syscall.Stat_t
 	err := syscall.Stat(rootPath, &st)
 	if err != nil {
@@ -142,6 +101,7 @@ func NewCachedLoopbackRoot(rootPath string, cache CacheManager, snapshotMode boo
 		statQueue:       make(chan *statJob, 1000),       // Buffered channel for stat jobs
 		workersDone:     make(chan struct{}),
 		SnapshotMode:    snapshotMode,
+		NoCacheMode:     noCacheMode,
 	}
 
 	// Create the root node using the mount context
@@ -363,6 +323,17 @@ func (n *CachedLoopbackNode) Create(ctx context.Context, name string, flags uint
 	ch := n.NewInode(ctx, node, idFromStat(n.RootData.Dev, &st))
 	out.FromStat(&st)
 
+	// In NoCacheMode, use NoCacheFileHandle
+	if n.mountCtx.NoCacheMode {
+		fh := &NoCacheFileHandle{
+			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+			path:         fullPath,
+			isWrite:      true,
+			hasher:       sha256.New(),
+		}
+		return ch, fh, 0, 0
+	}
+
 	// Create file handle with caching enabled for writes
 	//log.Printf("Created file %s, enabling write caching", fullPath)
 	fh := &CachedFileHandle{
@@ -477,6 +448,25 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 
 	// Check if this is a write operation
 	isWrite := (flags&syscall.O_WRONLY != 0) || (flags&syscall.O_RDWR != 0)
+
+	// In NoCacheMode, use NoCacheFileHandle
+	if n.mountCtx.NoCacheMode {
+		fd, err := syscall.Open(fullPath, int(flags), 0)
+		if err != nil {
+			return nil, 0, fs.ToErrno(err)
+		}
+
+		fh := &NoCacheFileHandle{
+			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+			path:         fullPath,
+			isWrite:      isWrite,
+		}
+		// Initialize hasher for write operations
+		if isWrite {
+			fh.hasher = sha256.New()
+		}
+		return fh, 0, 0
+	}
 
 	if isWrite {
 		// Open the real file for writing
@@ -902,253 +892,4 @@ func (n *CachedLoopbackNode) Listxattr(ctx context.Context, dest []byte) (uint32
 	}
 
 	return uint32(sz), 0
-}
-
-// CachedFileHandle wraps a file descriptor with caching capabilities
-type CachedFileHandle struct {
-	*fs.LoopbackFile
-	path       string
-	cache      CacheManager
-	isWrite    bool
-	fromCache  bool
-	cachedStat *syscall.Stat_t
-
-	// For caching operations
-	mu           sync.Mutex
-	cacheOps     bool
-	cacheWrite   CacheWriter
-	bytesWritten int64
-	flushed      bool // Track if file has been flushed
-	cacheFlushed bool // Track if cache was committed during flush
-}
-
-// switchToCachedFd switches the file handle to use a cached file descriptor
-// This is called by background workers after successfully fetching and caching a file
-func (f *CachedFileHandle) switchToCachedFd(cachedFd int, st *syscall.Stat_t) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	// Only switch if we haven't already switched, we're not writing, not closed, and no bytes have been written
-	if f.isWrite || f.LoopbackFile == nil {
-		syscall.Close(cachedFd) // Close the cached fd if we can't use it
-		return
-	}
-
-	// Store original fd and switch to cached
-	originalFile := f.LoopbackFile
-	f.LoopbackFile = fs.NewLoopbackFile(cachedFd).(*fs.LoopbackFile)
-	f.fromCache = true
-	f.cachedStat = st
-	f.cacheOps = false // Disable further caching since we're now using cache
-	if f.cacheWrite != nil {
-		f.cacheWrite.Abort()
-	}
-
-	// Close the original fd
-	originalFile.Release(nil)
-}
-
-var _ = (fs.FileHandle)((*CachedFileHandle)(nil))
-var _ = (fs.FileReleaser)((*CachedFileHandle)(nil))
-var _ = (fs.FileGetattrer)((*CachedFileHandle)(nil))
-var _ = (fs.FileReader)((*CachedFileHandle)(nil))
-var _ = (fs.FileWriter)((*CachedFileHandle)(nil))
-var _ = (fs.FileGetlker)((*CachedFileHandle)(nil))
-var _ = (fs.FileSetlker)((*CachedFileHandle)(nil))
-var _ = (fs.FileSetlkwer)((*CachedFileHandle)(nil))
-var _ = (fs.FileLseeker)((*CachedFileHandle)(nil))
-var _ = (fs.FileFlusher)((*CachedFileHandle)(nil))
-var _ = (fs.FileFsyncer)((*CachedFileHandle)(nil))
-var _ = (fs.FileSetattrer)((*CachedFileHandle)(nil))
-var _ = (fs.FileAllocater)((*CachedFileHandle)(nil))
-
-// Disable passthrough to allow redirecting to cached file descriptor when available
-func (f *CachedFileHandle) PassthroughFd() (int, error) {
-	fd, _ := f.LoopbackFile.PassthroughFd()
-	return fd, syscall.EIO
-}
-
-// Getattr implements FileGetattrer
-// Returns the original stat obtained during open when using cached file
-func (f *CachedFileHandle) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	// If we're using a cached file, return the original stat
-	if f.fromCache && f.cachedStat != nil {
-		out.FromStat(f.cachedStat)
-		return 0
-	}
-
-	// Otherwise, delegate to the underlying LoopbackFile
-	return f.LoopbackFile.Getattr(ctx, out)
-}
-
-// Read implements FileReader
-func (f *CachedFileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	fd, _ := f.PassthroughFd()
-	n, err := syscall.Pread(fd, dest, off)
-	if err != nil {
-		return nil, fs.ToErrno(err)
-	}
-
-	// If we're doing cache ops and reading sequentially, hash the data
-	if f.cacheOps && !f.isWrite && off == f.bytesWritten {
-		if f.cacheWrite == nil {
-			// Initialize cache writer
-			cw, err := f.cache.CreateTemp()
-			if err != nil {
-				// Failed to create cache, disable caching
-				f.abortCaching()
-			} else {
-				f.cacheWrite = cw
-			}
-		}
-		f.cacheWrite.Write(dest[:n])
-		f.bytesWritten += int64(n)
-	}
-
-	return fuse.ReadResultData(dest[:n]), 0
-}
-
-// Write implements FileWriter
-func (f *CachedFileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	// Check if this is a sequential write
-	if f.cacheOps && off != f.bytesWritten {
-		// Non-sequential write, mark as uncachable
-		f.abortCaching()
-	}
-
-	n, errno := f.LoopbackFile.Write(ctx, data, off)
-	if errno != 0 {
-		return 0, errno
-	}
-
-	// If caching is enabled, write to cache as well
-	if f.cacheOps && f.isWrite {
-		if f.cacheWrite == nil {
-			// Initialize cache writer
-			cw, err := f.cache.CreateTemp()
-			if err != nil {
-				// Failed to create cache, disable caching
-				f.abortCaching()
-			} else {
-				f.cacheWrite = cw
-			}
-		}
-
-		if f.cacheWrite != nil {
-			_, err := f.cacheWrite.Write(data[:n])
-			if err != nil {
-				// Failed to write to cache, abort
-				f.abortCaching()
-			} else {
-				f.bytesWritten += int64(n)
-			}
-		}
-	}
-
-	return uint32(n), 0
-}
-
-// Lseek implements FileLseeker - seeking aborts caching
-func (f *CachedFileHandle) Lseek(ctx context.Context, off uint64, whence uint32) (uint64, syscall.Errno) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	// Any seek aborts caching
-	f.abortCaching()
-
-	return f.LoopbackFile.Lseek(ctx, off, whence)
-}
-
-// Flush implements FileFlusher - commits cache on flush
-func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	errno := f.LoopbackFile.Flush(ctx)
-	if errno != 0 {
-		return errno
-	}
-	fd, _ := f.PassthroughFd()
-
-	// Mark as flushed
-	f.flushed = true
-
-	// Commit cache if we were writing sequentially
-	if f.cacheOps && f.isWrite && f.cacheWrite != nil {
-		// Now commit the cache
-		committedSHA, err := f.cacheWrite.Commit()
-		if err == nil && committedSHA != "" {
-			// Get mtime from file after flush
-			var st syscall.Stat_t
-			if statErr := syscall.Fstat(fd, &st); statErr == nil {
-				fileMtime := time.Unix(st.Mtim.Unix())
-				// Encode SHA256 and mtime into xattr
-				xattrValue := encodeCacheXattr(committedSHA, fileMtime, st.Size)
-				unix.Lsetxattr(f.path, xattrCacheName, []byte(xattrValue), 0)
-				//log.Printf("Set xattr for %s: SHA=%s, mtime=%v, err=%v", f.path, committedSHA, fileMtime, setErr)
-				f.cacheFlushed = true
-			}
-		}
-		f.cacheWrite = nil
-		f.cacheOps = false // Disable further caching after flush
-	} else if f.cacheOps && !f.isWrite && f.cacheWrite != nil && f.bytesWritten > 0 {
-		// Get current mtime & size
-		var st syscall.Stat_t
-		if statErr := syscall.Fstat(fd, &st); statErr == nil && f.bytesWritten == st.Size {
-			// For reads, compute SHA256 and set xattr with mtime
-			committedSHA, err := f.cacheWrite.Commit()
-			if err == nil && committedSHA != "" {
-				fileMtime := time.Unix(st.Mtim.Unix())
-				xattrValue := encodeCacheXattr(committedSHA, fileMtime, st.Size)
-				unix.Lsetxattr(f.path, xattrCacheName, []byte(xattrValue), 0)
-				//log.Printf("Set xattr for %s after read: SHA=%s, mtime=%v", f.path, sha256sum, fileMtime)
-			}
-		}
-		f.cacheOps = false // Disable further caching after flush
-	} else if f.cacheWrite != nil {
-		// Abort any pending cache write that wasn't sequential - ABORTED
-		if GlobalCacheMetrics != nil {
-			GlobalCacheMetrics.CacheAborted.Inc()
-		}
-		f.cacheWrite.Abort()
-		f.cacheWrite = nil
-		f.cacheOps = false
-	}
-
-	return 0
-}
-
-// Release implements FileReleaser - clean up on close
-func (f *CachedFileHandle) Release(ctx context.Context) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	// If cache operations are still pending and not flushed, abort them
-	if f.cacheWrite != nil {
-		f.cacheWrite.Abort()
-		f.cacheWrite = nil
-	}
-	oldfile := f.LoopbackFile
-	f.LoopbackFile = nil
-	return oldfile.Release(ctx)
-}
-
-// abortCaching disables caching for this file handle
-func (f *CachedFileHandle) abortCaching() {
-	if f.cacheWrite != nil {
-		// Track aborted cache operation
-		if GlobalCacheMetrics != nil {
-			GlobalCacheMetrics.CacheAborted.Inc()
-		}
-		f.cacheWrite.Abort()
-		f.cacheWrite = nil
-	}
-	f.cacheOps = false
 }

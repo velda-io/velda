@@ -28,10 +28,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func disallowOther(options *fs.Options) {
+var disallowOther = WithFuseOption(func(options *fs.Options) {
 	options.MountOptions.AllowOther = false
 	//options.Debug = true
-}
+})
 
 // testEnv holds the test environment directories
 type testEnv struct {

@@ -25,7 +25,14 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 )
 
-type MountOptions func(*fs.Options)
+// VeldaMountOptions wraps FUSE mount options and Velda-specific settings
+type VeldaMountOptions struct {
+	FuseOptions  *fs.Options
+	SnapshotMode bool
+	NoCacheMode  bool
+}
+
+type MountOptions func(*VeldaMountOptions)
 
 // WithSnapshotMode enables snapshot mode for maximum IO performance.
 // In snapshot mode, all caching is maximized:
@@ -33,13 +40,29 @@ type MountOptions func(*fs.Options)
 // - All file content, stats, and symlinks are aggressively cached
 // - Best suited for read-only snapshot workloads where data doesn't change
 func WithSnapshotMode() MountOptions {
-	return func(opts *fs.Options) {
-		// Set to mark snapshot mode - will be used in MountWorkDir
-		// We use a negative timeout as a sentinel value
-		sentinel := -1 * time.Second
-		opts.EntryTimeout = &sentinel
-		opts.EnableSymlinkCaching = true
-		opts.ExplicitDataCacheControl = true
+	return func(opts *VeldaMountOptions) {
+		opts.SnapshotMode = true
+		opts.FuseOptions.EnableSymlinkCaching = true
+		opts.FuseOptions.ExplicitDataCacheControl = true
+	}
+}
+
+// WithNoCacheMode enables no-cache mode.
+// In no-cache mode:
+// - Cache is never read from or written to
+// - Only cache keys (xattr) are set during write operations
+// - All reads go directly to the underlying file
+// - Useful for write-heavy workloads where cache overhead should be avoided
+func WithNoCacheMode() MountOptions {
+	return func(opts *VeldaMountOptions) {
+		opts.NoCacheMode = true
+	}
+}
+
+// WithFuseOption allows setting FUSE-specific options
+func WithFuseOption(fn func(*fs.Options)) MountOptions {
+	return func(opts *VeldaMountOptions) {
+		fn(opts.FuseOptions)
 	}
 }
 
@@ -66,20 +89,44 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 		GlobalCacheMetrics = cacheMetrics
 	}
 
-	// Detect snapshot mode from options
-	snapshotMode := false
+	timeout := 60 * time.Second
+	negativeTimeout := 10 * time.Second
+
+	// Create VeldaMountOptions with default FUSE options
+	veldaOpts := &VeldaMountOptions{
+		FuseOptions: &fs.Options{
+			EntryTimeout:    &timeout,
+			AttrTimeout:     &timeout,
+			NegativeTimeout: &negativeTimeout,
+			MountOptions: fuse.MountOptions{
+				AllowOther:         true,
+				DisableReadDirPlus: true,
+				DirectMount:        true,
+				Name:               "veldafs",
+				MaxWrite:           1024 * 1024,
+				EnableLocks:        true,
+				DirectMountFlags:   syscall.MS_MGC_VAL,
+			},
+		},
+		SnapshotMode: false,
+		NoCacheMode:  false,
+	}
+
+	// Apply user-provided options
 	for _, opt := range options {
-		// Create a temporary options struct to detect snapshot mode
-		tempOpts := &fs.Options{}
-		opt(tempOpts)
-		if tempOpts.EntryTimeout != nil && *tempOpts.EntryTimeout < 0 {
-			snapshotMode = true
-			break
-		}
+		opt(veldaOpts)
+	}
+
+	// In snapshot mode, use infinite timeouts for maximum caching
+	if veldaOpts.SnapshotMode {
+		infiniteTimeout := 365 * 24 * time.Hour // 1 year
+		veldaOpts.FuseOptions.EntryTimeout = &infiniteTimeout
+		veldaOpts.FuseOptions.AttrTimeout = &infiniteTimeout
+		veldaOpts.FuseOptions.NegativeTimeout = &infiniteTimeout
 	}
 
 	// Create cached loopback root
-	rootNode, err := NewCachedLoopbackRoot(baseDir, cache, snapshotMode)
+	rootNode, err := NewCachedLoopbackRoot(baseDir, cache, veldaOpts.SnapshotMode, veldaOpts.NoCacheMode)
 	if err != nil {
 		return nil, err
 	}
@@ -90,42 +137,7 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 		return nil, fmt.Errorf("failed to assert root node type")
 	}
 
-	timeout := 60 * time.Second
-	negativeTimeout := 10 * time.Second
-
-	// In snapshot mode, use infinite timeouts for maximum caching
-	if snapshotMode {
-		// Use very large timeout (effectively infinite)
-		infiniteTimeout := 365 * 24 * time.Hour // 1 year
-		timeout = infiniteTimeout
-		negativeTimeout = infiniteTimeout
-	}
-
-	option := &fs.Options{
-		EntryTimeout:    &timeout,
-		AttrTimeout:     &timeout,
-		NegativeTimeout: &negativeTimeout,
-		MountOptions: fuse.MountOptions{
-			AllowOther:         true,
-			DisableReadDirPlus: true,
-			DirectMount:        true,
-			Name:               "veldafs",
-			MaxWrite:           1024 * 1024,
-			EnableLocks:        true,
-			DirectMountFlags:   syscall.MS_MGC_VAL,
-		},
-	}
-	for _, opt := range options {
-		opt(option)
-	}
-
-	// Reset sentinel value to actual infinite timeout
-	if snapshotMode && option.EntryTimeout != nil && *option.EntryTimeout < 0 {
-		infiniteTimeout := 365 * 24 * time.Hour
-		option.EntryTimeout = &infiniteTimeout
-	}
-
-	server, err := fs.Mount(workspaceDir, rootNode, option)
+	server, err := fs.Mount(workspaceDir, rootNode, veldaOpts.FuseOptions)
 	if err != nil {
 		return nil, err
 	}
