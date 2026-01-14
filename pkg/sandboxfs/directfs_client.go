@@ -33,6 +33,11 @@ import (
 	"velda.io/velda/pkg/fileserver"
 )
 
+const (
+	// Number of background workers for prefetching
+	prefetchWorkers = 200
+)
+
 type Response struct {
 	errno syscall.Errno
 	data  []byte
@@ -58,6 +63,10 @@ type DirectFSClient struct {
 	// Cache from sandboxfs
 	cache *DirectoryCacheManager
 
+	// Prefetch queue and workers
+	prefetchQueue chan *prefetchJob
+	workersWg     sync.WaitGroup
+
 	// FUSE state
 	fuseServer *fuse.Server
 	ctx        context.Context
@@ -65,17 +74,33 @@ type DirectFSClient struct {
 	wg         sync.WaitGroup
 }
 
+// prefetchJob represents a background job to prefetch and cache a small file
+type prefetchJob struct {
+	client *DirectFSClient
+	fh     unix.FileHandle
+	attr   fileserver.FileAttr
+}
+
 // NewDirectFSClient creates a new direct filesystem client
 func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager) *DirectFSClient {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &DirectFSClient{
-		serverAddr: serverAddr,
-		pending:    make(map[uint32]chan Response),
-		inodes:     make(map[uint64]*fs.Inode),
-		cache:      cache,
-		ctx:        ctx,
-		cancel:     cancel,
+	client := &DirectFSClient{
+		serverAddr:    serverAddr,
+		pending:       make(map[uint32]chan Response),
+		inodes:        make(map[uint64]*fs.Inode),
+		cache:         cache,
+		prefetchQueue: make(chan *prefetchJob, 1000),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
+
+	// Start prefetch workers
+	for i := 0; i < prefetchWorkers; i++ {
+		client.workersWg.Add(1)
+		go client.prefetchWorker()
+	}
+
+	return client
 }
 
 // Connect connects to the file server and performs mount
@@ -166,12 +191,86 @@ func (sc *DirectFSClient) Stop() {
 	if sc.conn != nil {
 		sc.conn.Close()
 	}
+	close(sc.prefetchQueue)
+	sc.workersWg.Wait()
 	sc.wg.Wait()
+}
+
+// prefetchWorker is a background worker that processes prefetch jobs
+func (sc *DirectFSClient) prefetchWorker() {
+	defer sc.workersWg.Done()
+
+	for job := range sc.prefetchQueue {
+		if job == nil {
+			return
+		}
+		sc.processPrefetchJob(job)
+	}
+}
+
+// processPrefetchJob processes a single prefetch job
+func (sc *DirectFSClient) processPrefetchJob(job *prefetchJob) {
+	// Check if file has SHA256
+	var zeroHash [32]byte
+	if job.attr.Sha256 == zeroHash {
+		return // Cannot cache without SHA256
+	}
+
+	sha256Hex := fmt.Sprintf("%x", job.attr.Sha256[:])
+
+	// Check if already in cache
+	cachedPath, err := sc.cache.Lookup(sha256Hex)
+	if err == nil && cachedPath != "" {
+		// Already cached
+		return
+	}
+
+	// Read entire file from server
+	readReq := fileserver.ReadRequest{
+		Fh:     job.fh,
+		Offset: 0,
+		Size:   uint32(job.attr.Size),
+	}
+
+	readResp := fileserver.ReadResponse{}
+	err = sc.SendRequest(&readReq, &readResp)
+	if err != nil {
+		return
+	}
+
+	// Write to cache
+	writer, err := sc.cache.CreateTemp()
+	if err != nil {
+		return
+	}
+
+	if _, err := writer.Write(readResp.Data); err != nil {
+		writer.Abort()
+		return
+	}
+
+	computedHash, err := writer.Commit()
+	if err != nil {
+		writer.Abort()
+		return
+	}
+
+	// Verify hash matches
+	if computedHash == sha256Hex {
+		if GlobalCacheMetrics != nil {
+			GlobalCacheMetrics.CacheSaved.Inc()
+		}
+	}
 }
 
 // nextSeq generates the next sequence number
 func (sc *DirectFSClient) nextSeq() uint32 {
-	return atomic.AddUint32(&sc.seq, 1)
+	result := atomic.AddUint32(&sc.seq, 1)
+	if result == 0 {
+		// Skip 0 as it's reserved for notifications
+		result = atomic.AddUint32(&sc.seq, 1)
+	}
+	return result
 }
 
 // sendRequestWithData sends pre-serialized data and waits for response
@@ -287,7 +386,7 @@ func (sc *DirectFSClient) readResponses() {
 		}
 
 		// Check if this is a DirDataNotification (opcode indicates notification)
-		if header.Opcode == fileserver.OpDirDataNotification {
+		if header.Seq == 0 && header.Opcode == fileserver.OpDirDataNotification {
 			// Handle DirDataNotification asynchronously
 			go sc.handleDirDataNotification(data)
 			continue
@@ -359,7 +458,7 @@ func (sc *DirectFSClient) handleDirDataNotification(data []byte) {
 		childInode := parentNode.NewPersistentInode(ctx, childNode, stable)
 
 		// Add to parent's children (this makes it visible to readdir)
-		parentInode.AddChild(entry.Name, childInode, true)
+		parentInode.AddChild(entry.Name, childInode, false)
 	}
 
 	log.Printf("Pre-loaded %d entries for inode %d", len(notification.Entries), notification.Ino)
@@ -368,9 +467,12 @@ func (sc *DirectFSClient) handleDirDataNotification(data []byte) {
 // SnapshotNode implements fs.InodeEmbedder for persistent inodes
 type SnapshotNode struct {
 	fs.Inode
-	client *DirectFSClient
-	fh     unix.FileHandle     // File handle from server
-	attr   fileserver.FileAttr // Cached attributes
+	client         *DirectFSClient
+	fh             unix.FileHandle     // File handle from server
+	attr           fileserver.FileAttr // Cached attributes
+	dirFetched     sync.Once           // Whether directory entries have been fetched
+	dirFetchError  error
+	prefetchedData uint32 // Atomic flag for whether small files have been prefetched
 }
 
 // Ensure SnapshotNode implements required interfaces
@@ -393,9 +495,68 @@ func (n *SnapshotNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.A
 	return fs.OK
 }
 
+// fetchDirIfNeeded prefetches directory entries on first call
+func (n *SnapshotNode) fetchDirIfNeeded(ctx context.Context) {
+	n.dirFetched.Do(func() {
+		// Send readdir request
+		readDirReq := fileserver.ReadDirRequest{
+			Fh: n.fh,
+		}
+
+		readDirResp := fileserver.ReadDirResponse{}
+		err := n.client.SendRequest(&readDirReq, &readDirResp)
+		if err != nil {
+			n.dirFetchError = err
+			return
+		}
+		for _, entry := range readDirResp.Entries {
+			// Create child node
+			childNode := &SnapshotNode{
+				client: n.client,
+				fh:     entry.Fh,
+				attr:   entry.Attr,
+			}
+
+			// Create persistent inode
+			stable := fs.StableAttr{
+				Mode: entry.Attr.Mode,
+				Ino:  entry.Attr.Ino,
+			}
+			child := n.NewPersistentInode(ctx, childNode, stable)
+
+			// Add to children, don't replace existing child if it already exists
+			n.AddChild(entry.Name, child, false)
+		}
+
+		// Start prefetching small files after directory fetch is complete
+		n.prefetchSmallFiles() // Empty file handle means don't exclude any file
+	})
+}
+
 // Lookup looks up a child node
 func (n *SnapshotNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	// Send lookup request
+	// Prefetch directory on first lookup
+	n.fetchDirIfNeeded(ctx)
+
+	// Check if child already exists (from prefetch)
+	existingChild := n.GetChild(name)
+	if existingChild != nil {
+		// Child exists from prefetch, return it
+		if childNode, ok := existingChild.Operations().(*SnapshotNode); ok {
+			toFuseAttr(&childNode.attr, &out.Attr)
+			out.SetEntryTimeout(time.Hour)
+			out.SetAttrTimeout(time.Hour)
+			return existingChild, fs.OK
+		}
+	}
+
+	// If directory has been fetched and child doesn't exist, return ENOENT
+	// without making a server call
+	if n.dirFetchError == nil {
+		return nil, syscall.ENOENT
+	}
+
+	// Send lookup request for directories that haven't been fully prefetched
 	lookupReq := fileserver.LookupRequest{
 		ParentFh: n.fh,
 		Name:     name,
@@ -433,30 +594,84 @@ func (n *SnapshotNode) Lookup(ctx context.Context, name string, out *fuse.EntryO
 
 // Readdir reads directory entries
 func (n *SnapshotNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	// Send readdir request
-	readDirReq := fileserver.ReadDirRequest{
-		Fh:     n.fh,
-		Offset: 0,
-		Count:  10000, // Read many entries at once for snapshots
-	}
+	// Fetch directory entries if not already done
+	n.fetchDirIfNeeded(ctx)
 
-	readDirResp := fileserver.ReadDirResponse{}
-	err := n.client.SendRequest(&readDirReq, &readDirResp)
-	if err != nil {
-		return nil, fs.ToErrno(err)
+	if n.dirFetchError != nil {
+		return nil, fs.ToErrno(n.dirFetchError)
 	}
 
 	// Convert to fuse.DirEntry
-	entries := make([]fuse.DirEntry, len(readDirResp.Entries))
-	for i, entry := range readDirResp.Entries {
-		entries[i] = fuse.DirEntry{
-			Name: entry.Name,
-			Mode: entry.Attr.Mode,
-			Ino:  entry.Attr.Ino,
-		}
+	children := n.Children()
+	entries := make([]fuse.DirEntry, 0, len(children))
+	for name, entry := range children {
+		entries = append(entries, fuse.DirEntry{
+			Name: name,
+			Ino:  entry.StableAttr().Ino,
+			Mode: entry.StableAttr().Mode & unix.S_IFMT,
+		})
+	}
+	return fs.NewListDirStream(entries), fs.OK
+}
+
+// prefetchSmallFiles eagerly fetches small files (<128KB) from a directory
+// This is called on first read-only open to warm the cache for sibling files
+func (n *SnapshotNode) prefetchSmallFiles() {
+	// Ensure we only prefetch once per directory inode
+	if !atomic.CompareAndSwapUint32(&n.prefetchedData, 0, 1) {
+		return
 	}
 
-	return fs.NewListDirStream(entries), fs.OK
+	// Spawn async goroutine to do the actual prefetching
+	go func() {
+		// Get all children of this directory
+		children := n.Children()
+
+		count := 0
+		for _, child := range children {
+			if count >= maxSmallFilePrefetch {
+				break
+			}
+
+			// Get child node
+			childNode, ok := child.Operations().(*SnapshotNode)
+			if !ok {
+				continue
+			}
+
+			// Only prefetch regular files under maxSmallFileSize
+			if childNode.attr.Mode&unix.S_IFMT == unix.S_IFREG &&
+				childNode.attr.Size > 0 &&
+				childNode.attr.Size <= maxSmallFileSize {
+
+				// Check if file has SHA256 and is already cached
+				var zeroHash [32]byte
+				if childNode.attr.Sha256 != zeroHash {
+					sha256Hex := fmt.Sprintf("%x", childNode.attr.Sha256[:])
+					cachedPath, err := n.client.cache.Lookup(sha256Hex)
+					if err == nil && cachedPath != "" {
+						// Already cached, skip prefetching
+						continue
+					}
+				}
+
+				// Submit prefetch job (non-blocking)
+				job := &prefetchJob{
+					client: n.client,
+					fh:     childNode.fh,
+					attr:   childNode.attr,
+				}
+
+				select {
+				case n.client.prefetchQueue <- job:
+					count++
+				default:
+					// Queue full, stop prefetching
+					return
+				}
+			}
+		}
+	}()
 }
 
 // Open opens a file for reading
@@ -481,32 +696,24 @@ func (n *SnapshotNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, u
 			if err == nil {
 				GlobalCacheMetrics.CacheHit.Inc()
 				// Use LoopbackFile for passthrough mode
-				loopbackFile := fs.NewLoopbackFile(fd)
-				if lf, ok := loopbackFile.(*fs.LoopbackFile); ok {
-					return &SnapshotFile{
-						baseFile:  lf,
-						client:    n.client,
-						fh:        n.fh,
-						attr:      n.attr,
-						cache:     n.client.cache,
-						cacheFd:   fd,
-						fromCache: true,
-					}, fuse.FOPEN_KEEP_CACHE, fs.OK
-				}
-				// Fallback: close fd if type assertion fails
-				unix.Close(fd)
+				loopbackFile := fs.NewLoopbackFile(fd).(*fs.LoopbackFile)
+				return &SnapshotFile{
+					cachedBackingFile: loopbackFile,
+					client:            n.client,
+					fh:                n.fh,
+					attr:              n.attr,
+					cache:             n.client.cache,
+				}, fuse.FOPEN_KEEP_CACHE, fs.OK
 			}
 		}
 	}
 
 	// Create file handle for remote access
 	file := &SnapshotFile{
-		client:    n.client,
-		fh:        n.fh,
-		attr:      n.attr,
-		cache:     n.client.cache,
-		cacheFd:   -1,
-		fromCache: false,
+		client: n.client,
+		fh:     n.fh,
+		attr:   n.attr,
+		cache:  n.client.cache,
 	}
 
 	return file, fuse.FOPEN_KEEP_CACHE, fs.OK
@@ -560,13 +767,11 @@ func (n *SnapshotNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
 
 // SnapshotFile implements fs.FileHandle for reading files
 type SnapshotFile struct {
-	baseFile  *fs.LoopbackFile // Embedded for passthrough mode when cached
-	client    *DirectFSClient
-	fh        unix.FileHandle
-	attr      fileserver.FileAttr
-	cache     *DirectoryCacheManager
-	cacheFd   int  // File descriptor for cached file (-1 if not cached)
-	fromCache bool // Whether this file is served from cache
+	cachedBackingFile *fs.LoopbackFile // Embedded for passthrough mode when cached
+	client            *DirectFSClient
+	fh                unix.FileHandle
+	attr              fileserver.FileAttr
+	cache             *DirectoryCacheManager
 }
 
 // Ensure SnapshotFile implements required interfaces
@@ -580,8 +785,8 @@ var _ fs.FileReleaser = (*SnapshotFile)(nil)
 // Read reads data from the file with caching
 func (f *SnapshotFile) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	// If file is from cache, use passthrough mode
-	if f.fromCache && f.baseFile != nil {
-		return f.baseFile.Read(ctx, dest, off)
+	if f.cachedBackingFile != nil {
+		return f.cachedBackingFile.Read(ctx, dest, off)
 	}
 
 	// Check cache first if SHA256 is available
@@ -670,12 +875,8 @@ func (f *SnapshotFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fus
 
 // Release closes the file descriptor if it's a cached file
 func (f *SnapshotFile) Release(ctx context.Context) syscall.Errno {
-	if f.cacheFd >= 0 {
-		unix.Close(f.cacheFd)
-		f.cacheFd = -1
-	}
-	if f.baseFile != nil {
-		return f.baseFile.Release(ctx)
+	if f.cachedBackingFile != nil {
+		return f.cachedBackingFile.Release(ctx)
 	}
 	return fs.OK
 }
@@ -683,8 +884,8 @@ func (f *SnapshotFile) Release(ctx context.Context) syscall.Errno {
 var _ = (fs.FilePassthroughFder)((*SnapshotFile)(nil))
 
 func (f *SnapshotFile) PassthroughFd() (int, bool) {
-	if f.fromCache && f.baseFile != nil {
-		return f.baseFile.PassthroughFd()
+	if f.cachedBackingFile != nil {
+		return f.cachedBackingFile.PassthroughFd()
 	}
 	return -1, false
 }

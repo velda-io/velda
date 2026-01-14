@@ -28,17 +28,16 @@ import (
 // CachedFileHandle wraps a file descriptor with caching capabilities
 type CachedFileHandle struct {
 	*fs.LoopbackFile
-	path       string
 	cache      CacheManager
-	isWrite    bool
-	fromCache  bool
 	cachedStat *syscall.Stat_t
 
 	// For caching operations
 	mu           sync.Mutex
-	cacheOps     bool
 	cacheWrite   CacheWriter
 	bytesWritten int64
+	isWrite      bool
+	fromCache    bool
+	cacheOps     bool
 	flushed      bool // Track if file has been flushed
 	cacheFlushed bool // Track if cache was committed during flush
 }
@@ -66,7 +65,7 @@ func (f *CachedFileHandle) switchToCachedFd(cachedFd int, st *syscall.Stat_t) {
 	}
 
 	// Close the original fd
-	originalFile.Release(nil)
+	originalFile.Release(context.TODO())
 }
 
 var _ = (fs.FileHandle)((*CachedFileHandle)(nil))
@@ -122,7 +121,7 @@ func (f *CachedFileHandle) Read(ctx context.Context, dest []byte, off int64) (fu
 			cw, err := f.cache.CreateTemp()
 			if err != nil {
 				// Failed to create cache, disable caching
-				f.abortCaching()
+				f.abortCaching("cache create error in read")
 			} else {
 				f.cacheWrite = cw
 			}
@@ -142,7 +141,7 @@ func (f *CachedFileHandle) Write(ctx context.Context, data []byte, off int64) (u
 	// Check if this is a sequential write
 	if f.cacheOps && off != f.bytesWritten {
 		// Non-sequential write, mark as uncachable
-		f.abortCaching()
+		f.abortCaching("non-sequential write")
 	}
 
 	n, errno := f.LoopbackFile.Write(ctx, data, off)
@@ -157,7 +156,7 @@ func (f *CachedFileHandle) Write(ctx context.Context, data []byte, off int64) (u
 			cw, err := f.cache.CreateTemp()
 			if err != nil {
 				// Failed to create cache, disable caching
-				f.abortCaching()
+				f.abortCaching("cache create error")
 			} else {
 				f.cacheWrite = cw
 			}
@@ -167,7 +166,7 @@ func (f *CachedFileHandle) Write(ctx context.Context, data []byte, off int64) (u
 			_, err := f.cacheWrite.Write(data[:n])
 			if err != nil {
 				// Failed to write to cache, abort
-				f.abortCaching()
+				f.abortCaching("cache write error")
 			} else {
 				f.bytesWritten += int64(n)
 			}
@@ -183,7 +182,7 @@ func (f *CachedFileHandle) Lseek(ctx context.Context, off uint64, whence uint32)
 	defer f.mu.Unlock()
 
 	// Any seek aborts caching
-	f.abortCaching()
+	f.abortCaching("seek")
 
 	return f.LoopbackFile.Lseek(ctx, off, whence)
 }
@@ -196,6 +195,14 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 	if errno != 0 {
 		return errno
 	}
+	return 0
+}
+
+// Release implements FileReleaser - clean up on close
+func (f *CachedFileHandle) Release(ctx context.Context) syscall.Errno {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	fd, _ := f.PassthroughFd()
 
 	// Mark as flushed
@@ -212,14 +219,14 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 				fileMtime := time.Unix(st.Mtim.Unix())
 				// Encode SHA256 and mtime into xattr
 				xattrValue := encodeCacheXattr(committedSHA, fileMtime, st.Size)
-				unix.Lsetxattr(f.path, xattrCacheName, []byte(xattrValue), 0)
-				//log.Printf("Set xattr for %s: SHA=%s, mtime=%v, err=%v", f.path, committedSHA, fileMtime, setErr)
+				unix.Fsetxattr(fd, xattrCacheName, []byte(xattrValue), 0)
 				f.cacheFlushed = true
 			}
 		}
 		f.cacheWrite = nil
 		f.cacheOps = false // Disable further caching after flush
 	} else if f.cacheOps && !f.isWrite && f.cacheWrite != nil && f.bytesWritten > 0 {
+		// Reading sequentially.
 		// Get current mtime & size
 		var st syscall.Stat_t
 		if statErr := syscall.Fstat(fd, &st); statErr == nil && f.bytesWritten == st.Size {
@@ -228,8 +235,7 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 			if err == nil && committedSHA != "" {
 				fileMtime := time.Unix(st.Mtim.Unix())
 				xattrValue := encodeCacheXattr(committedSHA, fileMtime, st.Size)
-				unix.Lsetxattr(f.path, xattrCacheName, []byte(xattrValue), 0)
-				//log.Printf("Set xattr for %s after read: SHA=%s, mtime=%v", f.path, sha256sum, fileMtime)
+				unix.Fsetxattr(fd, xattrCacheName, []byte(xattrValue), 0)
 			}
 		}
 		f.cacheOps = false // Disable further caching after flush
@@ -243,26 +249,13 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 		f.cacheOps = false
 	}
 
-	return 0
-}
-
-// Release implements FileReleaser - clean up on close
-func (f *CachedFileHandle) Release(ctx context.Context) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	// If cache operations are still pending and not flushed, abort them
-	if f.cacheWrite != nil {
-		f.cacheWrite.Abort()
-		f.cacheWrite = nil
-	}
 	oldfile := f.LoopbackFile
 	f.LoopbackFile = nil
 	return oldfile.Release(ctx)
 }
 
 // abortCaching disables caching for this file handle
-func (f *CachedFileHandle) abortCaching() {
+func (f *CachedFileHandle) abortCaching(reason string) {
 	if f.cacheWrite != nil {
 		// Track aborted cache operation
 		if GlobalCacheMetrics != nil {

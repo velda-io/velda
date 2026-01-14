@@ -124,9 +124,7 @@ type ReadResponse struct {
 // readResponseRaw removed; fields serialized directly
 // ReadDirRequest represents a readdir request
 type ReadDirRequest struct {
-	Fh     unix.FileHandle // Directory file handle
-	Offset uint32          // Offset in directory listing
-	Count  uint32          // Maximum number of entries to return
+	Fh unix.FileHandle // Directory file handle
 }
 
 // DirEntry represents a directory entry

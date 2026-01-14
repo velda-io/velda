@@ -484,7 +484,7 @@ func (fs *FileServer) handleMount(mountReq *MountRequest, session *Session) (Ser
 		mountPath = filepath.Join(fs.rootPath, mountPath)
 	}
 	mountPath = filepath.Clean(mountPath)
-	if !strings.HasPrefix(mountPath+"/", fs.rootPath) {
+	if !strings.HasPrefix(mountPath+"/", fs.rootPath+"/") {
 		return nil, fmt.Errorf("mount path %s is outside root path %s: %w", mountPath, fs.rootPath, syscall.EPERM)
 	}
 	// Trigger lazy mount of zfs snapshot if needed by appending "/." to the path
@@ -610,18 +610,6 @@ func (fs *FileServer) handleReadDir(readDirReq *ReadDirRequest, session *Session
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory entries: %w", err)
 	}
-
-	// Apply offset and count
-	start := int(readDirReq.Offset)
-	if start >= len(entries) {
-		start = len(entries)
-	}
-	end := start + int(readDirReq.Count)
-	if end > len(entries) {
-		end = len(entries)
-	}
-
-	entries = entries[start:end]
 
 	// Build directory entries with file handles using NameToHandleAt
 	dirEntries := make([]DirEntry, 0, len(entries))
@@ -749,7 +737,7 @@ func (fs *FileServer) makeFileAttrWithPath(parentFd int, name string) (FileAttr,
 					copy(attr.Sha256[:], sha256Bytes)
 				}
 			} else {
-				log.Printf("Invalid cache xattr for %s: %s, expected: %d:%d:%d", name, string(cacheKey[:sz]), mtime.Unix(), mtime.Nanosecond(), size)
+				log.Printf("Invalid cache xattr for %s: %s, expected: %d:%d:%d", name, string(cacheKey[:sz]), attr.Mtim, attr.MtimNsec, attr.Size)
 			}
 		}
 		// If xattr doesn't exist or has wrong size, Sha256 remains all zeros

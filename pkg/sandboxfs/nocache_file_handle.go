@@ -30,7 +30,6 @@ import (
 // It does not read from cache or write data to cache, only sets the cache key (xattr) during write.
 type NoCacheFileHandle struct {
 	*fs.LoopbackFile
-	path string
 
 	// For cache key operations
 	mu           sync.Mutex
@@ -93,7 +92,7 @@ func (f *NoCacheFileHandle) Flush(ctx context.Context) syscall.Errno {
 				fileMtime := time.Unix(st.Mtim.Unix())
 				// Encode SHA256 and mtime into xattr (cache key only)
 				xattrValue := encodeCacheXattr(sha256sum, fileMtime, st.Size)
-				unix.Lsetxattr(f.path, xattrCacheName, []byte(xattrValue), 0)
+				unix.Fsetxattr(fd, xattrCacheName, []byte(xattrValue), 0)
 				// Note: We do NOT actually store the data in cache, only set the key
 			}
 		}
