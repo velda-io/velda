@@ -30,6 +30,7 @@ type VeldaMountOptions struct {
 	FuseOptions  *fs.Options
 	SnapshotMode bool
 	NoCacheMode  bool
+	DirectFSMode bool
 }
 
 type MountOptions func(*VeldaMountOptions)
@@ -59,6 +60,19 @@ func WithNoCacheMode() MountOptions {
 	}
 }
 
+// WithDirectFSMode enables DirectFS mode for remote snapshot serving.
+// In DirectFS mode:
+// - Connects to a remote fileserver using custom protocol
+// - Uses Linux file handles for efficient access
+// - All data cached using content-addressable storage
+// - Kernel-level caching with persistent inodes
+// - Optimized for serving filesystem snapshots over network
+func WithDirectFSMode() MountOptions {
+	return func(opts *VeldaMountOptions) {
+		opts.DirectFSMode = true
+	}
+}
+
 // WithFuseOption allows setting FUSE-specific options
 func WithFuseOption(fn func(*fs.Options)) MountOptions {
 	return func(opts *VeldaMountOptions) {
@@ -70,7 +84,6 @@ func WithFuseOption(fn func(*fs.Options)) MountOptions {
 type VeldaServer struct {
 	*fuse.Server
 	Cache *DirectoryCacheManager
-	Root  *CachedLoopbackNode
 }
 
 // MountWorkDir mounts a workspace directory with caching support
@@ -125,16 +138,20 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 		veldaOpts.FuseOptions.NegativeTimeout = &infiniteTimeout
 	}
 
-	// Create cached loopback root
-	rootNode, err := NewCachedLoopbackRoot(baseDir, cache, veldaOpts.SnapshotMode, veldaOpts.NoCacheMode)
-	if err != nil {
-		return nil, err
-	}
-
-	// Type assert to get the actual root node for worker management
-	cachedRoot, ok := rootNode.(*CachedLoopbackNode)
-	if !ok {
-		return nil, fmt.Errorf("failed to assert root node type")
+	var rootNode fs.InodeEmbedder
+	// Handle DirectFS mode
+	if veldaOpts.DirectFSMode {
+		client := NewDirectFSClient(baseDir, cache)
+		rootNode, err = client.Connect()
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to DirectFS server: %w", err)
+		}
+	} else {
+		// Create cached loopback root
+		rootNode, err = NewCachedLoopbackRoot(baseDir, cache, veldaOpts.SnapshotMode, veldaOpts.NoCacheMode)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	server, err := fs.Mount(workspaceDir, rootNode, veldaOpts.FuseOptions)
@@ -147,7 +164,6 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 	veldaServer := &VeldaServer{
 		Server: server,
 		Cache:  cache,
-		Root:   cachedRoot,
 	}
 
 	go func() {

@@ -60,7 +60,6 @@ func setupTestServerClient(t *testing.T, srcDir, cacheDir, mountDir string, work
 	require.NoError(t, err)
 
 	client := NewDirectFSClient(server.Addr().String(), cache)
-	require.NoError(t, client.Connect())
 
 	veldaServer, err := client.Mount(mountDir)
 	require.NoError(t, err)
@@ -69,7 +68,7 @@ func setupTestServerClient(t *testing.T, srcDir, cacheDir, mountDir string, work
 	time.Sleep(200 * time.Millisecond)
 
 	t.Cleanup(func() {
-		_ = client.Unmount()
+		require.NoError(t, client.Unmount())
 		client.Stop()
 		server.Stop()
 	})
@@ -85,7 +84,6 @@ func setupTestServerClientWithCache(t *testing.T, srcDir string, cache *Director
 	time.Sleep(100 * time.Millisecond)
 
 	client := NewDirectFSClient(server.Addr().String(), cache)
-	require.NoError(t, client.Connect())
 
 	veldaServer, err := client.Mount(mountDir)
 	require.NoError(t, err)
@@ -93,7 +91,7 @@ func setupTestServerClientWithCache(t *testing.T, srcDir string, cache *Director
 	time.Sleep(200 * time.Millisecond)
 
 	t.Cleanup(func() {
-		_ = client.Unmount()
+		require.NoError(t, client.Unmount())
 		client.Stop()
 		server.Stop()
 	})
@@ -132,10 +130,6 @@ func TestSnapshotClientE2E(t *testing.T) {
 	testContent2 := []byte("Second test file with different content")
 	testFile2 := filepath.Join(srcDir, "test2.txt")
 	require.NoError(t, os.WriteFile(testFile2, testContent2, 0644))
-
-	// Compute SHA256 for test file 2 and set xattr using backfill util
-	hash2 := sha256.Sum256(testContent2)
-	_ = hex.EncodeToString(hash2[:]) // sha256Hex2 for potential future use
 
 	// Create a subdirectory with a file
 	subDir := filepath.Join(srcDir, "subdir")
@@ -367,7 +361,7 @@ func TestSnapshotClientTimestamps(t *testing.T) {
 
 	// Start server
 	server := fileserver.NewFileServer(srcDir, 2)
-	serverAddr := "localhost:19236"
+	serverAddr := "localhost:0"
 	err := server.Start(serverAddr)
 	require.NoError(t, err)
 	defer server.Stop()
@@ -377,12 +371,10 @@ func TestSnapshotClientTimestamps(t *testing.T) {
 	cache, err := NewDirectoryCacheManager(cacheDir)
 	require.NoError(t, err)
 
-	client := NewDirectFSClient(serverAddr, cache)
-	err = client.Connect()
-	require.NoError(t, err)
-	defer client.Stop()
+	client := NewDirectFSClient(server.Addr().String(), cache)
 
 	veldaServer, err := client.Mount(mountDir)
+	defer client.Stop()
 	require.NoError(t, err)
 	defer client.Unmount()
 	require.NoError(t, veldaServer.WaitMount())
@@ -400,5 +392,80 @@ func TestSnapshotClientTimestamps(t *testing.T) {
 		// Compare nanoseconds
 		assert.Equal(t, srcStat.Mtim.Nsec, mountStat.Mtim.Nsec, "Mtime nanoseconds mismatch")
 		assert.Equal(t, srcStat.Ctim.Nsec, mountStat.Ctim.Nsec, "Ctime nanoseconds mismatch")
+	})
+}
+
+// TestSnapshotClientReadlink tests readlink functionality
+func TestSnapshotClientReadlink(t *testing.T) {
+	checkCapSysAdmin(t)
+
+	// Setup test directories
+	srcDir := t.TempDir()
+	cacheDir := t.TempDir()
+	mountDir := t.TempDir()
+
+	// Create a test file and symlinks
+	testFile := filepath.Join(srcDir, "target.txt")
+	testContent := []byte("target content")
+	require.NoError(t, os.WriteFile(testFile, testContent, 0644))
+
+	// Create absolute symlink
+	absSymlink := filepath.Join(srcDir, "abs_link")
+	require.NoError(t, os.Symlink("/tmp/absolute_target", absSymlink))
+
+	// Create relative symlink
+	relSymlink := filepath.Join(srcDir, "rel_link")
+	require.NoError(t, os.Symlink("target.txt", relSymlink))
+
+	// Create nested directory with symlink
+	nestedDir := filepath.Join(srcDir, "nested")
+	require.NoError(t, os.Mkdir(nestedDir, 0755))
+	nestedSymlink := filepath.Join(nestedDir, "nested_link")
+	require.NoError(t, os.Symlink("../target.txt", nestedSymlink))
+
+	// Start server and client
+	setupTestServerClient(t, srcDir, cacheDir, mountDir, 2)
+
+	t.Run("absolute symlink", func(t *testing.T) {
+		mountedLink := filepath.Join(mountDir, "abs_link")
+		target, err := os.Readlink(mountedLink)
+		require.NoError(t, err)
+		assert.Equal(t, "/tmp/absolute_target", target)
+
+		// Verify lstat shows it's a symlink
+		fi, err := os.Lstat(mountedLink)
+		require.NoError(t, err)
+		assert.Equal(t, os.ModeSymlink, fi.Mode()&os.ModeSymlink)
+	})
+
+	t.Run("relative symlink", func(t *testing.T) {
+		mountedLink := filepath.Join(mountDir, "rel_link")
+		target, err := os.Readlink(mountedLink)
+		require.NoError(t, err)
+		assert.Equal(t, "target.txt", target)
+
+		// Verify the symlink can be followed
+		content, err := os.ReadFile(mountedLink)
+		require.NoError(t, err)
+		assert.Equal(t, testContent, content)
+	})
+
+	t.Run("nested symlink", func(t *testing.T) {
+		mountedLink := filepath.Join(mountDir, "nested", "nested_link")
+		target, err := os.Readlink(mountedLink)
+		require.NoError(t, err)
+		assert.Equal(t, "../target.txt", target)
+
+		// Verify the symlink can be followed
+		content, err := os.ReadFile(mountedLink)
+		require.NoError(t, err)
+		assert.Equal(t, testContent, content)
+	})
+
+	t.Run("readlink on regular file fails", func(t *testing.T) {
+		mountedFile := filepath.Join(mountDir, "target.txt")
+		_, err := os.Readlink(mountedFile)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, syscall.EINVAL)
 	})
 }

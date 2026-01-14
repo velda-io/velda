@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,11 +17,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,12 +31,9 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	fuse "github.com/hanwen/go-fuse/v2/fs"
 )
 
 var XattrCacheKey = "user.veldafs.sha256"
-var ToErrno = fuse.ToErrno
 
 // FileServer manages snapshot file serving with custom protocol
 type FileServer struct {
@@ -48,6 +47,9 @@ type FileServer struct {
 	// Request and response queues
 	reqQueue  chan Request
 	respQueue chan Response
+
+	// Pre-loading queue for metadata
+	preloadQueue chan PreLoadItem
 
 	// Worker management
 	numWorkers int
@@ -74,13 +76,14 @@ func NewFileServer(rootPath string, numWorkers int) *FileServer {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &FileServer{
-		rootPath:   rootPath,
-		sessions:   make(map[*Session]bool),
-		reqQueue:   make(chan Request, 100),
-		respQueue:  make(chan Response, 100),
-		numWorkers: numWorkers,
-		ctx:        ctx,
-		cancel:     cancel,
+		rootPath:     rootPath,
+		sessions:     make(map[*Session]bool),
+		reqQueue:     make(chan Request, 100),
+		respQueue:    make(chan Response, 100),
+		preloadQueue: make(chan PreLoadItem, 1000),
+		numWorkers:   numWorkers,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 }
 
@@ -96,6 +99,12 @@ func (fs *FileServer) Start(addr string) error {
 	for i := 0; i < fs.numWorkers; i++ {
 		fs.wg.Add(1)
 		go fs.requestWorker()
+	}
+
+	// Start pre-loading workers (same number as request workers)
+	for i := 0; i < fs.numWorkers; i++ {
+		fs.wg.Add(1)
+		go fs.preloadWorker()
 	}
 
 	// Start response sender
@@ -244,59 +253,196 @@ func (fs *FileServer) responseSender() {
 	}
 }
 
+// preloadWorker processes pre-loading items from the queue
+func (fs *FileServer) preloadWorker() {
+	defer fs.wg.Done()
+
+	for {
+		select {
+		case <-fs.ctx.Done():
+			return
+		case item := <-fs.preloadQueue:
+			fs.handlePreload(item)
+		}
+	}
+}
+
+// handlePreload walks the directory tree and sends metadata to client
+func (fs *FileServer) handlePreload(item PreLoadItem) {
+	// Walk from the inode up to 2 levels deep
+	// fs.walkAndSendDirectory(item.Fh, item.Ino, item.Session, 0, 2, 1000)
+}
+
+// walkAndSendDirectory recursively walks directory and sends DirData
+// maxDepth: maximum depth to walk (2 for this implementation)
+// maxEntries: maximum entries to send per directory (1000, except last dir can have all)
+func (fs *FileServer) walkAndSendDirectory(fh unix.FileHandle, ino uint64, session *Session, currentDepth, maxDepth, maxEntries int) {
+	if currentDepth >= maxDepth {
+		return
+	}
+
+	// Open directory using OpenByHandleAt
+	fd, err := unix.OpenByHandleAt(session.rootFd, fh, unix.O_RDONLY|unix.O_DIRECTORY)
+	if err != nil {
+		log.Printf("Failed to open directory for preload: %v", err)
+		return
+	}
+	file := os.NewFile(uintptr(fd), "")
+	defer file.Close()
+
+	entries, err := file.ReadDir(-1)
+	if err != nil {
+		log.Printf("Failed to read directory for preload: %v", err)
+		return
+	}
+
+	// Determine how many entries to process
+	entriesToProcess := len(entries)
+
+	// Build directory entries
+	dirEntries := make([]DirEntry, 0, entriesToProcess)
+	subdirs := make([]struct {
+		fh  unix.FileHandle
+		ino uint64
+	}, 0)
+
+	for i := 0; i < entriesToProcess; i++ {
+		entry := entries[i]
+
+		// Get file handle using NameToHandleAt
+		entryFileHandle, entryMountID, err := unix.NameToHandleAt(fd, entry.Name(), 0)
+		if err != nil {
+			log.Printf("Failed to get file handle for %s during preload: %v", entry.Name(), err)
+			continue
+		}
+
+		// Verify mount_id matches session
+		if int32(entryMountID) != session.mountID {
+			continue
+		}
+
+		attr, err := fs.makeFileAttrWithPath(fd, entry.Name())
+		if err != nil {
+			log.Printf("Failed to get file attributes for %s during preload: %v", entry.Name(), err)
+			continue
+		}
+
+		dirEntries = append(dirEntries, DirEntry{
+			Fh:   entryFileHandle,
+			Name: entry.Name(),
+			Attr: attr,
+		})
+
+		// Track subdirectories for recursive processing
+		if entry.IsDir() {
+			subdirs = append(subdirs, struct {
+				fh  unix.FileHandle
+				ino uint64
+			}{entryFileHandle, attr.Ino})
+		}
+	}
+
+	// Send DirData notification to client
+	if len(dirEntries) > 0 {
+		fs.sendDirData(ino, dirEntries, session)
+	}
+
+	// Recursively process subdirectories
+	for _, subdir := range subdirs {
+		fs.walkAndSendDirectory(subdir.fh, subdir.ino, session, currentDepth+1, maxDepth, maxEntries)
+	}
+}
+
+// sendDirData sends a DirDataNotification to the client
+func (fs *FileServer) sendDirData(ino uint64, entries []DirEntry, session *Session) {
+	notification := &DirDataNotification{
+		Ino:     ino,
+		Entries: entries,
+	}
+
+	respBytes, err := SerializeWithHeader(OpDirDataNotification, 0, notification)
+	if err != nil {
+		log.Printf("Failed to serialize DirData notification: %v", err)
+		return
+	}
+
+	// Send via response queue
+	select {
+	case fs.respQueue <- Response{Session: session, Data: respBytes}:
+	case <-fs.ctx.Done():
+	}
+}
+
 // handleRequest dispatches request to appropriate handler
 func (fs *FileServer) handleRequest(req Request) {
 	var resp Serializable
-	var errno syscall.Errno
+	var err error
 
 	switch req.Header.Opcode {
 	case OpMount:
 		mountReq := MountRequest{}
-		if err := mountReq.Deserialize(bytes.NewReader(req.Data)); err != nil {
-			errno = syscall.EINVAL
+		if deserErr := mountReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize mount request: %w", syscall.EINVAL)
 		} else {
-			resp, errno = fs.handleMount(&mountReq, req.Session)
+			resp, err = fs.handleMount(&mountReq, req.Session)
 		}
 	case OpLookup:
 		lookupReq := LookupRequest{}
-		if err := lookupReq.Deserialize(bytes.NewReader(req.Data)); err != nil {
-			errno = syscall.EINVAL
+		if deserErr := lookupReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize lookup request: %w", syscall.EINVAL)
 		} else {
-			resp, errno = fs.handleLookup(&lookupReq, req.Session)
+			resp, err = fs.handleLookup(&lookupReq, req.Session)
 		}
 	case OpRead:
 		readReq := ReadRequest{}
-		if err := readReq.Deserialize(bytes.NewReader(req.Data)); err != nil {
-			errno = syscall.EINVAL
+		if deserErr := readReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize read request: %w", syscall.EINVAL)
 		} else {
-			resp, errno = fs.handleRead(&readReq, req.Session)
+			resp, err = fs.handleRead(&readReq, req.Session)
 		}
 	case OpReadDir:
 		readDirReq := ReadDirRequest{}
-		if err := readDirReq.Deserialize(bytes.NewReader(req.Data)); err != nil {
-			errno = syscall.EINVAL
+		if deserErr := readDirReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize readdir request: %w", syscall.EINVAL)
 		} else {
-			resp, errno = fs.handleReadDir(&readDirReq, req.Session)
+			resp, err = fs.handleReadDir(&readDirReq, req.Session)
+		}
+	case OpReadlink:
+		readlinkReq := ReadlinkRequest{}
+		if deserErr := readlinkReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize readlink request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleReadlink(&readlinkReq, req.Session)
 		}
 	default:
-		errno = syscall.ENOSYS
+		err = fmt.Errorf("unsupported opcode %d: %w", req.Header.Opcode, syscall.ENOSYS)
 	}
-	if resp == nil && errno == 0 {
+
+	// Convert error to errno and log if needed
+	var errno syscall.Errno
+	if err != nil {
+		errno = toErrno(err)
+		// Log unusual errors
+		if errno != syscall.ENOENT && errno != syscall.EPERM && errno != syscall.EACCES {
+			log.Printf("Request opcode=%d seq=%d failed: %v (errno=%d)", req.Header.Opcode, req.Header.Seq, err, errno)
+		}
+	} else if resp == nil {
 		errno = syscall.EIO
+		log.Printf("Request opcode=%d seq=%d returned nil response without error", req.Header.Opcode, req.Header.Seq)
 	}
+
 	var respBytes []byte
 	if errno != 0 {
 		respBytes = fs.makeErrorResponse(req.Header.Seq, errno)
 	} else {
-		var err error
+		var serErr error
 		// Use opcode=0 for success responses
-		respBytes, err = SerializeWithHeader(0, req.Header.Seq, resp)
-		if err != nil {
-			log.Printf("Failed to serialize response: %v", err)
+		respBytes, serErr = SerializeWithHeader(0, req.Header.Seq, resp)
+		if serErr != nil {
+			log.Printf("Failed to serialize response for opcode=%d seq=%d: %v", req.Header.Opcode, req.Header.Seq, serErr)
 			respBytes = fs.makeErrorResponse(req.Header.Seq, syscall.EIO)
 		}
 	}
-	log.Printf("Handled request opcode %d, seq %d, errno %s", req.Header.Opcode, req.Header.Seq, errno)
 
 	select {
 	case fs.respQueue <- Response{Session: req.Session, Data: respBytes}:
@@ -326,82 +472,110 @@ func SerializeWithHeader(op uint32, seq uint32, resp Serializable) ([]byte, erro
 
 // handleMount handles mount requests
 // old handleMount signature removed; new handler defined below
-func (fs *FileServer) handleMount(mountReq *MountRequest, session *Session) (Serializable, syscall.Errno) {
+func (fs *FileServer) handleMount(mountReq *MountRequest, session *Session) (Serializable, error) {
 	// Check version compatibility
 	if mountReq.Version != ProtocolVersion {
-		return nil, syscall.EPROTONOSUPPORT
+		return nil, fmt.Errorf("protocol version mismatch: client=%d, server=%d: %w", mountReq.Version, ProtocolVersion, syscall.EPROTONOSUPPORT)
 	}
 
+	// Use the path from the request, or fallback to fs.rootPath
+	mountPath := mountReq.Path
+	if mountPath == "" || mountPath[0] != '/' {
+		mountPath = filepath.Join(fs.rootPath, mountPath)
+	}
+	mountPath = filepath.Clean(mountPath)
+	if !strings.HasPrefix(mountPath+"/", fs.rootPath) {
+		return nil, fmt.Errorf("mount path %s is outside root path %s: %w", mountPath, fs.rootPath, syscall.EPERM)
+	}
+	// Trigger lazy mount of zfs snapshot if needed by appending "/." to the path
+	mountPath = mountPath + "/."
+
 	// Get file handle for root directory using NameToHandleAt
-	fh, mountID, err := unix.NameToHandleAt(unix.AT_FDCWD, fs.rootPath, 0)
+	fh, mountID, err := unix.NameToHandleAt(unix.AT_FDCWD, mountPath, 0)
 	if err != nil {
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to get file handle for mount path %s: %w", mountPath, err)
 	}
-	rootFd, err := unix.Open(fs.rootPath, unix.O_RDONLY|unix.O_DIRECTORY, 0)
+	rootFd, err := unix.Open(mountPath, unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if err != nil {
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to open mount path %s: %w", mountPath, err)
 	}
-	stat, err := os.Stat(fs.rootPath)
-	if err != nil {
+
+	// Get stat for the root directory
+	var stat unix.Stat_t
+	if err := unix.Fstat(rootFd, &stat); err != nil {
 		unix.Close(rootFd)
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to stat mount path %s: %w", mountPath, err)
 	}
-	log.Printf("root stat: %s, size %d, isDir %t, ino: %d", stat.Name(), stat.Size(), stat.IsDir(), stat.Sys().(*syscall.Stat_t).Ino)
 
 	// Save mount_id in session
 	session.Init(int32(mountID), rootFd)
+
+	// Create file attributes for the root
+	attr := fs.makeFileAttr(&stat)
 
 	// Build response
 	resp := &MountResponse{
 		Version: ProtocolVersion,
 		Flags:   mountReq.Flags & FlagReadOnly,
 		Fh:      fh,
+		Attr:    attr,
 	}
 
-	return resp, 0
+	return resp, nil
 }
 
 // handleLookup handles lookup requests (includes getattr)
-func (fs *FileServer) handleLookup(lookupReq *LookupRequest, session *Session) (Serializable, syscall.Errno) {
+func (fs *FileServer) handleLookup(lookupReq *LookupRequest, session *Session) (Serializable, error) {
 	// Open parent directory
 	parentFd, err := unix.OpenByHandleAt(session.rootFd, lookupReq.ParentFh, unix.O_DIRECTORY)
 	if err != nil {
-		log.Printf("Failed to open parent directory: %v, %d %d %v", err, lookupReq.ParentFh.Type(), lookupReq.ParentFh.Size(), lookupReq.ParentFh.Bytes())
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to open parent directory (type=%d, size=%d): %w", lookupReq.ParentFh.Type(), lookupReq.ParentFh.Size(), err)
 	}
 	defer unix.Close(parentFd)
 
 	// Get file handle using NameToHandleAt
 	fileHandle, mountID, err := unix.NameToHandleAt(parentFd, lookupReq.Name, 0)
 	if err != nil {
-		log.Printf("Failed to get file handle for %s: %v", lookupReq.Name, err)
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to get file handle for %s: %w", lookupReq.Name, err)
 	}
 
 	// Verify mount_id matches session
 	if int32(mountID) != session.mountID {
-		return nil, ToErrno(syscall.EXDEV)
+		return nil, fmt.Errorf("mount ID mismatch for %s: got=%d, expected=%d: %w", lookupReq.Name, mountID, session.mountID, syscall.EXDEV)
 	}
 
 	// Build response
 	attr, err := fs.makeFileAttrWithPath(parentFd, lookupReq.Name)
 	if err != nil {
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to get file attributes for %s: %w", lookupReq.Name, err)
 	}
 	resp := &LookupResponse{
 		Fh:   fileHandle,
 		Attr: attr,
 	}
 
-	return resp, 0
+	// If it's a directory, enqueue for pre-loading
+	if attr.Mode&syscall.S_IFDIR != 0 {
+		select {
+		case fs.preloadQueue <- PreLoadItem{
+			Fh:      fileHandle,
+			Ino:     attr.Ino,
+			Session: session,
+		}:
+		default:
+			// Queue full, skip pre-loading for this directory
+		}
+	}
+
+	return resp, nil
 }
 
 // handleRead handles read requests
-func (fs *FileServer) handleRead(readReq *ReadRequest, session *Session) (Serializable, syscall.Errno) {
+func (fs *FileServer) handleRead(readReq *ReadRequest, session *Session) (Serializable, error) {
 	// Open file using OpenByHandleAt
 	fd, err := unix.OpenByHandleAt(session.rootFd, readReq.Fh, unix.O_RDONLY)
 	if err != nil {
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to open file (type=%d, size=%d): %w", readReq.Fh.Type(), readReq.Fh.Size(), err)
 	}
 	file := os.NewFile(uintptr(fd), "")
 	defer file.Close()
@@ -410,7 +584,7 @@ func (fs *FileServer) handleRead(readReq *ReadRequest, session *Session) (Serial
 	data := make([]byte, readReq.Size)
 	n, err := file.ReadAt(data, int64(readReq.Offset))
 	if err != nil && err != io.EOF {
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to read at offset=%d, size=%d: %w", readReq.Offset, readReq.Size, err)
 	}
 
 	// Build response
@@ -418,15 +592,15 @@ func (fs *FileServer) handleRead(readReq *ReadRequest, session *Session) (Serial
 		Data: data[:n],
 	}
 
-	return resp, 0
+	return resp, nil
 }
 
 // handleReadDir handles readdir requests
-func (fs *FileServer) handleReadDir(readDirReq *ReadDirRequest, session *Session) (Serializable, syscall.Errno) {
+func (fs *FileServer) handleReadDir(readDirReq *ReadDirRequest, session *Session) (Serializable, error) {
 	// Open directory using OpenByHandleAt
 	fd, err := unix.OpenByHandleAt(session.rootFd, readDirReq.Fh, unix.O_RDONLY|unix.O_DIRECTORY)
 	if err != nil {
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to open directory (type=%d, size=%d): %w", readDirReq.Fh.Type(), readDirReq.Fh.Size(), err)
 	}
 	file := os.NewFile(uintptr(fd), "")
 	file.Seek(0, 0)
@@ -434,7 +608,7 @@ func (fs *FileServer) handleReadDir(readDirReq *ReadDirRequest, session *Session
 
 	entries, err := file.ReadDir(-1)
 	if err != nil {
-		return nil, ToErrno(err)
+		return nil, fmt.Errorf("failed to read directory entries: %w", err)
 	}
 
 	// Apply offset and count
@@ -447,7 +621,6 @@ func (fs *FileServer) handleReadDir(readDirReq *ReadDirRequest, session *Session
 		end = len(entries)
 	}
 
-	log.Printf("ReadDir: %d entries, offset %d, count %d, returned %d entries", len(entries), readDirReq.Offset, readDirReq.Count, len(entries))
 	entries = entries[start:end]
 
 	// Build directory entries with file handles using NameToHandleAt
@@ -478,6 +651,19 @@ func (fs *FileServer) handleReadDir(readDirReq *ReadDirRequest, session *Session
 			Name: entry.Name(),
 			Attr: attr,
 		})
+
+		// If it's a directory, enqueue for pre-loading
+		if attr.Mode&syscall.S_IFDIR != 0 {
+			select {
+			case fs.preloadQueue <- PreLoadItem{
+				Fh:      entryFileHandle,
+				Ino:     attr.Ino,
+				Session: session,
+			}:
+			default:
+				// Queue full, skip pre-loading for this directory
+			}
+		}
 	}
 
 	// Build response
@@ -485,7 +671,31 @@ func (fs *FileServer) handleReadDir(readDirReq *ReadDirRequest, session *Session
 		Entries: dirEntries,
 	}
 
-	return resp, 0
+	return resp, nil
+}
+
+// handleReadlink handles readlink requests
+func (fs *FileServer) handleReadlink(readlinkReq *ReadlinkRequest, session *Session) (Serializable, error) {
+	// Open symlink using OpenByHandleAt with O_PATH|O_NOFOLLOW
+	fd, err := unix.OpenByHandleAt(session.rootFd, readlinkReq.Fh, unix.O_PATH|unix.O_NOFOLLOW)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open symlink (type=%d, size=%d): %w", readlinkReq.Fh.Type(), readlinkReq.Fh.Size(), err)
+	}
+	defer unix.Close(fd)
+
+	// Read symlink target using readlinkat on the /proc/self/fd path
+	buf := make([]byte, 4096)
+	n, err := unix.Readlinkat(fd, "", buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read symlink target: %w", err)
+	}
+
+	// Build response
+	resp := &ReadlinkResponse{
+		Target: string(buf[:n]),
+	}
+
+	return resp, nil
 }
 
 // Helper functions for encoding
@@ -520,32 +730,30 @@ func (fs *FileServer) makeFileAttrWithPath(parentFd int, name string) (FileAttr,
 	}
 	attr := fs.makeFileAttr(&stat)
 
-	fd, err := unix.Openat(parentFd, name, unix.O_RDONLY, 0)
-	if err != nil {
-		return attr, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer unix.Close(fd)
-
-	// Try to read SHA256 from xattr user.veldafs.cache
-	var cacheKey [128]byte
-	sz, err := unix.Fgetxattr(fd, "user.veldafs.cache", cacheKey[:])
-	if err == nil {
-		sha256sum, mtime, size, ok := decodeCacheXattr(string(cacheKey[:sz]))
-		if ok && len(sha256sum) == 64 && size == attr.Size && mtime.Equal(time.Unix(attr.Mtim, int64(attr.MtimNsec))) {
-			// Decode hex string to bytes
-			sha256Bytes, err := hex.DecodeString(sha256sum)
-			if err == nil && len(sha256Bytes) == 32 {
-				copy(attr.Sha256[:], sha256Bytes)
-			} else {
-				log.Printf("Invalid SHA256 hex string for %s: %s", name, sha256sum)
-			}
-		} else {
-			log.Printf("Invalid cache xattr for %s: %s", name, string(cacheKey[:sz]))
+	if stat.Mode&syscall.S_IFMT == syscall.S_IFREG {
+		fd, err := unix.Openat(parentFd, name, unix.O_RDONLY|unix.AT_SYMLINK_NOFOLLOW, 0)
+		if err != nil {
+			return attr, fmt.Errorf("failed to open file for xattr: %w", err)
 		}
-	} else {
-		log.Printf("Failed to read xattr for %s: %v", name, err)
+		defer unix.Close(fd)
+
+		// Try to read SHA256 from xattr user.veldafs.cache
+		var cacheKey [128]byte
+		sz, err := unix.Fgetxattr(fd, "user.veldafs.cache", cacheKey[:])
+		if err == nil {
+			sha256sum, mtime, size, ok := decodeCacheXattr(string(cacheKey[:sz]))
+			if ok && len(sha256sum) == 64 && size == attr.Size && mtime.Equal(time.Unix(attr.Mtim, int64(attr.MtimNsec))) {
+				// Decode hex string to bytes
+				sha256Bytes, err := hex.DecodeString(sha256sum)
+				if err == nil && len(sha256Bytes) == 32 {
+					copy(attr.Sha256[:], sha256Bytes)
+				}
+			} else {
+				log.Printf("Invalid cache xattr for %s: %s, expected: %d:%d:%d", name, string(cacheKey[:sz]), mtime.Unix(), mtime.Nanosecond(), size)
+			}
+		}
+		// If xattr doesn't exist or has wrong size, Sha256 remains all zeros
 	}
-	// If xattr doesn't exist or has wrong size, Sha256 remains all zeros
 
 	return attr, nil
 }
@@ -591,4 +799,15 @@ func decodeCacheXattr(xattrValue string) (sha256sum string, mtime time.Time, siz
 	}
 
 	return sha256sum, mtime, size, true
+}
+
+func toErrno(err error) syscall.Errno {
+	if err == nil {
+		return 0
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno
+	}
+	return syscall.EIO
 }

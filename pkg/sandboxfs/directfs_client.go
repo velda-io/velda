@@ -21,6 +21,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -42,7 +43,6 @@ type Response struct {
 type DirectFSClient struct {
 	serverAddr string
 	conn       net.Conn
-	mountPoint string
 
 	// Connection state
 	mu       sync.Mutex
@@ -51,12 +51,15 @@ type DirectFSClient struct {
 	rootFh   unix.FileHandle
 	rootAttr fileserver.FileAttr
 
+	// Inode tracking for pre-loaded metadata
+	inodeMu sync.RWMutex
+	inodes  map[uint64]*fs.Inode // Map from inode number to FUSE inode
+
 	// Cache from sandboxfs
 	cache *DirectoryCacheManager
 
 	// FUSE state
 	fuseServer *fuse.Server
-	rootNode   *SnapshotNode
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
@@ -68,6 +71,7 @@ func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager) *DirectF
 	return &DirectFSClient{
 		serverAddr: serverAddr,
 		pending:    make(map[uint32]chan Response),
+		inodes:     make(map[uint64]*fs.Inode),
 		cache:      cache,
 		ctx:        ctx,
 		cancel:     cancel,
@@ -75,10 +79,16 @@ func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager) *DirectF
 }
 
 // Connect connects to the file server and performs mount
-func (sc *DirectFSClient) Connect() error {
-	conn, err := net.Dial("tcp", sc.serverAddr)
+func (sc *DirectFSClient) Connect() (*SnapshotNode, error) {
+	parts := strings.SplitN(sc.serverAddr, "@", 2)
+	host := parts[0]
+	var path string
+	if len(parts) > 1 {
+		path = parts[1]
+	}
+	conn, err := net.Dial("tcp", host)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 	sc.conn = conn
 
@@ -90,28 +100,31 @@ func (sc *DirectFSClient) Connect() error {
 	mountReq := fileserver.MountRequest{
 		Version: fileserver.ProtocolVersion,
 		Flags:   fileserver.FlagReadOnly,
+		Path:    path, // Request root path
 	}
 
 	var mountResp fileserver.MountResponse
 	err = sc.SendRequest(&mountReq, &mountResp)
 	if err != nil {
 		sc.conn.Close()
-		return fmt.Errorf("mount failed: %w", err)
+		return nil, fmt.Errorf("mount failed: %w", err)
 	}
+	// Store root file handle and attributes from mount response
 	sc.rootFh = mountResp.Fh
-	return nil
+	sc.rootAttr = mountResp.Attr
+	return &SnapshotNode{
+		client: sc,
+		fh:     sc.rootFh,
+		attr:   sc.rootAttr,
+	}, nil
 }
 
 // Mount mounts the filesystem at the given mount point
 func (sc *DirectFSClient) Mount(mountPoint string) (*VeldaServer, error) {
-	sc.mountPoint = mountPoint
-
-	// Create root node
-	sc.rootNode = &SnapshotNode{
-		client: sc,
-		fh:     sc.rootFh,
+	root, err := sc.Connect()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get root: %w", err)
 	}
-
 	// Set up FUSE options optimized for snapshots
 	timeout := 1 * time.Hour // Long timeout for snapshots
 	opts := &fs.Options{
@@ -126,7 +139,7 @@ func (sc *DirectFSClient) Mount(mountPoint string) (*VeldaServer, error) {
 	}
 
 	// Mount using go-fuse
-	server, err := fs.Mount(mountPoint, sc.rootNode, opts)
+	server, err := fs.Mount(mountPoint, root, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mount: %w", err)
 	}
@@ -136,7 +149,6 @@ func (sc *DirectFSClient) Mount(mountPoint string) (*VeldaServer, error) {
 	return &VeldaServer{
 		Server: server,
 		Cache:  sc.cache,
-		Root:   nil, // Not using CachedLoopbackNode for snapshots
 	}, nil
 }
 
@@ -215,6 +227,8 @@ func (sc *DirectFSClient) SendRequest(req fileserver.Serializable, res fileserve
 		opCode = fileserver.OpRead
 	case *fileserver.ReadDirRequest:
 		opCode = fileserver.OpReadDir
+	case *fileserver.ReadlinkRequest:
+		opCode = fileserver.OpReadlink
 	default:
 		return fmt.Errorf("unknown request type")
 	}
@@ -272,6 +286,13 @@ func (sc *DirectFSClient) readResponses() {
 			}
 		}
 
+		// Check if this is a DirDataNotification (opcode indicates notification)
+		if header.Opcode == fileserver.OpDirDataNotification {
+			// Handle DirDataNotification asynchronously
+			go sc.handleDirDataNotification(data)
+			continue
+		}
+
 		// Dispatch response
 		sc.mu.Lock()
 		respChan, ok := sc.pending[header.Seq]
@@ -284,6 +305,64 @@ func (sc *DirectFSClient) readResponses() {
 			respChan <- Response{errno: syscall.Errno(header.Opcode), data: data}
 		}
 	}
+}
+
+// handleDirDataNotification processes DirDataNotification from the server
+func (sc *DirectFSClient) handleDirDataNotification(data []byte) {
+	// Deserialize notification
+	var notification fileserver.DirDataNotification
+	if err := notification.Deserialize(bytes.NewReader(data)); err != nil {
+		log.Printf("Failed to deserialize DirDataNotification: %v", err)
+		return
+	}
+
+	// Find the inode for this directory
+	sc.inodeMu.RLock()
+	parentInode, exists := sc.inodes[notification.Ino]
+	sc.inodeMu.RUnlock()
+
+	if !exists {
+		// Inode not in cache yet, skip pre-loading
+		log.Printf("DirDataNotification for unknown inode %d, skipping", notification.Ino)
+		return
+	}
+
+	// Get the SnapshotNode from the inode
+	parentNode, ok := parentInode.Operations().(*SnapshotNode)
+	if !ok {
+		log.Printf("Failed to get SnapshotNode from inode %d", notification.Ino)
+		return
+	}
+
+	// Add all child inodes to the FUSE inode tree
+	ctx := context.Background()
+	for _, entry := range notification.Entries {
+		// Check if child already exists
+		existingChild := parentInode.GetChild(entry.Name)
+		if existingChild != nil {
+			// Child already exists, skip
+			continue
+		}
+
+		// Create child node
+		childNode := &SnapshotNode{
+			client: sc,
+			fh:     entry.Fh,
+			attr:   entry.Attr,
+		}
+
+		// Create persistent inode
+		stable := fs.StableAttr{
+			Mode: entry.Attr.Mode,
+			Ino:  entry.Attr.Ino,
+		}
+		childInode := parentNode.NewPersistentInode(ctx, childNode, stable)
+
+		// Add to parent's children (this makes it visible to readdir)
+		parentInode.AddChild(entry.Name, childInode, true)
+	}
+
+	log.Printf("Pre-loaded %d entries for inode %d", len(notification.Entries), notification.Ino)
 }
 
 // SnapshotNode implements fs.InodeEmbedder for persistent inodes
@@ -306,6 +385,7 @@ var _ fs.NodeMkdirer = (*SnapshotNode)(nil)
 var _ fs.NodeUnlinker = (*SnapshotNode)(nil)
 var _ fs.NodeRmdirer = (*SnapshotNode)(nil)
 var _ fs.NodeRenamer = (*SnapshotNode)(nil)
+var _ fs.NodeReadlinker = (*SnapshotNode)(nil)
 
 // Getattr returns file attributes
 func (n *SnapshotNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
@@ -462,6 +542,22 @@ func (n *SnapshotNode) Rename(ctx context.Context, name string, newParent fs.Ino
 	return syscall.EROFS
 }
 
+// Readlink reads the target of a symlink
+func (n *SnapshotNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	// Send readlink request
+	readlinkReq := fileserver.ReadlinkRequest{
+		Fh: n.fh,
+	}
+
+	readlinkResp := fileserver.ReadlinkResponse{}
+	err := n.client.SendRequest(&readlinkReq, &readlinkResp)
+	if err != nil {
+		return nil, fs.ToErrno(err)
+	}
+
+	return []byte(readlinkResp.Target), fs.OK
+}
+
 // SnapshotFile implements fs.FileHandle for reading files
 type SnapshotFile struct {
 	baseFile  *fs.LoopbackFile // Embedded for passthrough mode when cached
@@ -552,8 +648,6 @@ func (f *SnapshotFile) Read(ctx context.Context, dest []byte, off int64) (fuse.R
 				GlobalCacheMetrics.CacheSaved.Inc()
 			}
 		}()
-	} else {
-		log.Printf("Not caching file with SHA256 %s (size: %d, read size: %d)\n", sha256Hex, f.attr.Size, len(readResp.Data))
 	}
 
 	return fuse.ReadResultData(readResp.Data), fs.OK

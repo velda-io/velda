@@ -33,11 +33,6 @@ func TestSnapshotMode(t *testing.T) {
 	}
 	defer server.Unmount()
 
-	// Verify snapshot mode is enabled
-	if !server.Root.mountCtx.SnapshotMode {
-		t.Fatal("Expected SnapshotMode to be true")
-	}
-
 	// Read the file through the mount
 	mountedFile := filepath.Join(mountDir, "test.txt")
 	readContent, err := os.ReadFile(mountedFile)

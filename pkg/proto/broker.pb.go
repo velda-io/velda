@@ -701,12 +701,15 @@ type SessionRequest struct {
 	Checkpointed bool `protobuf:"varint,16,opt,name=checkpointed,proto3" json:"checkpointed,omitempty"`
 	// Additional information for the agent to execute the session.
 	AgentSessionInfo *AgentSessionInfo `protobuf:"bytes,17,opt,name=agent_session_info,json=agentSessionInfo,proto3" json:"agent_session_info,omitempty"`
-	// For batch workload: The writable directories for the job.
-	// Default to ["/"] which means the entire filesystem is writable.
-	// If not "/", a snapshot will be created for the job.
+	// The writable directories for the job.
+	// If unset, it will be read-only if snapshot_name is set, otherwise it will
+	// be read-write for the entire filesystem.
+	// If set, the session will be created with a snapshot of the current disk,
+	// and the specified directories will be writable and sync with the latest.
 	WritableDirs []string `protobuf:"bytes,20,rep,name=writable_dirs,json=writableDirs,proto3" json:"writable_dirs,omitempty"`
-	// For batch workload: The snapshot name to use.
-	// This is set by the broker when creating a snapshot for the job.
+	// The snapshot name to use.
+	// If not set, the snapshot will be created with a default name if
+	// writable_dirs is set.
 	SnapshotName  string `protobuf:"bytes,21,opt,name=snapshot_name,json=snapshotName,proto3" json:"snapshot_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

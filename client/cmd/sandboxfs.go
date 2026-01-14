@@ -16,6 +16,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -44,7 +45,7 @@ var sandboxfsCmd = &cobra.Command{
 		base := args[0]
 		target := args[1]
 		cacheDir, _ := cmd.Flags().GetString("cache-dir")
-		snapshotMode, _ := cmd.Flags().GetBool("snapshot")
+		mode, _ := cmd.Flags().GetString("mode")
 
 		var mountOpts []sandboxfs.MountOptions
 		mountOpts = append(mountOpts, func(opt *sandboxfs.VeldaMountOptions) {
@@ -52,13 +53,18 @@ var sandboxfsCmd = &cobra.Command{
 			opt.FuseOptions.Debug = clientlib.Debug
 		})
 
-		if snapshotMode {
+		switch mode {
+		case "snapshot":
 			mountOpts = append(mountOpts, sandboxfs.WithSnapshotMode())
-		}
-
-		noCacheMode, _ := cmd.Flags().GetBool("nocache")
-		if noCacheMode {
+		case "nocache":
 			mountOpts = append(mountOpts, sandboxfs.WithNoCacheMode())
+		case "directfs-snapshot":
+			mountOpts = append(mountOpts, sandboxfs.WithDirectFSMode())
+		case "directfs":
+		case "standard":
+			// No additional options
+		default:
+			cobra.CheckErr(fmt.Errorf("invalid mode: %s", mode))
 		}
 
 		server, err := sandboxfs.MountWorkDir(base, target, cacheDir, mountOpts...)
@@ -85,6 +91,5 @@ func init() {
 	sandboxfsCmd.Flags().Int("readyfd", 0, "File descriptor to signal when the mount is ready")
 	sandboxfsCmd.Flags().String("name", "", "Name of the mount")
 	sandboxfsCmd.Flags().String("cache-dir", "/tmp/velda_cas_cache", "Directory for caching")
-	sandboxfsCmd.Flags().Bool("snapshot", false, "Enable snapshot mode for maximum IO performance (aggressive caching)")
-	sandboxfsCmd.Flags().Bool("nocache", false, "Enable no-cache mode to disable caching")
+	sandboxfsCmd.Flags().String("mode", "snapshot", "Mount mode: standard, snapshot, nocache, directfs or directfs-snapshot")
 }

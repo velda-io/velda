@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -92,6 +92,7 @@ func TestMountRequestSerialization(t *testing.T) {
 			req: MountRequest{
 				Version: ProtocolVersion,
 				Flags:   FlagReadOnly,
+				Path:    "/data",
 			},
 		},
 		{
@@ -99,6 +100,7 @@ func TestMountRequestSerialization(t *testing.T) {
 			req: MountRequest{
 				Version: ProtocolVersion,
 				Flags:   FlagNone,
+				Path:    "/",
 			},
 		},
 	}
@@ -121,7 +123,7 @@ func TestMountRequestSerialization(t *testing.T) {
 			}
 
 			// Compare (skip header comparison)
-			if deserialized.Version != tt.req.Version || deserialized.Flags != tt.req.Flags {
+			if deserialized.Version != tt.req.Version || deserialized.Flags != tt.req.Flags || deserialized.Path != tt.req.Path {
 				t.Errorf("Deserialized request mismatch:\nExpected: %+v\nGot:      %+v", tt.req, deserialized)
 			}
 		})
@@ -133,6 +135,23 @@ func TestMountResponseSerialization(t *testing.T) {
 	// Create a file handle for testing
 	fh := unix.NewFileHandle(1, []byte{0x01, 0x02, 0x03, 0x04})
 
+	// Create test file attributes
+	testAttr := FileAttr{
+		Dev:      123,
+		Ino:      456,
+		Nlink:    1,
+		Mode:     0755,
+		Uid:      1000,
+		Gid:      1000,
+		Size:     4096,
+		Blksize:  4096,
+		Blocks:   8,
+		Mtim:     1234567890,
+		Ctim:     1234567890,
+		MtimNsec: 0,
+		CtimNsec: 0,
+	}
+
 	tests := []struct {
 		name string
 		resp MountResponse
@@ -143,6 +162,7 @@ func TestMountResponseSerialization(t *testing.T) {
 				Version: ProtocolVersion,
 				Flags:   FlagReadOnly,
 				Fh:      fh,
+				Attr:    testAttr,
 			},
 		},
 		{
@@ -151,6 +171,7 @@ func TestMountResponseSerialization(t *testing.T) {
 				Version: ProtocolVersion,
 				Flags:   FlagNone,
 				Fh:      unix.NewFileHandle(0, []byte{}),
+				Attr:    testAttr,
 			},
 		},
 	}
@@ -179,6 +200,9 @@ func TestMountResponseSerialization(t *testing.T) {
 			}
 			if !bytes.Equal(deserialized.Fh.Bytes(), tt.resp.Fh.Bytes()) || deserialized.Fh.Type() != tt.resp.Fh.Type() {
 				t.Errorf("FileHandle mismatch: expected %v, got %v", tt.resp.Fh, deserialized.Fh)
+			}
+			if deserialized.Attr != tt.resp.Attr {
+				t.Errorf("Attr mismatch: expected %+v, got %+v", tt.resp.Attr, deserialized.Attr)
 			}
 		})
 	}
@@ -621,12 +645,11 @@ func TestFileHandleEncoding(t *testing.T) {
 // TestSerializeWithHeader tests the SerializeWithHeader function
 func TestSerializeWithHeader(t *testing.T) {
 	tests := []struct {
-		name     string
-		op       uint32
-		flags    uint32
-		seq      uint32
-		resp     Serializable
-		wantSize int
+		name  string
+		op    uint32
+		flags uint32
+		seq   uint32
+		resp  Serializable
 	}{
 		{
 			name: "ReadResponse",
@@ -635,7 +658,6 @@ func TestSerializeWithHeader(t *testing.T) {
 			resp: &ReadResponse{
 				Data: []byte("test data"),
 			},
-			wantSize: HeaderSize + 4 + 9, // header + count(4) + data(9)
 		},
 		{
 			name: "Empty ReadResponse",
@@ -644,7 +666,6 @@ func TestSerializeWithHeader(t *testing.T) {
 			resp: &ReadResponse{
 				Data: []byte{},
 			},
-			wantSize: HeaderSize + 4, // header + count(4)
 		},
 	}
 
@@ -654,11 +675,6 @@ func TestSerializeWithHeader(t *testing.T) {
 			data, err := SerializeWithHeader(0, tt.seq, tt.resp)
 			if err != nil {
 				t.Fatalf("SerializeWithHeader failed: %v", err)
-			}
-
-			// Check size
-			if len(data) != tt.wantSize {
-				t.Errorf("Size mismatch: expected %d, got %d", tt.wantSize, len(data))
 			}
 
 			// Deserialize header
@@ -672,8 +688,8 @@ func TestSerializeWithHeader(t *testing.T) {
 			if header.Opcode != 0 {
 				t.Errorf("Header Opcode should be 0 for response, got %d", header.Opcode)
 			}
-			if header.Size != uint32(tt.wantSize) {
-				t.Errorf("Header Size mismatch: expected %d, got %d", tt.wantSize, header.Size)
+			if int(header.Size) != len(data) {
+				t.Errorf("Header Size mismatch: expected %d, got %d", len(data), header.Size)
 			}
 			if header.Seq != tt.seq {
 				t.Errorf("Header Seq mismatch: expected %d, got %d", tt.seq, header.Seq)
@@ -705,6 +721,87 @@ func TestInvalidDeserialization(t *testing.T) {
 		_, err := decodeFileHandle(bytes.NewBuffer(data))
 		if err == nil {
 			t.Error("Expected error for invalid file handle size, got nil")
+		}
+	})
+}
+
+// TestReadlinkSerialization tests ReadlinkRequest and ReadlinkResponse serialization/deserialization
+func TestReadlinkSerialization(t *testing.T) {
+	t.Run("ReadlinkRequest", func(t *testing.T) {
+		fh := unix.NewFileHandle(1, []byte{0x01, 0x02, 0x03, 0x04})
+		req := ReadlinkRequest{
+			Fh: fh,
+		}
+
+		var buf bytes.Buffer
+
+		// Serialize
+		if err := req.Serialize(&buf); err != nil {
+			t.Fatalf("Serialize failed: %v", err)
+		}
+
+		// Deserialize
+		var deserialized ReadlinkRequest
+		if err := deserialized.Deserialize(&buf); err != nil {
+			t.Fatalf("Deserialize failed: %v", err)
+		}
+
+		// Compare file handles
+		if deserialized.Fh.Type() != req.Fh.Type() {
+			t.Errorf("Fh Type mismatch: expected %d, got %d", req.Fh.Type(), deserialized.Fh.Type())
+		}
+		if !bytes.Equal(deserialized.Fh.Bytes(), req.Fh.Bytes()) {
+			t.Errorf("Fh Bytes mismatch: expected %v, got %v", req.Fh.Bytes(), deserialized.Fh.Bytes())
+		}
+	})
+
+	t.Run("ReadlinkResponse", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			target string
+		}{
+			{
+				name:   "simple path",
+				target: "/tmp/target",
+			},
+			{
+				name:   "relative path",
+				target: "../target",
+			},
+			{
+				name:   "absolute path",
+				target: "/usr/bin/target",
+			},
+			{
+				name:   "empty target",
+				target: "",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				resp := ReadlinkResponse{
+					Target: tt.target,
+				}
+
+				var buf bytes.Buffer
+
+				// Serialize
+				if err := resp.Serialize(&buf); err != nil {
+					t.Fatalf("Serialize failed: %v", err)
+				}
+
+				// Deserialize
+				var deserialized ReadlinkResponse
+				if err := deserialized.Deserialize(&buf); err != nil {
+					t.Fatalf("Deserialize failed: %v", err)
+				}
+
+				// Compare
+				if deserialized.Target != resp.Target {
+					t.Errorf("Target mismatch: expected %q, got %q", resp.Target, deserialized.Target)
+				}
+			})
 		}
 	})
 }
