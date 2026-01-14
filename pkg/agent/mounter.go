@@ -75,23 +75,33 @@ func (m *SimpleMounter) mountInternal(ctx context.Context, session *proto.Sessio
 	useCAS := m.sandboxConfig.GetDiskSource().CasConfig != nil
 
 	if useCAS {
+		useDirectFS := m.sandboxConfig.GetDiskSource().GetCasConfig().GetUseDirectProtocol()
+
 		// Mount with veldafs wrapper
 		dataDir := path.Join(path.Dir(targetDir), path.Base(targetDir)+"_data")
-		if err := os.MkdirAll(dataDir, 0755); err != nil {
-			return nil, fmt.Errorf("mkdir %s: %w", dataDir, err)
-		}
 
 		var baseCleanup func()
 		var mountErr error
 
-		if mType == mountTypeSnapshot {
-			baseCleanup, mountErr = m.mountDirect(ctx, session, dataDir, true, snapshotName)
+		// Skip base mount if using DirectFS for snapshots
+		if useDirectFS && mType == mountTypeSnapshot {
+			// DirectFS will directly mount from the server, no need for base mount
+			baseCleanup = nil
+			mountErr = nil
+			dataDir = fmt.Sprintf("%s:7655@%s/.zfs/snapshot/%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsPath, snapshotName)
 		} else {
-			baseCleanup, mountErr = m.mountDirect(ctx, session, dataDir, false, "")
-		}
+			if err := os.MkdirAll(dataDir, 0755); err != nil {
+				return nil, fmt.Errorf("mkdir %s: %w", dataDir, err)
+			}
+			if mType == mountTypeSnapshot {
+				baseCleanup, mountErr = m.mountDirect(ctx, session, dataDir, true, snapshotName)
+			} else {
+				baseCleanup, mountErr = m.mountDirect(ctx, session, dataDir, false, "")
+			}
 
-		if mountErr != nil {
-			return nil, mountErr
+			if mountErr != nil {
+				return nil, mountErr
+			}
 		}
 
 		// Mount CAS driver on top
@@ -218,10 +228,15 @@ func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, works
 	if m.sandboxConfig.GetDiskSource().GetCasConfig().GetCasCacheDir() != "" {
 		args = append(args, "--cache-dir", m.sandboxConfig.GetDiskSource().GetCasConfig().GetCasCacheDir())
 		if mode == mountTypeSnapshot {
-			args = append(args, "--snapshot")
+			if m.sandboxConfig.GetDiskSource().GetCasConfig().GetUseDirectProtocol() {
+				// Use DirectFS mode with NFS server address
+				args = append(args, "--mode", "directfs-snapshot")
+			} else {
+				args = append(args, "--mode", "snapshot")
+			}
 		}
 	} else {
-		args = append(args, "--nocache")
+		args = append(args, "--mode", "nocache")
 	}
 	args = append(args, disk, workspaceDir)
 

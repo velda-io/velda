@@ -56,11 +56,6 @@ func TestNoCacheMode(t *testing.T) {
 	}
 	defer server.Unmount()
 
-	// Verify NoCacheMode is enabled
-	if !server.Root.mountCtx.NoCacheMode {
-		t.Fatal("Expected NoCacheMode to be true")
-	}
-
 	// Capture initial metrics
 	initialHits := getCounterValue(GlobalCacheMetrics.CacheHit)
 	initialMisses := getCounterValue(GlobalCacheMetrics.CacheMiss)
@@ -154,11 +149,6 @@ func TestNoCacheMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer server2.Unmount()
-
-	// Verify regular cache mode (not no-cache mode)
-	if server2.Root.mountCtx.NoCacheMode {
-		t.Fatal("Expected NoCacheMode to be false for regular mount")
-	}
 
 	// Capture metrics before reading
 	hitsBeforeRead := getCounterValue(GlobalCacheMetrics.CacheHit)

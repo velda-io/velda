@@ -30,11 +30,12 @@ import (
 )
 
 type LocalZfsRunner struct {
-	zfsRoot   string
-	suiteName string
-	configDir string
-	apiServer *exec.Cmd
-	veldaBin  string
+	zfsRoot    string
+	suiteName  string
+	configDir  string
+	apiServer  *exec.Cmd
+	fileServer *exec.Cmd
+	veldaBin   string
 }
 
 func NewLocalRunner(zfsRoot string) *LocalZfsRunner {
@@ -80,6 +81,7 @@ sandbox_config:
       mount_options: nolock,acregmax=5,acregmin=1,acdirmax=5,acdirmin=1
     cas_config:
       cas_cache_dir: /tmp/velda_cas_cache
+      use_direct_protocol: true
 daemon_config:
 pool: shell
 `)
@@ -190,9 +192,20 @@ agent_pools:
 		t.Fatalf("Failed to start API server: %v", err)
 	}
 
+	r.fileServer = exec.Command("sudo", veldaBin, "fileserver", "--addr", ":7655", "--root", fmt.Sprintf("/%s", suiteName))
+	r.fileServer.Stdout = os.Stdout
+	r.fileServer.Stderr = os.Stderr
+
+	if err := r.fileServer.Start(); err != nil {
+		t.Fatalf("Failed to start file server: %v", err)
+	}
+
 	t.Cleanup(func() {
 		if err := r.apiServer.Process.Kill(); err != nil {
 			t.Errorf("Failed to kill API server: %v", err)
+		}
+		if err := exec.Command("sudo", "kill", fmt.Sprintf("%d", r.fileServer.Process.Pid)).Run(); err != nil {
+			t.Errorf("Failed to kill file server: %v", err)
 		}
 		// Clean up all remaining containers
 		if err := exec.Command("sh", "-c", "docker ps -a | grep agent-test | awk '{print $1}'  | xargs docker rm -f || true").Run(); err != nil {
