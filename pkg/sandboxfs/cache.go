@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -162,7 +163,7 @@ type dirCacheWriter struct {
 	cacheDir string
 	mu       *sync.RWMutex
 	hasher   io.Writer
-	written  int64
+	written  atomic.Int64
 	closed   bool
 }
 
@@ -179,7 +180,9 @@ func (w *dirCacheWriter) Write(p []byte) (n int, err error) {
 
 	// Also write to hasher
 	w.hasher.Write(p[:n])
-	w.written += int64(n)
+
+	// Update written counter atomically
+	w.written.Add(int64(n))
 
 	return n, nil
 }
@@ -202,12 +205,6 @@ func (w *dirCacheWriter) Commit() (string, error) {
 
 	w.closed = true
 
-	// Sync the file
-	if err := w.file.Sync(); err != nil {
-		w.file.Close()
-		return "", err
-	}
-
 	// Get the SHA256 hash
 	hashBytes := w.hasher.(interface{ Sum([]byte) []byte }).Sum(nil)
 	sha256sum := hex.EncodeToString(hashBytes)
@@ -221,9 +218,6 @@ func (w *dirCacheWriter) Commit() (string, error) {
 	prefix := sha256sum[:2]
 	targetDir := filepath.Join(w.cacheDir, prefix)
 	targetPath := filepath.Join(targetDir, sha256sum)
-
-	w.mu.Lock()
-	defer w.mu.Unlock()
 
 	// Create target directory
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -261,4 +255,24 @@ func (w *dirCacheWriter) Abort() error {
 	w.closed = true
 	w.file.Close()
 	return os.Remove(w.file.Name())
+}
+
+// ReadAt reads len(p) bytes from the cached file at offset off
+// Returns an error if the requested range hasn't been cached yet
+func (w *dirCacheWriter) ReadAt(p []byte, off int64) (n int, err error) {
+	if w.closed {
+		return 0, syscall.EBADF
+	}
+
+	// Check if the requested range has been written
+	currentWritten := w.written.Load()
+
+	// If the requested range extends beyond what's been written, return error
+	// This ensures we don't return partial data for chunks that haven't been fetched yet
+	if off+int64(len(p)) > currentWritten {
+		return 0, io.ErrUnexpectedEOF
+	}
+
+	// Read from the file using ReadAt (which doesn't modify file offset)
+	return w.file.ReadAt(p, off)
 }

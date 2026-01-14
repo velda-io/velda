@@ -687,8 +687,9 @@ func (n *SnapshotNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, u
 	// Check if file is in cache
 	var zeroHash [32]byte
 	sha256Hex := fmt.Sprintf("%x", n.attr.Sha256[:])
+	cacheKeyExists := n.attr.Sha256 != zeroHash
 
-	if n.attr.Sha256 != zeroHash {
+	if cacheKeyExists {
 		cachedPath, err := n.client.cache.Lookup(sha256Hex)
 		if err == nil && cachedPath != "" {
 			// Open cached file using passthrough mode
@@ -706,15 +707,21 @@ func (n *SnapshotNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, u
 				}, fuse.FOPEN_KEEP_CACHE, fs.OK
 			}
 		}
+		GlobalCacheMetrics.CacheMiss.Inc()
+	} else {
+		GlobalCacheMetrics.CacheNotExist.Inc()
 	}
 
-	// Create file handle for remote access
+	// Cache miss or no cache key - create file handle and start eager fetch
 	file := &SnapshotFile{
 		client: n.client,
 		fh:     n.fh,
 		attr:   n.attr,
 		cache:  n.client.cache,
 	}
+
+	// Start eager fetch in background
+	go file.eagerFetchAndCache(cacheKeyExists, sha256Hex)
 
 	return file, fuse.FOPEN_KEEP_CACHE, fs.OK
 }
@@ -772,6 +779,10 @@ type SnapshotFile struct {
 	fh                unix.FileHandle
 	attr              fileserver.FileAttr
 	cache             *DirectoryCacheManager
+
+	// Eager fetch state
+	fetchMu     sync.Mutex
+	cacheWriter CacheWriter // Active cache writer for pread access during fetch
 }
 
 // Ensure SnapshotFile implements required interfaces
@@ -782,37 +793,135 @@ var _ fs.FileFlusher = (*SnapshotFile)(nil)
 var _ fs.FileSetattrer = (*SnapshotFile)(nil)
 var _ fs.FileReleaser = (*SnapshotFile)(nil)
 
+// eagerFetchAndCache fetches the entire file from server and caches it using 1MB buffered chunks
+func (f *SnapshotFile) eagerFetchAndCache(hasExistingKey bool, expectedSHA string) {
+	f.fetchMu.Lock()
+	if f.cacheWriter != nil {
+		f.fetchMu.Unlock()
+		return
+	}
+
+	// Create cache writer
+	writer, err := f.cache.CreateTemp()
+	if err != nil {
+		f.fetchMu.Unlock()
+		return
+	}
+
+	// Store writer for pread access
+	f.cacheWriter = writer
+	f.fetchMu.Unlock()
+
+	abort := func() {
+		writer.Abort()
+		f.fetchMu.Lock()
+		f.cacheWriter = nil
+		f.fetchMu.Unlock()
+	}
+
+	const chunkSize = 1024 * 1024 // 1MB chunks
+	var offset uint64
+
+	for offset < uint64(f.attr.Size) {
+		// Calculate read size for this chunk
+		remaining := uint64(f.attr.Size) - offset
+		readSize := uint32(chunkSize)
+		if remaining < uint64(chunkSize) {
+			readSize = uint32(remaining)
+		}
+
+		// Read chunk from server
+		readReq := fileserver.ReadRequest{
+			Fh:     f.fh,
+			Offset: offset,
+			Size:   readSize,
+		}
+
+		readResp := fileserver.ReadResponse{}
+		err := f.client.SendRequest(&readReq, &readResp)
+		if err != nil {
+			abort()
+			return
+		}
+
+		// Write chunk to cache
+		if _, err := writer.Write(readResp.Data); err != nil {
+			abort()
+			return
+		}
+
+		offset += uint64(len(readResp.Data))
+
+		// Check if we got less data than expected (EOF)
+		if len(readResp.Data) < int(readSize) {
+			break
+		}
+	}
+
+	f.fetchMu.Lock()
+	defer f.fetchMu.Unlock()
+	f.cacheWriter = nil // Clear writer reference
+
+	// Commit the cache and get computed SHA256
+	computedSHA, err := writer.Commit()
+	if err != nil {
+		return
+	}
+
+	// Verify hash if we had an existing key
+	if hasExistingKey && computedSHA != expectedSHA {
+		log.Printf("Warning: computed hash %s doesn't match expected %s", computedSHA, expectedSHA)
+		// Don't update fetch state on hash mismatch
+		return
+	}
+
+	// Look up cached file path
+	cachedPath, err := f.cache.Lookup(computedSHA)
+	if err != nil || cachedPath == "" {
+		return
+	}
+
+	// Open cached file for future reads
+	fd, err := unix.Open(cachedPath, unix.O_RDONLY, 0)
+	if err != nil {
+		return
+	}
+
+	// Update fetch state and set cachedBackingFile
+	f.cachedBackingFile = fs.NewLoopbackFile(fd).(*fs.LoopbackFile)
+
+	if GlobalCacheMetrics != nil {
+		GlobalCacheMetrics.CacheSaved.Inc()
+	}
+}
+
 // Read reads data from the file with caching
 func (f *SnapshotFile) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	// Check if eager fetch is in progress or completed
+	f.fetchMu.Lock()
 	// If file is from cache, use passthrough mode
-	if f.cachedBackingFile != nil {
-		return f.cachedBackingFile.Read(ctx, dest, off)
-	}
+	cachedFile := f.cachedBackingFile
+	writer := f.cacheWriter
 
-	// Check cache first if SHA256 is available
-	var zeroHash [32]byte
-	sha256Hex := fmt.Sprintf("%x", f.attr.Sha256[:])
-
-	if f.attr.Sha256 != zeroHash {
-		// Try to get from cache
-		cachedPath, err := f.cache.Lookup(sha256Hex)
-		if err == nil && cachedPath != "" {
-			// Read from cache
-			cachedFile, err := unix.Open(cachedPath, unix.O_RDONLY, 0)
-			if err == nil {
-				defer unix.Close(cachedFile)
-
-				buf := make([]byte, len(dest))
-				n, err := unix.Pread(cachedFile, buf, off)
-				if err == nil || err == io.EOF {
-					GlobalCacheMetrics.CacheHit.Inc()
-					return fuse.ReadResultData(buf[:n]), fs.OK
-				}
+	if writer != nil {
+		// Try to read from in-progress cache using ReadAt if available
+		// This access needs lock to prevent concurrent commit of the writer.
+		if readerAt, ok := writer.(io.ReaderAt); ok {
+			n, err := readerAt.ReadAt(dest, off)
+			if err == nil && n == len(dest) {
+				f.fetchMu.Unlock()
+				// Successfully read from in-progress cache
+				return fuse.ReadResultData(dest[:n]), fs.OK
 			}
+			// If ReadAt failed (range not yet cached), fall through to network fetch
 		}
-		GlobalCacheMetrics.CacheMiss.Inc()
 	}
 
+	f.fetchMu.Unlock()
+
+	if cachedFile != nil {
+		return cachedFile.Read(ctx, dest, off)
+	}
 	// Send read request to server
 	readReq := fileserver.ReadRequest{
 		Fh:     f.fh,
@@ -824,35 +933,6 @@ func (f *SnapshotFile) Read(ctx context.Context, dest []byte, off int64) (fuse.R
 	err := f.client.SendRequest(&readReq, &readResp)
 	if err != nil {
 		return nil, fs.ToErrno(err)
-	}
-	// Cache the full file if this is a complete read and SHA256 is available
-	if f.attr.Sha256 != zeroHash && off == 0 && int64(len(readResp.Data)) == f.attr.Size {
-		log.Printf("Caching with SHA256 %s\n", sha256Hex)
-		// Write to cache asynchronously
-		go func() {
-			writer, err := f.cache.CreateTemp()
-			if err != nil {
-				return
-			}
-
-			if _, err := writer.Write(readResp.Data); err != nil {
-				writer.Abort()
-				return
-			}
-
-			computedHash, err := writer.Commit()
-			if err != nil {
-				writer.Abort()
-				return
-			}
-
-			// Verify hash matches
-			if computedHash != sha256Hex {
-				fmt.Printf("Warning: computed hash %s doesn't match expected %s\n", computedHash, sha256Hex)
-			} else {
-				GlobalCacheMetrics.CacheSaved.Inc()
-			}
-		}()
 	}
 
 	return fuse.ReadResultData(readResp.Data), fs.OK
