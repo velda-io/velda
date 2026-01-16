@@ -36,7 +36,7 @@ import (
 
 const (
 	// Number of background workers for prefetching
-	prefetchWorkers = 200
+	prefetchWorkers = 20
 )
 
 type Response struct {
@@ -109,6 +109,8 @@ func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager) *DirectF
 
 // Connect connects to the file server and performs mount
 func (sc *DirectFSClient) Connect() (*SnapshotNode, error) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 	mountResp, err := sc.connect()
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
@@ -167,10 +169,14 @@ func (sc *DirectFSClient) Unmount() error {
 // Stop stops the client
 func (sc *DirectFSClient) Stop() {
 	sc.cancel()
-	if sc.conn != nil {
-		sc.conn.Close()
-	}
-	close(sc.prefetchQueue)
+	func() {
+		sc.mu.Lock()
+		defer sc.mu.Unlock()
+		if sc.conn != nil {
+			sc.conn.Close()
+			sc.conn = nil
+		}
+	}()
 	sc.workersWg.Wait()
 	sc.wg.Wait()
 }
@@ -214,7 +220,8 @@ func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
 
 	// Start new response reader
 	sc.wg.Add(1)
-	go sc.readResponses()
+	sc.pending = make(map[uint32]chan Response)
+	go sc.readResponses(conn, sc.pending)
 
 	// Re-send mount request
 	mountReq := fileserver.MountRequest{
@@ -224,25 +231,51 @@ func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
 	}
 
 	var mountResp fileserver.MountResponse
-	err = sc.SendRequest(&mountReq, &mountResp)
+	seq := sc.nextSeq()
+	data, err := fileserver.SerializeWithHeader(fileserver.OpMount, seq, &mountReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize request: %w", err)
+	}
+	// Create response channel
+	respChan := make(chan Response, 1)
+	sc.pending[seq] = respChan
+
+	// Send request with connection failure detection
+	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	_, err = conn.Write(data)
+
 	if err != nil {
 		sc.conn.Close()
 		return nil, fmt.Errorf("re-mount failed: %w", err)
 	}
+	sc.mu.Unlock()
+	resq := <-respChan
+	delete(sc.pending, seq)
+	sc.mu.Lock()
+	if resq.errno != 0 {
+		sc.conn.Close()
+		sc.conn = nil
+		return nil, fmt.Errorf("mount failed with errno: %w", syscall.Errno(resq.errno))
+	}
+	if err = mountResp.Deserialize(bytes.NewReader(resq.data)); err != nil {
+		sc.conn.Close()
+		sc.conn = nil
+		return nil, fmt.Errorf("failed to deserialize mount response: %w", err)
+	}
+
 	return &mountResp, nil
 }
 
 // reconnect attempts to re-establish the connection and re-mount
 func (sc *DirectFSClient) reconnect() error {
-	sc.reconnectMu.Lock()
-	defer sc.reconnectMu.Unlock()
+	if sc.conn != nil {
+		return nil
+	}
 
 	log.Printf("Attempting to reconnect to %s", sc.serverAddr)
 
 	// Close old connection if exists
-	if sc.conn != nil {
-		sc.conn.Close()
-	}
+	sc.conn.Close()
 
 	mountResp, err := sc.connect()
 	if err != nil {
@@ -262,11 +295,16 @@ func (sc *DirectFSClient) reconnect() error {
 func (sc *DirectFSClient) prefetchWorker() {
 	defer sc.workersWg.Done()
 
-	for job := range sc.prefetchQueue {
-		if job == nil {
+	for {
+		select {
+		case <-sc.ctx.Done():
 			return
+		case job := <-sc.prefetchQueue:
+			if job == nil {
+				return
+			}
+			sc.processPrefetchJob(job)
 		}
-		sc.processPrefetchJob(job)
 	}
 }
 
@@ -336,25 +374,38 @@ func (sc *DirectFSClient) nextSeq() uint32 {
 }
 
 // sendRequestWithData sends pre-serialized data and waits for response
-func (sc *DirectFSClient) sendRequestWithData(data []byte, seq uint32, res fileserver.Serializable) error {
+func (sc *DirectFSClient) sendRequestWithData(opCode uint32, req fileserver.Serializable, res fileserver.Serializable) error {
+	seq := sc.nextSeq()
+	data, err := fileserver.SerializeWithHeader(opCode, seq, req)
+	if err != nil {
+		return fmt.Errorf("failed to serialize request: %w", err)
+	}
 	// Create response channel
 	respChan := make(chan Response, 1)
 	sc.mu.Lock()
+	conn := sc.conn
+	for conn == nil {
+		if err := sc.reconnect(); err != nil {
+			sc.mu.Unlock()
+			return fmt.Errorf("failed to reconnect: %w", err)
+		}
+		conn = sc.conn
+	}
 	sc.pending[seq] = respChan
 	sc.mu.Unlock()
 
 	// Send request with connection failure detection
-	sc.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-	_, err := sc.conn.Write(data)
+	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	_, err = conn.Write(data)
 	if err != nil {
+		// Mark the connection as down and trigger reconnection at next request
 		sc.mu.Lock()
+		if sc.conn == conn {
+			sc.conn.Close()
+			sc.conn = nil
+		}
 		delete(sc.pending, seq)
 		sc.mu.Unlock()
-
-		// Check if it's a network error
-		if isRetriableError(err) {
-			return fmt.Errorf("connection lost: %w", err)
-		}
 		return fmt.Errorf("write failed: %w", err)
 	}
 
@@ -385,39 +436,24 @@ func (sc *DirectFSClient) SendRequest(req fileserver.Serializable, res fileserve
 	}
 
 	var lastErr error
+	var opCode uint32
+	switch req.(type) {
+	case *fileserver.MountRequest:
+		opCode = fileserver.OpMount
+	case *fileserver.LookupRequest:
+		opCode = fileserver.OpLookup
+	case *fileserver.ReadRequest:
+		opCode = fileserver.OpRead
+	case *fileserver.ReadDirRequest:
+		opCode = fileserver.OpReadDir
+	case *fileserver.ReadlinkRequest:
+		opCode = fileserver.OpReadlink
+	default:
+		return fmt.Errorf("unknown request type")
+	}
+
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if attempt > 0 {
-			// Connection lost, try to reconnect
-			log.Printf("Retrying request after connection failure (attempt %d/%d)", attempt+1, maxAttempts)
-			if err := sc.reconnect(); err != nil {
-				return fmt.Errorf("reconnection failed: %w", err)
-			}
-		}
-
-		seq := sc.nextSeq()
-
-		var opCode uint32
-		switch req.(type) {
-		case *fileserver.MountRequest:
-			opCode = fileserver.OpMount
-		case *fileserver.LookupRequest:
-			opCode = fileserver.OpLookup
-		case *fileserver.ReadRequest:
-			opCode = fileserver.OpRead
-		case *fileserver.ReadDirRequest:
-			opCode = fileserver.OpReadDir
-		case *fileserver.ReadlinkRequest:
-			opCode = fileserver.OpReadlink
-		default:
-			return fmt.Errorf("unknown request type")
-		}
-
-		data, err := fileserver.SerializeWithHeader(opCode, seq, req)
-		if err != nil {
-			return fmt.Errorf("failed to serialize request: %w", err)
-		}
-
-		err = sc.sendRequestWithData(data, seq, res)
+		err := sc.sendRequestWithData(opCode, req, res)
 		if err == nil {
 			return nil
 		}
@@ -452,15 +488,14 @@ func isRetriableError(err error) bool {
 }
 
 // readResponses reads responses from the connection
-func (sc *DirectFSClient) readResponses() {
+func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]chan Response) {
 	defer sc.wg.Done()
 	defer func() {
 		// Mark connection as down when reader exits
 		log.Printf("Response reader exited, connection marked as down")
 		sc.mu.Lock()
-		for seq, ch := range sc.pending {
+		for _, ch := range pendingList {
 			ch <- Response{errno: syscall.ECONNRESET, data: nil}
-			delete(sc.pending, seq)
 		}
 		sc.mu.Unlock()
 	}()
@@ -474,7 +509,7 @@ func (sc *DirectFSClient) readResponses() {
 		}
 
 		// Read header
-		_, err := io.ReadFull(sc.conn, buf[:fileserver.HeaderSize])
+		_, err := io.ReadFull(conn, buf[:fileserver.HeaderSize])
 		if err != nil {
 			if err != io.EOF && !errors.Is(err, net.ErrClosed) {
 				log.Printf("Read header error: %v", err)
@@ -499,7 +534,7 @@ func (sc *DirectFSClient) readResponses() {
 		data := make([]byte, header.Size-fileserver.HeaderSize)
 
 		if header.Size > fileserver.HeaderSize {
-			_, err = io.ReadFull(sc.conn, data)
+			_, err = io.ReadFull(conn, data)
 			if err != nil {
 				log.Printf("Read data error: %v", err)
 				return
@@ -515,8 +550,8 @@ func (sc *DirectFSClient) readResponses() {
 
 		// Dispatch response
 		sc.mu.Lock()
-		respChan, ok := sc.pending[header.Seq]
-		delete(sc.pending, header.Seq)
+		respChan, ok := pendingList[header.Seq]
+		delete(pendingList, header.Seq)
 		sc.mu.Unlock()
 
 		if ok {
@@ -1089,6 +1124,8 @@ func (f *SnapshotFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fus
 
 // Release closes the file descriptor if it's a cached file
 func (f *SnapshotFile) Release(ctx context.Context) syscall.Errno {
+	f.fetchMu.Lock()
+	defer f.fetchMu.Unlock()
 	if f.cachedBackingFile != nil {
 		return f.cachedBackingFile.Release(ctx)
 	}
