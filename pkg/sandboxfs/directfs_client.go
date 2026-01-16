@@ -17,6 +17,7 @@ package sandboxfs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -55,6 +56,9 @@ type DirectFSClient struct {
 	pending  map[uint32]chan Response
 	rootFh   unix.FileHandle
 	rootAttr fileserver.FileAttr
+
+	// Reconnection tracking
+	reconnectMu sync.Mutex
 
 	// Inode tracking for pre-loaded metadata
 	inodeMu sync.RWMutex
@@ -105,34 +109,9 @@ func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager) *DirectF
 
 // Connect connects to the file server and performs mount
 func (sc *DirectFSClient) Connect() (*SnapshotNode, error) {
-	parts := strings.SplitN(sc.serverAddr, "@", 2)
-	host := parts[0]
-	var path string
-	if len(parts) > 1 {
-		path = parts[1]
-	}
-	conn, err := net.Dial("tcp", host)
+	mountResp, err := sc.connect()
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
-	}
-	sc.conn = conn
-
-	// Start response reader
-	sc.wg.Add(1)
-	go sc.readResponses()
-
-	// Send mount request
-	mountReq := fileserver.MountRequest{
-		Version: fileserver.ProtocolVersion,
-		Flags:   fileserver.FlagReadOnly,
-		Path:    path, // Request root path
-	}
-
-	var mountResp fileserver.MountResponse
-	err = sc.SendRequest(&mountReq, &mountResp)
-	if err != nil {
-		sc.conn.Close()
-		return nil, fmt.Errorf("mount failed: %w", err)
 	}
 	// Store root file handle and attributes from mount response
 	sc.rootFh = mountResp.Fh
@@ -194,6 +173,89 @@ func (sc *DirectFSClient) Stop() {
 	close(sc.prefetchQueue)
 	sc.workersWg.Wait()
 	sc.wg.Wait()
+}
+
+func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
+	// Parse server address
+	parts := strings.SplitN(sc.serverAddr, "@", 2)
+	host := parts[0]
+	var path string
+	if len(parts) > 1 {
+		path = parts[1]
+	}
+
+	// Retry connection with exponential backoff
+	var conn net.Conn
+	var err error
+
+	attempt := 0
+	for ; attempt < 5; attempt++ {
+		if attempt > 0 {
+			delay := 2 * time.Second * time.Duration(1<<uint(attempt-1))
+			if delay > 60*time.Second {
+				delay = 60 * time.Second
+			}
+			log.Printf("Reconnection attempt %d after %v", attempt, delay)
+			time.Sleep(delay)
+		}
+
+		conn, err = net.Dial("tcp", host)
+		if err == nil {
+			break
+		}
+		log.Printf("Reconnection attempt %d failed: %v", attempt, err)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconnect after %d attempts: %w", attempt, err)
+	}
+
+	sc.conn = conn
+
+	// Start new response reader
+	sc.wg.Add(1)
+	go sc.readResponses()
+
+	// Re-send mount request
+	mountReq := fileserver.MountRequest{
+		Version: fileserver.ProtocolVersion,
+		Flags:   fileserver.FlagReadOnly,
+		Path:    path,
+	}
+
+	var mountResp fileserver.MountResponse
+	err = sc.SendRequest(&mountReq, &mountResp)
+	if err != nil {
+		sc.conn.Close()
+		return nil, fmt.Errorf("re-mount failed: %w", err)
+	}
+	return &mountResp, nil
+}
+
+// reconnect attempts to re-establish the connection and re-mount
+func (sc *DirectFSClient) reconnect() error {
+	sc.reconnectMu.Lock()
+	defer sc.reconnectMu.Unlock()
+
+	log.Printf("Attempting to reconnect to %s", sc.serverAddr)
+
+	// Close old connection if exists
+	if sc.conn != nil {
+		sc.conn.Close()
+	}
+
+	mountResp, err := sc.connect()
+	if err != nil {
+		return fmt.Errorf("failed to reconnect: %w", err)
+	}
+
+	// Verify root handle matches
+	if sc.rootFh != mountResp.Fh {
+		log.Printf("Warning: Root file handle changed after reconnect (old: %v, new: %v)", sc.rootFh, mountResp.Fh)
+	}
+
+	log.Printf("Successfully reconnected to %s", sc.serverAddr)
+	return nil
 }
 
 // prefetchWorker is a background worker that processes prefetch jobs
@@ -281,13 +343,18 @@ func (sc *DirectFSClient) sendRequestWithData(data []byte, seq uint32, res files
 	sc.pending[seq] = respChan
 	sc.mu.Unlock()
 
-	// Send request
-	sc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	// Send request with connection failure detection
+	sc.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 	_, err := sc.conn.Write(data)
 	if err != nil {
 		sc.mu.Lock()
 		delete(sc.pending, seq)
 		sc.mu.Unlock()
+
+		// Check if it's a network error
+		if isRetriableError(err) {
+			return fmt.Errorf("connection lost: %w", err)
+		}
 		return fmt.Errorf("write failed: %w", err)
 	}
 
@@ -302,11 +369,6 @@ func (sc *DirectFSClient) sendRequestWithData(data []byte, seq uint32, res files
 			return fmt.Errorf("failed to deserialize response: %w", err)
 		}
 		return nil
-	case <-time.After(30 * time.Second):
-		sc.mu.Lock()
-		delete(sc.pending, seq)
-		sc.mu.Unlock()
-		return fmt.Errorf("request timeout")
 	case <-sc.ctx.Done():
 		return fmt.Errorf("client stopped")
 	}
@@ -314,34 +376,94 @@ func (sc *DirectFSClient) sendRequestWithData(data []byte, seq uint32, res files
 
 // SendRequest sends a request and waits for response
 func (sc *DirectFSClient) SendRequest(req fileserver.Serializable, res fileserver.Serializable) error {
-	seq := sc.nextSeq()
+	// Don't retry mount requests - they're part of reconnection
+	_, isMountReq := req.(*fileserver.MountRequest)
 
-	var opCode uint32
-	switch req.(type) {
-	case *fileserver.MountRequest:
-		opCode = fileserver.OpMount
-	case *fileserver.LookupRequest:
-		opCode = fileserver.OpLookup
-	case *fileserver.ReadRequest:
-		opCode = fileserver.OpRead
-	case *fileserver.ReadDirRequest:
-		opCode = fileserver.OpReadDir
-	case *fileserver.ReadlinkRequest:
-		opCode = fileserver.OpReadlink
-	default:
-		return fmt.Errorf("unknown request type")
-	}
-	data, err := fileserver.SerializeWithHeader(opCode, seq, req)
-	if err != nil {
-		return fmt.Errorf("failed to serialize request: %w", err)
+	maxAttempts := 1
+	if !isMountReq {
+		maxAttempts = 2 // One attempt + one retry after reconnect
 	}
 
-	return sc.sendRequestWithData(data, seq, res)
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			// Connection lost, try to reconnect
+			log.Printf("Retrying request after connection failure (attempt %d/%d)", attempt+1, maxAttempts)
+			if err := sc.reconnect(); err != nil {
+				return fmt.Errorf("reconnection failed: %w", err)
+			}
+		}
+
+		seq := sc.nextSeq()
+
+		var opCode uint32
+		switch req.(type) {
+		case *fileserver.MountRequest:
+			opCode = fileserver.OpMount
+		case *fileserver.LookupRequest:
+			opCode = fileserver.OpLookup
+		case *fileserver.ReadRequest:
+			opCode = fileserver.OpRead
+		case *fileserver.ReadDirRequest:
+			opCode = fileserver.OpReadDir
+		case *fileserver.ReadlinkRequest:
+			opCode = fileserver.OpReadlink
+		default:
+			return fmt.Errorf("unknown request type")
+		}
+
+		data, err := fileserver.SerializeWithHeader(opCode, seq, req)
+		if err != nil {
+			return fmt.Errorf("failed to serialize request: %w", err)
+		}
+
+		err = sc.sendRequestWithData(data, seq, res)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		// Check if we should retry
+		if !isMountReq && isRetriableError(err) {
+			continue
+		}
+
+		// Non-retriable error or mount request, return immediately
+		return err
+	}
+
+	return lastErr
+}
+
+// isRetriableError checks if an error warrants a retry with reconnection
+func isRetriableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNABORTED) ||
+		strings.Contains(errStr, "connection lost") ||
+		strings.Contains(errStr, "connection reset")
 }
 
 // readResponses reads responses from the connection
 func (sc *DirectFSClient) readResponses() {
 	defer sc.wg.Done()
+	defer func() {
+		// Mark connection as down when reader exits
+		log.Printf("Response reader exited, connection marked as down")
+		sc.mu.Lock()
+		for seq, ch := range sc.pending {
+			ch <- Response{errno: syscall.ECONNRESET, data: nil}
+			delete(sc.pending, seq)
+		}
+		sc.mu.Unlock()
+	}()
 
 	buf := make([]byte, 4096)
 	for {
@@ -352,11 +474,10 @@ func (sc *DirectFSClient) readResponses() {
 		}
 
 		// Read header
-		sc.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		_, err := io.ReadFull(sc.conn, buf[:fileserver.HeaderSize])
 		if err != nil {
-			if err != io.EOF {
-				fmt.Printf("Read header error: %v\n", err)
+			if err != io.EOF && !errors.Is(err, net.ErrClosed) {
+				log.Printf("Read header error: %v", err)
 			}
 			return
 		}
@@ -364,13 +485,13 @@ func (sc *DirectFSClient) readResponses() {
 		// Parse header
 		var header fileserver.Header
 		if err := header.Deserialize(bytes.NewReader(buf[:fileserver.HeaderSize])); err != nil {
-			fmt.Printf("Invalid header: %v\n", err)
+			log.Printf("Invalid header: %v", err)
 			return
 		}
 
 		// Validate size
 		if header.Size < fileserver.HeaderSize || header.Size > 10*1024*1024 {
-			fmt.Printf("Invalid message size: %d\n", header.Size)
+			log.Printf("Invalid message size: %d", header.Size)
 			return
 		}
 
@@ -380,7 +501,7 @@ func (sc *DirectFSClient) readResponses() {
 		if header.Size > fileserver.HeaderSize {
 			_, err = io.ReadFull(sc.conn, data)
 			if err != nil {
-				fmt.Printf("Read data error: %v\n", err)
+				log.Printf("Read data error: %v", err)
 				return
 			}
 		}
@@ -395,9 +516,7 @@ func (sc *DirectFSClient) readResponses() {
 		// Dispatch response
 		sc.mu.Lock()
 		respChan, ok := sc.pending[header.Seq]
-		if ok {
-			delete(sc.pending, header.Seq)
-		}
+		delete(sc.pending, header.Seq)
 		sc.mu.Unlock()
 
 		if ok {
@@ -473,6 +592,11 @@ type SnapshotNode struct {
 	dirFetched     sync.Once           // Whether directory entries have been fetched
 	dirFetchError  error
 	prefetchedData uint32 // Atomic flag for whether small files have been prefetched
+
+	// Symlink caching
+	symlinkFetched sync.Once // Whether symlink target has been fetched
+	symlinkTarget  []byte    // Cached symlink target
+	symlinkError   error     // Error from fetching symlink
 }
 
 // Ensure SnapshotNode implements required interfaces
@@ -758,18 +882,28 @@ func (n *SnapshotNode) Rename(ctx context.Context, name string, newParent fs.Ino
 
 // Readlink reads the target of a symlink
 func (n *SnapshotNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
-	// Send readlink request
-	readlinkReq := fileserver.ReadlinkRequest{
-		Fh: n.fh,
+	// Fetch symlink target only once and cache it
+	n.symlinkFetched.Do(func() {
+		// Send readlink request
+		readlinkReq := fileserver.ReadlinkRequest{
+			Fh: n.fh,
+		}
+
+		readlinkResp := fileserver.ReadlinkResponse{}
+		err := n.client.SendRequest(&readlinkReq, &readlinkResp)
+		if err != nil {
+			n.symlinkError = err
+			return
+		}
+
+		n.symlinkTarget = []byte(readlinkResp.Target)
+	})
+
+	if n.symlinkError != nil {
+		return nil, fs.ToErrno(n.symlinkError)
 	}
 
-	readlinkResp := fileserver.ReadlinkResponse{}
-	err := n.client.SendRequest(&readlinkReq, &readlinkResp)
-	if err != nil {
-		return nil, fs.ToErrno(err)
-	}
-
-	return []byte(readlinkResp.Target), fs.OK
+	return n.symlinkTarget, fs.OK
 }
 
 // SnapshotFile implements fs.FileHandle for reading files

@@ -182,7 +182,7 @@ func (fs *FileServer) handleConnection(session *Session) {
 		}
 
 		// Read header
-		session.SetReadDeadline(time.Now().Add(30 * time.Second))
+		session.SetReadDeadline(time.Time{})
 		if _, err := io.ReadFull(session, buf[:HeaderSize]); err != nil {
 			if err != io.EOF {
 				fmt.Printf("Server Read header error: %v\n", err)

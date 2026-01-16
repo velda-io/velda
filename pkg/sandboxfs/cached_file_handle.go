@@ -36,10 +36,7 @@ type CachedFileHandle struct {
 	cacheWrite   CacheWriter
 	bytesWritten int64
 	isWrite      bool
-	fromCache    bool
 	cacheOps     bool
-	flushed      bool // Track if file has been flushed
-	cacheFlushed bool // Track if cache was committed during flush
 }
 
 // switchToCachedFd switches the file handle to use a cached file descriptor
@@ -57,7 +54,6 @@ func (f *CachedFileHandle) switchToCachedFd(cachedFd int, st *syscall.Stat_t) {
 	// Store original fd and switch to cached
 	originalFile := f.LoopbackFile
 	f.LoopbackFile = fs.NewLoopbackFile(cachedFd).(*fs.LoopbackFile)
-	f.fromCache = true
 	f.cachedStat = st
 	f.cacheOps = false // Disable further caching since we're now using cache
 	if f.cacheWrite != nil {
@@ -95,7 +91,7 @@ func (f *CachedFileHandle) Getattr(ctx context.Context, out *fuse.AttrOut) sysca
 	defer f.mu.Unlock()
 
 	// If we're using a cached file, return the original stat
-	if f.fromCache && f.cachedStat != nil {
+	if f.cachedStat != nil {
 		out.FromStat(f.cachedStat)
 		return 0
 	}
@@ -195,18 +191,8 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 	if errno != 0 {
 		return errno
 	}
-	return 0
-}
-
-// Release implements FileReleaser - clean up on close
-func (f *CachedFileHandle) Release(ctx context.Context) syscall.Errno {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 
 	fd, _ := f.PassthroughFd()
-
-	// Mark as flushed
-	f.flushed = true
 
 	// Commit cache if we were writing sequentially
 	if f.cacheOps && f.isWrite && f.cacheWrite != nil {
@@ -220,7 +206,6 @@ func (f *CachedFileHandle) Release(ctx context.Context) syscall.Errno {
 				// Encode SHA256 and mtime into xattr
 				xattrValue := encodeCacheXattr(committedSHA, fileMtime, st.Size)
 				unix.Fsetxattr(fd, xattrCacheName, []byte(xattrValue), 0)
-				f.cacheFlushed = true
 			}
 		}
 		f.cacheWrite = nil
@@ -248,6 +233,14 @@ func (f *CachedFileHandle) Release(ctx context.Context) syscall.Errno {
 		f.cacheWrite = nil
 		f.cacheOps = false
 	}
+
+	return 0
+}
+
+// Release implements FileReleaser - clean up on close
+func (f *CachedFileHandle) Release(ctx context.Context) syscall.Errno {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	oldfile := f.LoopbackFile
 	f.LoopbackFile = nil

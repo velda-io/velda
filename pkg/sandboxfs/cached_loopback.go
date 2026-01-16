@@ -472,14 +472,11 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 		if err != nil {
 			return nil, 0, fs.ToErrno(err)
 		}
-		cacheEnabled := flags&syscall.O_TRUNC != 0 || flags&syscall.O_CREAT != 0
-
-		//log.Printf("Opened file %s for writing", fullPath)
 		return &CachedFileHandle{
 			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
 			cache:        n.mountCtx.cache,
 			isWrite:      true,
-			cacheOps:     cacheEnabled, // Start with cache ops enabled if truncating or creating
+			cacheOps:     true,
 		}, 0, 0
 	}
 
@@ -512,7 +509,6 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 						LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
 						cache:        n.mountCtx.cache,
 						isWrite:      false,
-						fromCache:    true,
 						cachedStat:   &st,
 					}, fuse.FOPEN_KEEP_CACHE, 0
 				}
