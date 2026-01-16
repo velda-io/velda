@@ -331,12 +331,6 @@ func (r *ReadDirRequest) Serialize(w io.Writer) error {
 	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
 		return fmt.Errorf("failed to write fh: %w", err)
 	}
-	if err := binary.Write(w, binary.LittleEndian, r.Offset); err != nil {
-		return fmt.Errorf("failed to write offset: %w", err)
-	}
-	if err := binary.Write(w, binary.LittleEndian, r.Count); err != nil {
-		return fmt.Errorf("failed to write count: %w", err)
-	}
 
 	return nil
 }
@@ -348,14 +342,6 @@ func (r *ReadDirRequest) Deserialize(reader io.Reader) error {
 		return err
 	}
 	r.Fh = fh
-
-	if err := binary.Read(reader, binary.LittleEndian, &r.Offset); err != nil {
-		return fmt.Errorf("failed to read offset: %w", err)
-	}
-	if err := binary.Read(reader, binary.LittleEndian, &r.Count); err != nil {
-		return fmt.Errorf("failed to read count: %w", err)
-	}
-
 	return nil
 }
 

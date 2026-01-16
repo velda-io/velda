@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -327,7 +328,6 @@ func (n *CachedLoopbackNode) Create(ctx context.Context, name string, flags uint
 	if n.mountCtx.NoCacheMode {
 		fh := &NoCacheFileHandle{
 			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-			path:         fullPath,
 			isWrite:      true,
 			hasher:       sha256.New(),
 		}
@@ -338,7 +338,6 @@ func (n *CachedLoopbackNode) Create(ctx context.Context, name string, flags uint
 	//log.Printf("Created file %s, enabling write caching", fullPath)
 	fh := &CachedFileHandle{
 		LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-		path:         fullPath,
 		cache:        n.mountCtx.cache,
 		isWrite:      true,
 		cacheOps:     true,
@@ -458,7 +457,6 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 
 		fh := &NoCacheFileHandle{
 			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-			path:         fullPath,
 			isWrite:      isWrite,
 		}
 		// Initialize hasher for write operations
@@ -474,15 +472,11 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 		if err != nil {
 			return nil, 0, fs.ToErrno(err)
 		}
-		cacheEnabled := flags&syscall.O_TRUNC != 0 || flags&syscall.O_CREAT != 0
-
-		//log.Printf("Opened file %s for writing", fullPath)
 		return &CachedFileHandle{
 			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-			path:         fullPath,
 			cache:        n.mountCtx.cache,
 			isWrite:      true,
-			cacheOps:     cacheEnabled, // Start with cache ops enabled if truncating or creating
+			cacheOps:     true,
 		}, 0, 0
 	}
 
@@ -513,10 +507,8 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 					//log.Printf("Cache hit for %s (mtime match)", fullPath)
 					return &CachedFileHandle{
 						LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-						path:         fullPath,
 						cache:        n.mountCtx.cache,
 						isWrite:      false,
-						fromCache:    true,
 						cachedStat:   &st,
 					}, fuse.FOPEN_KEEP_CACHE, 0
 				}
@@ -539,7 +531,6 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 				// Create file handle with real fd
 				fh := &CachedFileHandle{
 					LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-					path:         fullPath,
 					cache:        n.mountCtx.cache,
 					isWrite:      false,
 					cacheOps:     false, // Disable lazy caching since we'll eager fetch
@@ -571,6 +562,7 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 				return fh, 0, 0
 			}
 		} else if ok {
+			log.Printf("Cache stale for %s: cached mtime=%v, current mtime=%v, cached size=%d, current size=%d", fullPath, cachedMtime, fileMtime, cachedSize, st.Size)
 			// SHA found but mtime doesn't match - CACHE MISS
 			if GlobalCacheMetrics != nil {
 				GlobalCacheMetrics.CacheStale.Inc()
@@ -597,7 +589,6 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 			// Create file handle with real fd
 			fh := &CachedFileHandle{
 				LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-				path:         fullPath,
 				cache:        n.mountCtx.cache,
 				isWrite:      false,
 				cacheOps:     false, // Disable lazy caching since we'll eager fetch
@@ -655,7 +646,6 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 	// For sequential reads, we'll cache the content
 	return &CachedFileHandle{
 		LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-		path:         fullPath,
 		cache:        n.mountCtx.cache,
 		isWrite:      false,
 		cacheOps:     true,
@@ -892,4 +882,49 @@ func (n *CachedLoopbackNode) Listxattr(ctx context.Context, dest []byte) (uint32
 	}
 
 	return uint32(sz), 0
+}
+
+var _ = (fs.NodeSetattrer)((*CachedLoopbackNode)(nil))
+
+func (n *CachedLoopbackNode) Setattr(ctx context.Context, fh fs.FileHandle, input *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	// File still open, assume cache key will be updated when file is closed.
+	if _, ok := fh.(fs.FileSetattrer); ok {
+		return n.LoopbackNode.Setattr(ctx, fh, input, out)
+	}
+	updateCache := input.Valid&fuse.FATTR_MTIME != 0 && input.Valid&fuse.FATTR_SIZE == 0
+	if updateCache {
+		p := filepath.Join(n.Path(n.Root()))
+		fullPath := filepath.Join(n.RootData.Path, p)
+		oldAttr := fuse.AttrOut{}
+		if err := n.Getattr(ctx, fh, &oldAttr); err != 0 {
+			return fs.ToErrno(err)
+		}
+		// Call parent setattr to perform the actual attribute change
+		errno := n.LoopbackNode.Setattr(ctx, fh, input, out)
+		if errno != 0 {
+			return errno
+		}
+
+		oldCacheKey := make([]byte, 128)
+		sz, err := unix.Lgetxattr(fullPath, xattrCacheName, oldCacheKey)
+		if err != nil || sz == 0 {
+			// No existing cache key, nothing to update
+			return 0
+		}
+		xattrValue := string(oldCacheKey[:sz])
+		cachedSHA, cachedMtime, cachedSize, ok := decodeCacheXattr(xattrValue)
+		if !ok {
+			return 0
+		}
+		if cachedMtime.Equal(time.Unix(int64(oldAttr.Mtime), int64(oldAttr.Mtimensec))) && cachedSize == int64(oldAttr.Size) {
+			// Update cache key with new mtime
+			fileMtime := time.Unix(int64(out.Mtime), int64(out.Mtimensec))
+			xattrValue := encodeCacheXattr(cachedSHA, fileMtime, cachedSize)
+			unix.Lsetxattr(fullPath, xattrCacheName, []byte(xattrValue), 0)
+		}
+	} else {
+		return n.LoopbackNode.Setattr(ctx, fh, input, out)
+	}
+
+	return 0
 }

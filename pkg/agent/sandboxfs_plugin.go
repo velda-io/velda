@@ -41,18 +41,54 @@ func NewSandboxFsPlugin(workspaceDir string, sandboxConfig *agentpb.SandboxConfi
 	}
 }
 
-func (p *SandboxFsPlugin) Run(ctx context.Context) error {
+func (p *SandboxFsPlugin) Run(ctx context.Context) (err error) {
 	session := ctx.Value(p.requestPlugin).(*proto.SessionRequest)
 
-	err := p.initAgentDir(session, p.WorkspaceDir)
+	err = p.initAgentDir(session, p.WorkspaceDir)
 	if err != nil {
 		return fmt.Errorf("InitAgentDir: %w", err)
 	}
 	defer func() {
-		if err := syscall.Unmount(path.Join(p.WorkspaceDir, "velda/velda"), syscall.MNT_DETACH); err != nil {
-			fmt.Printf("Unmount velda: %v\n", err)
+		// Unmount velda binary first
+		if unmountErr := syscall.Unmount(path.Join(p.WorkspaceDir, "velda/velda"), syscall.MNT_DETACH); unmountErr != nil {
+			err = fmt.Errorf("unmount velda: %w", unmountErr)
+			return
 		}
-		os.RemoveAll(p.WorkspaceDir)
+
+		// For mount directory, rmdir each subdir under it first, then RemoveAll the rest
+		mountDir := path.Join(path.Dir(p.WorkspaceDir), "mount")
+		if fi, statErr := os.Stat(mountDir); statErr == nil && fi.IsDir() {
+			entries, readErr := os.ReadDir(mountDir)
+			if readErr != nil {
+				err = fmt.Errorf("read mount dir: %w", readErr)
+				return
+			}
+			for _, e := range entries {
+				child := path.Join(mountDir, e.Name())
+				if rmdirErr := syscall.Rmdir(child); rmdirErr != nil {
+					err = fmt.Errorf("rmdir mount child %s: %w", child, rmdirErr)
+					return
+				}
+			}
+			// Remove any remaining files/dirs under mountDir
+			if removeErr := os.RemoveAll(mountDir); removeErr != nil {
+				err = fmt.Errorf("removeall mount dir %s: %w", mountDir, removeErr)
+				return
+			}
+		} else if statErr != nil && !os.IsNotExist(statErr) {
+			err = fmt.Errorf("stat mount dir: %w", statErr)
+			return
+		}
+		if removeErr := syscall.Rmdir(path.Join(p.WorkspaceDir, "workspace")); removeErr != nil && removeErr != syscall.ENOENT {
+			err = fmt.Errorf("rmdir workspace: %w", removeErr)
+			return
+		}
+
+		// Finally remove the workspace directory tree
+		if removeErr := os.RemoveAll(p.WorkspaceDir); removeErr != nil {
+			err = fmt.Errorf("removeall workspace dir %s: %w", p.WorkspaceDir, removeErr)
+			return
+		}
 	}()
 	return p.RunNext(ctx)
 }

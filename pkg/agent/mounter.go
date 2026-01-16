@@ -78,7 +78,11 @@ func (m *SimpleMounter) mountInternal(ctx context.Context, session *proto.Sessio
 		useDirectFS := m.sandboxConfig.GetDiskSource().GetCasConfig().GetUseDirectProtocol()
 
 		// Mount with veldafs wrapper
-		dataDir := path.Join(path.Dir(targetDir), path.Base(targetDir)+"_data")
+		mountDir := path.Join(path.Dir(targetDir), "mount")
+		if err := os.MkdirAll(mountDir, 0755); err != nil {
+			return nil, fmt.Errorf("mkdir mount: %w", err)
+		}
+		dataDir := path.Join(mountDir, path.Base(targetDir)+"_data")
 
 		var baseCleanup func()
 		var mountErr error
@@ -120,10 +124,32 @@ func (m *SimpleMounter) mountInternal(ctx context.Context, session *proto.Sessio
 
 		return func() {
 			if casCleanup != nil {
-				casCleanup()
+				if err := func() (err error) {
+					defer func() {
+						if r := recover(); r != nil {
+							err = fmt.Errorf("panic in casCleanup: %v", r)
+						}
+					}()
+					casCleanup()
+					return nil
+				}(); err != nil {
+					fmt.Fprintf(os.Stderr, "Error during casCleanup: %v\n", err)
+					return
+				}
 			}
 			if baseCleanup != nil {
-				baseCleanup()
+				if err := func() (err error) {
+					defer func() {
+						if r := recover(); r != nil {
+							err = fmt.Errorf("panic in baseCleanup: %v", r)
+						}
+					}()
+					baseCleanup()
+					return nil
+				}(); err != nil {
+					fmt.Fprintf(os.Stderr, "Error during baseCleanup: %v\n", err)
+					return
+				}
 			}
 		}, nil
 	} else {
@@ -206,11 +232,6 @@ func (m *SimpleMounter) mountDirect(ctx context.Context, session *proto.SessionR
 	}
 }
 
-// mount wraps mountInternal for backward compatibility
-func (m *SimpleMounter) mount(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
-	return m.mountInternal(ctx, session, workspaceDir, mountTypeCurrent, "", "")
-}
-
 func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, workspaceDir string, mode mountType) (cleanup func(), err error) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -261,18 +282,25 @@ func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, works
 		return nil, fmt.Errorf("Remount workspace: %w", err)
 	}
 	return func() {
-		fuseCmd.Process.Signal(syscall.SIGTERM)
-		fuseCmd.Wait()
+		if err := fuseCmd.Process.Signal(syscall.SIGTERM); err != nil {
+			fmt.Fprintf(os.Stderr, "Error sending SIGTERM to FUSE process: %v\n", err)
+			return
+		}
+		if err := fuseCmd.Wait(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error waiting for FUSE process: %v\n", err)
+			return
+		}
 	}, nil
 }
 
 // mountWithSnapshot mounts the filesystem with snapshot support using overlayfs
 func (m *SimpleMounter) mountWithSnapshot(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error) {
 	agentDir := path.Dir(workspaceDir)
-	baseDir := path.Join(agentDir, "base")
-	curDir := path.Join(agentDir, "cur")
-	upperDir := path.Join(agentDir, "upper")
-	workDir := path.Join(agentDir, "work")
+	mountDir := path.Join(agentDir, "mount")
+	baseDir := path.Join(mountDir, "base")
+	curDir := path.Join(mountDir, "cur")
+	upperDir := path.Join(mountDir, "upper")
+	workDir := path.Join(mountDir, "work")
 
 	var cleanupFuncs []func()
 	defer func() {
@@ -335,11 +363,30 @@ func (m *SimpleMounter) mountWithSnapshot(ctx context.Context, session *proto.Se
 
 	return func() {
 		for i := len(cleanupFuncs) - 1; i >= 0; i-- {
-			cleanupFuncs[i]()
+			if err := func() (err error) {
+				defer func() {
+					if r := recover(); r != nil {
+						err = fmt.Errorf("panic in cleanup function %d: %v", i, r)
+					}
+				}()
+				cleanupFuncs[i]()
+				return nil
+			}(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error during cleanup step %d: %v\n", i, err)
+				return
+			}
 		}
-		// Clean up temporary directories
-		os.RemoveAll(upperDir)
-		os.RemoveAll(workDir)
+		// Attempt to rmdir each subdirectory under mount (requires empty)
+		// After that, remove any remaining contents under mount with RemoveAll.
+		for _, d := range []string{upperDir, workDir, baseDir, curDir} {
+			if err := syscall.Rmdir(d); err != nil {
+				fmt.Fprintf(os.Stderr, "Error rmdir %s: %v (directory not empty or still mounted?)\n", d, err)
+			}
+		}
+		// Try to remove the mount directory tree (remaining files) using RemoveAll
+		if err := os.RemoveAll(mountDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error RemoveAll mountDir %s: %v\n", mountDir, err)
+		}
 	}, nil
 }
 
@@ -389,7 +436,18 @@ func (m *SimpleMounter) bindWritableDirs(session *proto.SessionRequest, workspac
 
 	return func() {
 		for i := len(cleanupFuncs) - 1; i >= 0; i-- {
-			cleanupFuncs[i]()
+			if err := func() (err error) {
+				defer func() {
+					if r := recover(); r != nil {
+						err = fmt.Errorf("panic in cleanup function %d: %v", i, r)
+					}
+				}()
+				cleanupFuncs[i]()
+				return nil
+			}(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error during cleanup step %d: %v\n", i, err)
+				return
+			}
 		}
 	}, nil
 }

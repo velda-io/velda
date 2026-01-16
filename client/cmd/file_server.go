@@ -60,7 +60,7 @@ var FileServerCmd = &cobra.Command{
 }
 
 func init() {
-	FileServerCmd.Flags().StringVarP(&fsAddr, "addr", "a", ":0", "Address to listen on")
+	FileServerCmd.Flags().StringVarP(&fsAddr, "addr", "a", "localhost:7655", "Address to listen on")
 	FileServerCmd.Flags().StringVarP(&fsRoot, "root", "r", ".", "Root path to serve")
 	FileServerCmd.Flags().IntVarP(&fsWorkers, "workers", "w", 4, "Number of worker goroutines")
 

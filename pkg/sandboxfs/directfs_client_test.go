@@ -185,7 +185,7 @@ func TestSnapshotClientE2E(t *testing.T) {
 	t.Run("list directory", func(t *testing.T) {
 		entries, err := os.ReadDir(mountDir)
 		require.NoError(t, err)
-		require.Len(t, entries, 3, "Should have 3 entries (2 files + 1 dir)")
+		assert.Len(t, entries, 3, "Should have 3 entries (2 files + 1 dir)")
 
 		names := make(map[string]bool)
 		for _, entry := range entries {

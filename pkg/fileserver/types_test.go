@@ -458,17 +458,7 @@ func TestReadDirRequestSerialization(t *testing.T) {
 		{
 			name: "basic readdir",
 			req: ReadDirRequest{
-				Fh:     fh,
-				Offset: 0,
-				Count:  100,
-			},
-		},
-		{
-			name: "with offset",
-			req: ReadDirRequest{
-				Fh:     fh,
-				Offset: 50,
-				Count:  25,
+				Fh: fh,
 			},
 		},
 	}
@@ -492,12 +482,7 @@ func TestReadDirRequestSerialization(t *testing.T) {
 			if !bytes.Equal(deserialized.Fh.Bytes(), tt.req.Fh.Bytes()) || deserialized.Fh.Type() != tt.req.Fh.Type() {
 				t.Errorf("FileHandle mismatch")
 			}
-			if deserialized.Offset != tt.req.Offset {
-				t.Errorf("Offset mismatch: expected %d, got %d", tt.req.Offset, deserialized.Offset)
-			}
-			if deserialized.Count != tt.req.Count {
-				t.Errorf("Count mismatch: expected %d, got %d", tt.req.Count, deserialized.Count)
-			}
+
 		})
 	}
 }

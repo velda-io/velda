@@ -70,6 +70,8 @@ func WithNoCacheMode() MountOptions {
 func WithDirectFSMode() MountOptions {
 	return func(opts *VeldaMountOptions) {
 		opts.DirectFSMode = true
+		opts.FuseOptions.EnableSymlinkCaching = true
+		opts.FuseOptions.ExplicitDataCacheControl = true
 	}
 }
 

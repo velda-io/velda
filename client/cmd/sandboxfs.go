@@ -60,9 +60,11 @@ var sandboxfsCmd = &cobra.Command{
 			mountOpts = append(mountOpts, sandboxfs.WithNoCacheMode())
 		case "directfs-snapshot":
 			mountOpts = append(mountOpts, sandboxfs.WithDirectFSMode())
-		case "directfs":
 		case "standard":
 			// No additional options
+		case "directfs":
+			// Not implemented yet
+			fallthrough
 		default:
 			cobra.CheckErr(fmt.Errorf("invalid mode: %s", mode))
 		}
@@ -91,5 +93,5 @@ func init() {
 	sandboxfsCmd.Flags().Int("readyfd", 0, "File descriptor to signal when the mount is ready")
 	sandboxfsCmd.Flags().String("name", "", "Name of the mount")
 	sandboxfsCmd.Flags().String("cache-dir", "/tmp/velda_cas_cache", "Directory for caching")
-	sandboxfsCmd.Flags().String("mode", "snapshot", "Mount mode: standard, snapshot, nocache, directfs or directfs-snapshot")
+	sandboxfsCmd.Flags().String("mode", "standard", "Mount mode: standard, snapshot, nocache, directfs or directfs-snapshot")
 }
