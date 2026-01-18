@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "Building directfs client tests..."
-go test -c -o /tmp/directfs_test
+go test -c -o /tmp/directfs_test -race
 
 echo "Running tests with sudo..."
 sudo /tmp/directfs_test -test.v -test.run TestSnapshotClient
