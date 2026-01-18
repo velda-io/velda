@@ -65,6 +65,12 @@ create a new one if not already exists.`,
 }
 
 func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
+	// If invoked via remote SSH with a forced command, use that as the entrypoint
+	// and infer the target instance from VELDA_INSTANCE environment variable.
+	if orig := os.Getenv("SSH_ORIGINAL_COMMAND"); orig != "" {
+		// Run the original command through a shell so complex commands work.
+		args = []string{"sh", "-lc", orig}
+	}
 	conn, err := clientlib.GetApiConnection()
 	if err != nil {
 		return fmt.Errorf("Error getting API connection: %v", err)
@@ -72,6 +78,9 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	defer conn.Close()
 
 	instance := cmd.Flag("instance").Value.String()
+	if instance == "" {
+		instance = os.Getenv("VELDA_INSTANCE")
+	}
 	instanceId, err := clientlib.ParseInstanceId(
 		cmd.Context(),
 		instance, clientlib.FallbackToSession)
