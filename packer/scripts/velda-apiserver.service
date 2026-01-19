@@ -1,16 +1,10 @@
 [Unit]
 Description=Velda API server
-After=network-online.target
-Wants=network-online.target
-
-# EC2 Cloud-Init
-After=cloud-final.service
-
-# GCE Guest Agent
-After=google-startup-scripts.service
 
 [Service]
-ExecStart=/bin/velda apiserver --config /etc/velda.yaml --foreground
+Type=forking
+ExecStart=/usr/bin/velda apiserver --config /etc/velda.yaml --pidfile /run/velda-apiserver.pid
+PIDFile=/run/velda-apiserver.pid
 Restart=always
 RestartSec=5
 Environment="PATH=/usr/bin:/bin:/snap/bin"
