@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/user"
 	"path/filepath"
 	"sync"
 
@@ -62,15 +61,6 @@ func DebugLog(format string, args ...interface{}) {
 }
 
 func getUserConfigDir() (string, error) {
-	sudoUser := os.Getenv("SUDO_USER")
-	if sudoUser != "" {
-		// If running under sudo, get the home directory of the original user.
-		u, err := user.Lookup(sudoUser)
-		if err != nil {
-			log.Fatalf("Unable to lookup home directory for user %s: %v", sudoUser, err)
-		}
-		return filepath.Join(u.HomeDir, ".config", "velda"), nil
-	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
