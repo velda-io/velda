@@ -65,6 +65,15 @@ create a new one if not already exists.`,
 }
 
 func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
+	// If invoked via remote SSH with a forced command, honor it only when
+	// the hidden --ssh flag is explicitly set. This prevents untrusted
+	// environment injection when running locally.
+	if sshFlag, _ := cmd.Flags().GetBool("ssh"); sshFlag {
+		if orig := os.Getenv("SSH_ORIGINAL_COMMAND"); orig != "" {
+			// Run the original command through a shell so complex commands work.
+			args = []string{"sh", "-lc", orig}
+		}
+	}
 	conn, err := clientlib.GetApiConnection()
 	if err != nil {
 		return fmt.Errorf("Error getting API connection: %v", err)
@@ -72,6 +81,9 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	defer conn.Close()
 
 	instance := cmd.Flag("instance").Value.String()
+	if instance == "" {
+		instance = os.Getenv("VELDA_INSTANCE")
+	}
 	instanceId, err := clientlib.ParseInstanceId(
 		cmd.Context(),
 		instance, clientlib.FallbackToSession)
@@ -497,6 +509,8 @@ func init() {
 	runCmd.Flags().StringSlice("writable-dir", []string{}, "Writable directories. If not set, the entire filesystem will be writable if snapshot is not set, otherwise it will be read-only. If set, the session will be created with a snapshot of the current disk, and the specified directories will be writable and sync with the current version.")
 	runCmd.Flags().String("snapshot", "", "Snapshot name to use. If provided, uses an existing snapshot; if not provided and writable-dirs are specified, a new snapshot will be created.")
 	runCmd.Flags().SetInterspersed(false)
+	runCmd.Flags().Bool("ssh", false, "Honor SSH_ORIGINAL_COMMAND when set. Use it for SSH forced command.")
+	runCmd.Flags().Lookup("ssh").Hidden = true
 }
 
 func attachAllForwardedPorts(cmd *cobra.Command, client *clientlib.SshClient) {
