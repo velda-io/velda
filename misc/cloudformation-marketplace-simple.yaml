@@ -1,0 +1,396 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::LanguageExtensions'
+Description: 'Velda Controller for AWS Marketplace'
+
+Parameters:
+  # Network Configuration
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for the deployment
+  
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: The subnet ID to deploy the controller and agents
+
+  AvailabilityZone:
+    Type: String
+    Description: Availability zone for the deployment
+  
+  # Instance Configuration
+  ControllerMachineType:
+    Type: String
+    Default: 'r8i-flex.large'
+    Description: Machine type of controller instance
+  
+  Ami:
+    Type: AWS::EC2::Image::Id
+
+  # Disk Configuration
+  DataDiskType:
+    Type: String
+    Default: 'gp3'
+    Description: Type of the disk for storing user data
+    AllowedValues:
+      - gp2
+      - gp3
+      - io1
+      - io2
+  
+  DataDiskSize:
+    Type: Number
+    Default: 20
+    MinValue: 8
+    MaxValue: 65536
+    Description: Size of disk for user data in GB
+  
+  # Security Configuration
+  ConnectionSourceCidr:
+    Type: String
+    Description: CIDR block for connection from. It's the same CIDR for SSH access. Please set CIDR to x.x.x.x/32 to allow one specific IP address access, 0.0.0.0/0 to allow all IP addresses access, or another CIDR range.
+  
+  UseNat:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Whether to use NAT in the network (Disable external IP)
+  
+  UseControllerExternalIp:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Whether controller has external IP
+
+  RootSSHPublicKey:
+    Type: String
+    Default: ''
+    Description: SSH public key to add to root user's authorized_keys, for managing the controller instance.
+
+  VeldaSSHPublicKey:
+    Type: String
+    Default: ''
+    Description: SSH public key to add to velda user's authorized_keys, for connecting to agent instances
+  
+  PoolConfigList:
+    Type: CommaDelimitedList
+    Default: 'shell:m7i.micro,gpu-t4-1:g4dn.xlarge,gpu-l4-1:g6.xlarge'
+    Description: List of agent pool configurations in the format "name:instance_type". A pool named "shell" must be included for the default login access.
+
+Conditions:
+  AssociatePublicIp: !Or
+    - !Not [!Equals [!Ref UseNat, 'true']]
+    - !Equals [!Ref UseControllerExternalIp, 'true']
+
+Resources:
+  # Data disk for controller
+  ControllerDataVolume:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      Size: !Ref DataDiskSize
+      VolumeType: !Ref DataDiskType
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-data'
+
+  # Security Groups
+  ControllerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-controller-sg'
+      GroupDescription: Security group for Velda controller
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 50051
+          ToPort: 50051
+          SourceSecurityGroupId: !Ref AgentSecurityGroup
+          Description: gRPC
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref ConnectionSourceCidr
+          Description: SSH
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: All outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-controller'
+
+  AgentSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-agent-sg'
+      GroupDescription: Security group for Velda agents
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: All outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-agent-sg'
+
+  # Security group ingress rules referencing other security groups (separate resources to avoid circular deps)
+  ControllerNFSIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ControllerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 2049
+      ToPort: 2049
+      SourceSecurityGroupId: !Ref AgentSecurityGroup
+      Description: NFS from agents
+
+  AgentFromControllerIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AgentSecurityGroup
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !Ref ControllerSecurityGroup
+      Description: All traffic from controller
+
+  AgentToAgentIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AgentSecurityGroup
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !Ref AgentSecurityGroup
+      Description: All traffic between agents
+
+  # IAM Resources
+  ControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-controller-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-controller-role'
+
+  ControllerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub '${AWS::StackName}-controller-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParametersByPath
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:*:parameter/${AWS::StackName}/*"
+          - Effect: Allow
+            Action:
+              - ec2:DescribeLaunchTemplates
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - ec2:CreateTags
+              - ec2:DescribeInstances
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - ec2:RunInstances
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                "ec2:LaunchTemplate": !Sub 'arn:aws:ec2:${AWS::Region}:*:launch-template/*'
+              Bool:
+                "ec2:IsLaunchTemplateResource": 'true'
+          - Effect: Allow
+            Action:
+              - ec2:StopInstances
+              - ec2:StartInstances
+              - ec2:TerminateInstances
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'ec2:ResourceTag/VeldaApp': !Ref AWS::StackName
+      Roles:
+        - !Ref ControllerRole
+
+  ControllerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-controller'
+      Roles:
+        - !Ref ControllerRole
+
+  # Controller Instance
+  ControllerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref Ami
+      InstanceType: !Ref ControllerMachineType
+      SubnetId: !Ref SubnetId
+      AvailabilityZone: !Ref AvailabilityZone
+      IamInstanceProfile: !Ref ControllerInstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            DeleteOnTermination: true
+      SecurityGroupIds:
+        - !Ref ControllerSecurityGroup
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+              #!/bin/bash
+              set -e
+              cat << EOF > /etc/velda.yaml
+              server:
+                  grpcAddress: :50051
+                  httpAddress: :8081
+              storage:
+                  zfs:
+                    pool: "zpool"
+              provisioners:
+                - aws:
+                    region: ${AWS::Region}
+                    config_prefix: "/${AWS::StackName}/pools"
+              EOF
+
+              systemctl stop velda-agent.service || true
+              systemctl disable velda-agent.service
+              systemctl disable nvidia-init.service
+
+              # Install provided SSH public keys
+              mkdir -p /root/.ssh
+              chmod 700 /root/.ssh
+              if [ -n "${RootSSHPublicKey}" ]; then
+                printf '%s\n' "${RootSSHPublicKey}" >> /root/.ssh/authorized_keys
+              fi
+              chmod 600 /root/.ssh/authorized_keys || true
+
+              if ! id -u velda >/dev/null 2>&1; then
+                useradd -m -s /bin/bash velda || true
+              fi
+              mkdir -p /home/velda/.ssh
+              chmod 700 /home/velda/.ssh
+              if [ -n "${VeldaSSHPublicKey}" ]; then
+                printf '%s\n' "${VeldaSSHPublicKey}" >> /home/velda/.ssh/authorized_keys
+              fi
+              chown -R velda:velda /home/velda/.ssh || true
+              chmod 600 /home/velda/.ssh/authorized_keys || true
+
+              device_to_use=""
+              controller_volume=${ControllerDataVolume}
+              patterns=(/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol${!controller_volume#vol-} /dev/sdf /dev/xvdf)
+
+              # Wait for the data volume to be attached and available
+              for i in $(seq 1 60); do
+                for p in "${!patterns[@]}"; do
+                  for f in $p; do
+                    [ -e "$f" ] || continue
+                    dev=$(readlink -f "$f" 2>/dev/null || true)
+                    [ -b "$dev" ] || continue
+                    device_to_use="$dev"
+                    break 3
+                  done
+                done
+                sleep 5
+              done
+              echo "Device to use: $device_to_use"
+
+              if [ -n "$device_to_use" ]; then
+                if ! zpool import zpool -f; then
+                  zpool create zpool "$device_to_use"
+                fi
+              fi
+
+              systemctl restart ssh
+              systemctl enable velda-apiserver.service
+              systemctl start velda-apiserver.service
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-controller'
+        - Key: VeldaApp
+          Value: !Sub '${AWS::StackName}'
+
+  # Volume attachment
+  ControllerDataVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/xvdf
+      InstanceId: !Ref ControllerInstance
+      VolumeId: !Ref ControllerDataVolume
+
+  # Agent Launch Template
+  AgentLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-agent'
+      LaunchTemplateData:
+        InstanceType: 'm5.large' # A place holder, actual instance type will be specified in the SSM parameter for each pool
+        ImageId: !Ref Ami
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: !If [AssociatePublicIp, 'true', 'false']
+            SubnetId: !Ref SubnetId
+            Groups:
+              - !Ref AgentSecurityGroup
+        PrivateDnsNameOptions:
+          HostnameType: resource-name
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: VeldaApp
+                Value: !Ref AWS::StackName
+
+  'Fn::ForEach::SSMParameter':
+    - Item
+    - !Ref PoolConfigList
+    - 'SSMParameter&{Item}':
+        Type: AWS::SSM::Parameter
+        Properties:
+          Name: !Sub
+            - '/${AWS::StackName}/pools/${Name}'
+            - Name: !Select [0, !Split [':', !Ref Item]]
+          Description: !Sub
+            - 'Agent pool configuration for ${Name}'
+            - Name: !Select [0, !Split [':', !Ref Item]]
+          Type: String
+          Value: !Sub
+            - |
+              name: "${Name}"
+              auto_scaler:
+                backend:
+                  aws_launch_template:
+                    launch_template_name: '${AWS::StackName}-agent'
+                    region: ${AWS::Region}
+                    use_instance_id_as_name: true
+                    instance_type: "${InstanceType}"
+                    tags:
+                      VeldaApp: "${AWS::StackName}"
+                      Pool: "${Name}"
+                    agent_config: {}
+                max_agents: 20
+                min_idle_agents: 0
+                max_idle_agents: 3
+                idle_decay: 90s
+            - Name: !Select [0, !Split [':', !Ref Item]]
+              InstanceType: !Select [1, !Split [':', !Ref Item]]
+        
+Outputs:
+  # Output the controller public IP
+  ControllerPublicIp:
+    Description: The public IP address of the Velda controller
+    Value: !GetAtt ControllerInstance.PublicIp
+
+  # Output the controller private IP
+  ControllerPrivateIp:
+    Description: The private IP address of the Velda controller
+    Value: !GetAtt ControllerInstance.PrivateIp
