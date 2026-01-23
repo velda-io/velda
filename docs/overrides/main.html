@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  <!-- Velda.io custom branding -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <meta property="og:title" content="{{ config.site_name }}">
+  <meta property="og:description" content="{{ config.site_description }}">
+  <meta property="og:image" content="https://velda.io/logo-h.png">
+  <meta property="og:url" content="{{ page.canonical_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@velda_io">
+{% endblock %}
+
+{% block announce %}
+  <!-- Optional announcement bar -->
+  {% if config.extra.announcement %}
+  <div class="md-banner">
+    <div class="md-banner__inner md-grid md-typeset">
+      {{ config.extra.announcement }}
+    </div>
+  </div>
+  {% endif %}
+{% endblock %}

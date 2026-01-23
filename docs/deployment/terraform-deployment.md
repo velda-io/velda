@@ -34,4 +34,4 @@ terraform init
 terraform apply
 ```
 
-You're all set. Check the printed instructions and follow the [connect guide](connect.md#create-and-initialize-your-first-instance) on how to connect to your instance.
+You're all set. Check the printed instructions to configure your first instance.

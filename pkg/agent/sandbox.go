@@ -195,7 +195,7 @@ func (p *PivotRootPlugin) Run(ctx context.Context) error {
 		die("Mount proc", err)
 	}
 	if _, err := os.Stat("/etc/fstab"); err == nil {
-		// Set up mounts from /etc/fstab by invoking "mount -a -O nolazy"
+		// Set up mounts from /etc/fstab by invoking "mount -a -O nox-lazy"
 		cmd := exec.Command("mount", "-a", "-O", "nox-lazy")
 		cmd.Stderr = os.Stderr
 		// Failures are non-fatal.

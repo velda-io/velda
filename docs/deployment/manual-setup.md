@@ -2,8 +2,7 @@
 
 This document shows how to set up an open-source Velda cluster directly on Linux machines.
 
-If you're deploying in a cloud provider, you can also check out our Terraform template.
-* [Google cloud](terraform_gcp.md)
+If you're deploying in your cloud provider, using terraform is the recommended approach. Check out our [Terraform template](https://github.com/velda-io/velda-terraform/) and how to deploy.
 
 
 ## Prepare the apiserver
@@ -36,7 +35,12 @@ agent_pools:
 - name: shell
 ```
 
-4. Initialize a default image. You can create an instance from a Docker image directly using the `velda` CLI.
+4. Start the API server
+```bash
+./apiserver --config config.yaml
+```
+
+5. Initialize a default image. You can create an instance from a Docker image directly using the `velda` CLI.
 
 From a Docker image (requires Docker available where you run this command):
 ```bash
@@ -44,12 +48,6 @@ velda instance create ubuntu_24 --docker-image ubuntu:24.04
 ```
 
 New images can be created from any existing instance.
-
-5. Start the API server
-```bash
-./apiserver --config config.yaml
-```
-
 The control plane is now ready. It's strongly recommended to ensure only authorized people (e.g., admin) have access to the control plane. Unauthorized access could grant complete access to all files in the system.
 
 ## Start a runner
@@ -135,6 +133,3 @@ velda run --instance first-instance
 ```bash
 velda image create --from-instance first-instance base-image
 ```
-
-## Create instances from an image / Connect to instances
-See [connect to your cluster](connect.md).
