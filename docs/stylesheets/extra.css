@@ -1,0 +1,149 @@
+/* Velda.io Custom Styles - cleaned
+   All custom color variables and color overrides removed to use
+   MkDocs/default theme colors. Non-color enhancements (typography,
+   spacing, code block styling, button shape) are preserved.
+*/
+
+/* Typography variables (sizes/spacing only) */
+:root {
+  --type-header-xxl: 60px;
+  --type-header-xl: 48px;
+  --type-header-l: 40px;
+  --type-header-m: 30px;
+  --type-header-s: 20px;
+  --type-header-xs: 18px;
+
+  --type-text-l: 20px;
+  --type-text-m: 18px;
+  --type-text-s: 16px;
+  --type-text-xs: 14px;
+}
+
+:root>* {
+  --md-accent-fg-color: #1B8696;
+  /* velda-teal */
+  --md-accent-fg-color--transparent: #1B869613;
+  /* velda-teal */
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Enhanced code blocks */
+.md-typeset pre>code {
+  border-radius: 0.5rem;
+}
+
+.md-typeset code {
+  background-color: var(--md-code-bg-color);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.85em;
+}
+
+/* Button shape and interaction */
+.md-button {
+  border-radius: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.md-button--primary:hover {
+  transform: translateY(-2px);
+}
+
+/* Tabs/navigation subtle adjustments */
+.md-tabs__link {
+  opacity: 0.9;
+}
+
+.md-tabs__link--active {
+  opacity: 1;
+  font-weight: 600;
+}
+
+/* Search input radius */
+.md-search__input {
+  border-radius: 0.5rem;
+}
+
+/* Typography mappings */
+.md-typeset h1 {
+  font-weight: 700;
+  font-size: var(--type-header-m);
+  line-height: 1.2;
+  margin: 0 0 0.6em 0;
+}
+
+.md-typeset h2 {
+  font-weight: 700;
+  font-size: var(--type-header-m);
+  line-height: 1.2;
+  margin: 80px 0 20px 0;
+}
+
+.md-typeset h3 {
+  font-weight: 700;
+  font-size: var(--type-header-s);
+  line-height: 1.2;
+  margin: 0 0 10px 0;
+}
+
+.md-typeset h4 {
+  font-weight: 600;
+  font-size: var(--type-header-xs);
+  line-height: 1.5;
+  margin: 0 0 10px 0;
+}
+
+.md-typeset h5 {
+  font-weight: 600;
+  font-size: var(--type-header-xs);
+  line-height: 1.5;
+  margin: 0 0 8px 0;
+}
+
+.md-typeset h6 {
+  font-weight: 600;
+  font-size: var(--type-header-xs);
+  line-height: 1.5;
+  margin: 0 0 8px 0;
+}
+
+.md-typeset p,
+.md-typeset li {
+  font-size: var(--type-text-m);
+  line-height: 1.5;
+  margin: 0 0 1em 0;
+}
+
+.md-typeset small,
+.md-typeset .text-xs {
+  font-size: var(--type-text-xs);
+  line-height: 1.5;
+}
+
+.md-typeset .text-l {
+  font-size: var(--type-text-l);
+}
+
+.md-typeset .text-s {
+  font-size: var(--type-text-s);
+}
+
+/* Table enhancements (no color overrides) */
+.md-typeset table:not([class]) {
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  font-weight: 600;
+}
+
+/* Admonition shape only (no color) */
+.md-typeset .note>.admonition-title,
+.md-typeset .note>summary {
+  border-radius: 0.25rem;
+}

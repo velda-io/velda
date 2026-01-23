@@ -1,0 +1,147 @@
+site_name: Velda Documentation
+site_description: Velda - Cloud OS for AI/ML Infrastructure
+site_author: Velda Team
+site_url: https://docs.velda.io
+repo_url: https://github.com/velda-io/velda
+repo_name: velda-io/velda
+docs_dir: docs
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  logo: https://velda.io/logo-h.png
+  favicon: https://velda.io/favicon.ico
+  palette:
+    - scheme: default
+      primary: white
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - content.action.edit
+    - content.action.view
+    - content.code.annotate
+    - content.code.copy
+    - content.tooltips
+    - navigation.expand
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - navigation.path
+    - navigation.sections
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom
+  - pymdownx.tabbed:
+      alternate_style: true
+      combine_header_slug: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+nav:
+  - Home: overview/what-is-velda.md
+  - Getting Started:
+      - 5-Minute Quickstart: quickstart/5-minute-quickstart.md
+  - User Guide:
+      - Managing Instances: user-guide/managing-instances.md
+      - Running Workloads: user-guide/running-workloads.md
+      - Batch Jobs (vbatch): user-guide/batch-jobs-vbatch.md
+      - DAGs & Workflows: user-guide/dags-and-workflows.md
+      - Sharded Jobs: user-guide/sharded-jobs.md
+      - Gang Scheduling: user-guide/gang-scheduling.md
+      - Snapshots & Overlays: user-guide/snapshots-and-overlays.md
+      - Storage & Volumes: user-guide/storage-volumes.md
+  - Deployment:
+      - Deployment Overview: deployment/overview.md
+      - Terraform Deployment: deployment/terraform-deployment.md
+      - Manual Cluster Setup: deployment/manual-setup.md
+      - Connecting to Cluster: deployment/connecting-to-cluster.md
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - minify:
+      minify_html: true
+  - mermaid2:
+      version: "10.4.0"
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/velda-io/velda
+      name: Velda on GitHub
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/company/velda-io/
+      name: Velda on LinkedIn
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/velda_io
+      name: Velda on X
+  homepage: https://velda.io
+  analytics:
+    feedback:
+      title: Was this page helpful?
+      ratings:
+        - icon: material/emoticon-happy-outline
+          name: This page was helpful
+          data: 1
+          note: >-
+            Thanks for your feedback!
+        - icon: material/emoticon-sad-outline
+          name: This page could be improved
+          data: 0
+          note: >-
+            Thanks for your feedback! Help us improve by
+            <a href="https://github.com/velda-io/velda/issues/new" target="_blank" rel="noopener">opening an issue</a>.
+
+extra_css:
+  - stylesheets/extra.css
