@@ -106,6 +106,12 @@ nav:
       - Terraform Deployment: deployment/terraform-deployment.md
       - Manual Cluster Setup: deployment/manual-setup.md
       - Connecting to Cluster: deployment/connecting-to-cluster.md
+      - Pool Configuration:
+          - Configuration Guide: deployment/pools-configuration.md
+          - Pool Backends Reference: deployment/pool-backends.md
+          - Autoscaling Configuration: deployment/pool-autoscaling.md
+          - Pool Provisioners: deployment/pool-provisioners.md
+          - Kubernetes CRD Integration: deployment/pool-kubernetes-crd.md
 
 plugins:
   - search:
