@@ -89,7 +89,7 @@ markdown_extensions:
   - pymdownx.tilde
 
 nav:
-  - Home: overview/what-is-velda.md
+  - Home: index.md
   - Getting Started:
       - 5-Minute Quickstart: quickstart/5-minute-quickstart.md
   - User Guide:
