@@ -35,7 +35,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install mkdocs-material pymdown-extensions mkdocs-mermaid2-plugin
+          pip install mkdocs-material pymdown-extensions mkdocs-mermaid2-plugin mkdocs-minify-plugin
 
       - name: Build MkDocs site
         run: mkdocs build --strict
