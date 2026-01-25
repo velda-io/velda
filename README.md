@@ -1,61 +1,57 @@
-<a href="https://velda.io">
-    <img width="2334" height="1206" alt="Velda banner image" src="https://github.com/user-attachments/assets/31e8ba86-df2b-4be3-a43d-7b61d1a3b6f0" />
-</a>
+<p align="center">
+  <a href="https://velda.io">
+    <picture>
+      <img alt="Velda.io" src="https://raw.githubusercontent.com/velda-io/velda/docreadme/docs/logo.png" width=55%>
+    </picture>
+  </a>
+</p>
 
-# Velda
+<p align="center">
+  <a href="https://docs.velda.io/">
+    <img alt="Documentation" src="https://img.shields.io/badge/docs-gray?logo=readthedocs&logoColor=f5f5f5">
+  </a>
 
-Velda is a cloud-native development, workload orchestration & HPC (High Performance Computing) platform. Directly scale your application from your development environment, no extra setup required.
+  <a href="https://github.com/velda-io/velda/releases">
+    <img alt="GitHub Release" src="https://img.shields.io/github/release/velda-io/velda.svg">
+  </a>
 
-## Code on Velda
+  <a href="https://discord.gg/MJQbeE33">
+    <img alt="Join Slack" src="https://img.shields.io/badge/Velda-Join%20Discord-blue?logo=discord">
+  </a>
 
-Velda provides a seamless development experience.
-* Connect with your favorite IDE (e.g., SSH, VS Code, Cursor, Windsurf), or code and run directly from your browser (hosted or enterprise only).
-* Onboard new developers instantly by cloning from a pre-configured image, or customize your own.
-* Compatible with most libraries, tools, or package managers. All your environment modifications and customizations are persisted and isolated from other users.
+</p>
 
-## Scale in seconds
-Velda provides the simplest way to scale or run workloads with different hardware requirements:
-* `vrun` is all you need. Prefix `vrun` to your command, and run your workload with the resource you requested.
-* Run any workload: machine learning training, batch processing, or host a microservice cluster.
-* Unbounded capacity: Access as many machines as you need from your cloud provider.
-* Your environment is always consistent. All your code, data, dependencies, and environment will be mounted on the new machine.
+<h3 align="center">
+    Scale like your local machine in the cloud
+</h3>
 
-## Save $$$
-Save instantly with Velda:
-* No more idle GPUs, sandboxes, or machines. Only allocate the resources you need. Stop paying for GPUs while coding or in meetings.
-* Save engineering time building, updating, and maintaining container images.
-* Optionally, skip Kubernetes cluster management and scale directly with VMs from your cloud provider.
+Containers make apps scalable, but the workflow is broken: Show to build; Dependencies drift; Registry bloat; Complex Job manifests.
+
+Velda eliminates all these steps, and makes your dev-environment immediately scalable:
+
+* ❌ No Dockerfiles or Manifests
+* ❌ No image builds or registries  
+* ❌ No redeploys on code changes  
+* ✅ Instant scale from local dev to cloud compute, run in any cloud
+
+Prefix any command with `vrun` to execute it on cloud resources using the exact same code, data, and dependencies as your development machine.
+You may also use `vbatch` or other commands to orchestrate large scale pipelines.
+
+<img src="https://media.licdn.com/dms/image/v2/D5622AQHSKDuq7DUkMA/feedshare-shrink_1280/B56ZuLnXzBKEAs-/0/1767573913380?e=1770854400&v=beta&t=ScfCep-AEomIs4yqvt0zooszf9UbKJo815xxv9qA2m4" />
+
+Velda is designed for:
+- ML engineers iterating on training & evaluation
+- Data engineers running ad-hoc or scheduled batch jobs
+- Infra teams tired of rebuilding containers for every code change
 
 # Getting started
-## Using mini-velda
-[Mini-velda](/docs/mini-velda.md) runs a Velda sandbox directly from your workstation, and automatically configure your cluster to scale to the cloud. Also see [limits and restrictions](/docs/mini-velda.md#Limitations).
-
-To start a mini-velda cluster:
+1. [Deploy Velda cluster](https://docs.velda.io/deployment/overview/).
+2. Connect to your instance using ssh or Velda CLI and start development.
+3. Run jobs with `vrun`, `vbatch`
 ```
-# Init the sandbox
-velda mini init sandbox
-
-# Connect to the sandbox
-ssh mini-velda
-
-# In mini-velda sandbox, setup environment as usual
-sudo apt install python3
-pip install torch
-
-# Run workload with L4 GPUs
-vrun -P aws:g6.xlarge train.sh
+vrun -P gpu-h200-8 python train.py --epochs 100
 ```
-
-Currently support automatic configuration from AWS environment, and manual configuration for GCP, K8s and command based backend.
-
-## Set-up a shared cluster
-For organizations who want sharing the cluster resource or centralized management, or needs more than mini-velda provides, you may deploy a standalone Velda cluster that is shared with team-members.
-We support various deployment methods.
-* Set up a new cluster:
-  * [Directly on machines](docs/cluster_setup.md)
-  * [AWS/Google Cloud](docs/terraform_setup.md)
-  * Other cloud providers coming soon.
-* [Connect to a cluster](docs/connect.md)
+4. Onboard more develoers by cloning from an existing templates.
 
 # 🤝 Contributing
 We love contributions from our community ❤️. Pull requests are welcome!
@@ -67,7 +63,7 @@ Join our community here:
 
 * 🌟 [Star us on GitHub](https://github.com/velda-io/velda)
 * 👋 [Join our Discord community](https://discord.gg/MJQbeE33)
-* 📜 [Read our blog posts](https://blog.velda.io)
+* 📜 [Subscribe to our blog posts](https://blog.velda.io)
 
 # Learn more
 Check out [velda.io](https://velda.io) to learn more about Velda and our hosted/enterprise offerings.
