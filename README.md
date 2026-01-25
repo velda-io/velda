@@ -1,7 +1,7 @@
 <p align="center">
   <a href="https://velda.io">
     <picture>
-      <img alt="Velda.io" src="https://raw.githubusercontent.com/velda-io/velda/docreadme/docs/logo.png" width=55%>
+      <img alt="Velda.io" src="https://raw.githubusercontent.com/velda-io/velda/main/docs/assets/logo.png" width=55%>
     </picture>
   </a>
 </p>
@@ -25,7 +25,7 @@
     Scale like your local machine in the cloud
 </h3>
 
-Containers make apps scalable, but the workflow is broken: Show to build; Dependencies drift; Registry bloat; Complex Job manifests.
+Containers make apps scalable, but the workflow is broken: Slow to build; Dependencies drift; Registry bloat; Complex Job manifests.
 
 Velda eliminates all these steps, and makes your dev-environment immediately scalable:
 
@@ -37,7 +37,7 @@ Velda eliminates all these steps, and makes your dev-environment immediately sca
 Prefix any command with `vrun` to execute it on cloud resources using the exact same code, data, and dependencies as your development machine.
 You may also use `vbatch` or other commands to orchestrate large scale pipelines.
 
-<img src="https://media.licdn.com/dms/image/v2/D5622AQHSKDuq7DUkMA/feedshare-shrink_1280/B56ZuLnXzBKEAs-/0/1767573913380?e=1770854400&v=beta&t=ScfCep-AEomIs4yqvt0zooszf9UbKJo815xxv9qA2m4" />
+<img src="https://raw.githubusercontent.com/velda-io/velda/main/docs/assets/vrun-anim.gif" />
 
 Velda is designed for:
 - ML engineers iterating on training & evaluation
@@ -51,7 +51,7 @@ Velda is designed for:
 ```
 vrun -P gpu-h200-8 python train.py --epochs 100
 ```
-4. Onboard more develoers by cloning from an existing templates.
+4. Onboard more developers by cloning from an existing templates.
 
 # 🤝 Contributing
 We love contributions from our community ❤️. Pull requests are welcome!
