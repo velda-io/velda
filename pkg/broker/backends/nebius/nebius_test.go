@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package mithril
+package nebius
 
 import (
 	"context"
@@ -24,58 +24,46 @@ import (
 )
 
 // To run test:
-// MITHRIL_API_TOKEN=<token> MITHRIL_PROJECT_ID=<project-id> MITHRIL_SSH_KEY_ID=<ssh-key-id> go test -v ./pkg/broker/backends/mithril
+// NEBIUS_BACKEND=<folder-id>/<instance-template-name> NEBIUS_IAM_TOKEN=<token> go test --tags nebius -v ./pkg/broker/backends/nebius
 
-func TestMithrilBackend(t *testing.T) {
-	apiToken := os.Getenv("MITHRIL_API_TOKEN")
-	if apiToken == "" {
-		t.Skip("MITHRIL_API_TOKEN not set, skipping test")
+func TestNebiusBackend(t *testing.T) {
+	parentID := os.Getenv("NEBIUS_PARENT_ID")
+	subnetID := os.Getenv("NEBIUS_SUBNET_ID")
+	if parentID == "" || subnetID == "" {
+		t.Skip("NEBIUS_PARENT_ID or NEBIUS_SUBNET_ID not set; skipping integration test")
 	}
-
-	projectID := os.Getenv("MITHRIL_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("MITHRIL_PROJECT_ID not set, skipping test")
-	}
-
-	sshKeyId := os.Getenv("MITHRIL_SSH_KEY_ID")
-	if sshKeyId == "" {
-		t.Skip("MITHRIL_SSH_KEY_ID not set")
-	}
-
 	configpb := &cfgpb.AutoscalerBackend{
-		Backend: &cfgpb.AutoscalerBackend_MithrilSpotBid{
-			MithrilSpotBid: &cfgpb.AutoscalerBackendMithrilSpotBid{
-				InstanceType: "it_RrgkIZz6c9BZu5gi",
-				Region:       "us-central3-a",
-				LimitPrice:   0.14,
-				ProjectId:    projectID,
-				ApiToken:     apiToken,
-				AgentConfig:  &agentpb.AgentConfig{},
+		Backend: &cfgpb.AutoscalerBackend_NebiusLaunchTemplate{
+			NebiusLaunchTemplate: &cfgpb.AutoscalerBackendNebiusLaunchTemplate{
+				ParentId:       parentID,
+				Platform:       "cpu-d3",
+				ResourcePreset: "4vcpu-16gb",
+				//Platform:           "gpu-h200-sxm",
+				//ResourcePreset:     "1gpu-16vcpu-200gb",
+				SubnetId:           subnetID,
+				InstanceNamePrefix: "velda-agent",
+				AgentConfig:        &agentpb.AgentConfig{},
+				MaxDiskPoolSize:    1,
 				Labels: map[string]string{
 					"velda-test": "velda",
 				},
-				SshKeyIds: []string{
-					sshKeyId,
-				},
-				MaxSuspendedBids: 1,
 			},
 		},
 	}
 
 	poolPb := &cfgpb.AgentPool{
-		Name:       "mithril-a100",
+		Name:       "cpu-4",
 		AutoScaler: &cfgpb.AgentPool_AutoScaler{Backend: configpb},
 	}
 
-	factory := &mithrilSpotBidPoolFactory{}
+	factory := &nebiusLaunchTemplatePoolFactory{}
 	brokerInfo := &agentpb.BrokerInfo{
-		Address: "localhost:50051",
+		Address: "172.31.30.15:50051",
 	}
 	backend, err := factory.NewBackend(poolPb, brokerInfo)
 	if err != nil {
 		t.Fatalf("Failed to create backend: %v", err)
 	}
-
 	backend.ListWorkers(context.Background())
 
 	backend_testing.TestSimpleScaleUpDown(t, backend)
