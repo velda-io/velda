@@ -95,6 +95,7 @@ nav:
   - User Guide:
       - Managing Instances: user-guide/managing-instances.md
       - Running Workloads: user-guide/running-workloads.md
+      - Port forwarding: user-guide/port-forwarding.md
       - Batch Jobs (vbatch): user-guide/batch-jobs-vbatch.md
       - DAGs & Workflows: user-guide/dags-and-workflows.md
       - Sharded Jobs: user-guide/sharded-jobs.md
@@ -112,6 +113,7 @@ nav:
           - Autoscaling Configuration: deployment/pool-autoscaling.md
           - Pool Provisioners: deployment/pool-provisioners.md
           - Kubernetes CRD Integration: deployment/pool-kubernetes-crd.md
+          - Multi-cloud pool: deployment/multi-cloud-pool.md
 
 plugins:
   - search:

@@ -1,38 +1,63 @@
 # What is Velda?
 
-Velda is a container orchestration platform designed for AI/ML workloads. It allows users to run commands on remote compute resources by prefixing them with `vrun`.
+Velda is a dev-friendly workload orchestration platform designed for AI, ML and data-intensive tasks. It allows users to run commands on remote compute like local machine.
 
-## The `vrun` Command
+## The `vrun` & `vbatch` Command
 
-The `vrun` command executes workloads on remote compute resources. Any command can be prefixed with `vrun` to run it on configured resource pools.
+A command prefix is all you need to run commands on remote compute resources. No Dockerfile, no Kubernetes manifests, and no context switching.
+
+### Interactive execution with `vrun`
+`vrun` gives you same experience as your local terminal, but with compute power of your cluster.
 
 ```bash
-# Run locally
+# Run locally (with CPU only)
 python train.py
 
-# Run with 4 GPUs on a remote resource pool
-vrun -P gpu-4xa100 python train.py
+# Run with 8 GPUs on a remote resource pool
+vrun -P gpu-a100-8 python train.py
 ```
 
-No container image building or Kubernetes manifests are required.
+You may add `vrun` to any command in your sub-process invocations, to leverage the additional power from your cloud. Depending on your cluster setup and the cloud capacity, the launch only takes a second for warm start and less than 30seconds for a cold start.
+
+### Running batch jobs with `vbatch`
+`vbatch` command is similar to `vrun`, but it runs the job in the background, so you can detach your terminal and continue monitor the tasks.
+
+```bash
+vbatch -f -P gpu-a100-8 python train.py  # -f streams logs immediately
+```
+
+Example usage:
+
+* Start multiple workers with your preferred task orchestrator: `vbatch -N 10 python worker.py`
+* Parallelism: [Run sharded jobs](user-guide/sharded-jobs.md) (e.g. tests, data processing)
+* Pipelines: [Build sophisticated job pipelines](user-guide/dags-and-workflows.md)
+* Distributed training: Support for ([Gang scheduling](user-guide/gang-scheduling.md))
 
 ## Features
 
-### Dynamic Resource Allocation
-Workloads can be assigned to different resource pools. Resources are allocated when jobs run and released when they complete.
+### Zero-image overhead.
+Traditional cloud scaling rely on container images, and this often result in over 10 minutes delay for each iterations. Velda skips this step and can launch job just in seconds.
 
-### Environment Isolation
-Each user get isolated and persisted environment. Users can install packages using standard package managers (pip, apt, npm, conda) without affecting other users.
+### Dynamic Resource Allocation
+Resources are provisioned on-demand and released immediately upon completion.
+
+### Consistent environment
+Use `pip`, `apt`, `conda` freely. Every user gets a persisted, isolated environment. Velda guarantees consistency across jobs by sharing underlying storage.
 
 ### Multi-Cloud Support
-Velda can be deployed on AWS, Google Cloud, or on-premises infrastructure. The agent may run from other clouds or network regions(egress and latency may apply).
+Velda can be deployed on most hyperscaler & newclouds (AWS, Google Cloud, Nebius) or on-premises infrastructure. The workload may run from clouds or network regions that is different from where the server is hosted (network cost and latency may apply).
 
 ## Use Cases
 
 ### Machine Learning & AI
 - Train models with distributed GPU clusters
 - Run hyperparameter tuning at scale
-- Deploy inference services with auto-scaling
+- Pipeline training with other steps including pre-processing & eval.
+
+### Development environment
+- Save cost on your dev-machine by only allocating GPUs when running GPU workloads
+- Auto-shutdown machines when idle
+- Onboard new developers with customized instance images
 
 ### Data Processing
 - Process large datasets with distributed computing
@@ -40,7 +65,7 @@ Velda can be deployed on AWS, Google Cloud, or on-premises infrastructure. The a
 - Execute data analysis workflows
 
 ### Software Development
-- Compile large codebases with multi-core machines
+- Compile large codebases with multi-core machines, or distribute compile commands remotely
 - Run CI/CD pipelines on cloud infrastructure
 - Test applications in production-like environments
 
