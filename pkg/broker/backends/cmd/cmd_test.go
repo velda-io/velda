@@ -14,6 +14,7 @@
 package cmd
 
 import (
+	"os"
 	"testing"
 
 	"velda.io/velda/pkg/broker/backends/backend_testing"
@@ -27,5 +28,9 @@ func TestCmdBackend(t *testing.T) {
 		"ls "+tmpdir,
 		"",
 	)
+	// This tests always run because the Cmd backend is lightweight and has no external dependencies
+	oldEnv := os.Getenv("BACKEND_TESTING")
+	defer os.Setenv("BACKEND_TESTING", oldEnv)
+	os.Setenv("BACKEND_TESTING", "1")
 	backend_testing.TestSimpleScaleUpDown(t, backend)
 }

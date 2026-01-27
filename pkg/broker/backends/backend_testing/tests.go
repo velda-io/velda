@@ -15,6 +15,8 @@ package backend_testing
 
 import (
 	"context"
+	"flag"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,6 +24,8 @@ import (
 
 	"velda.io/velda/pkg/broker"
 )
+
+var runBackendTests = flag.Bool("backend-testing", false, "Enable backend integration tests")
 
 type hasWait interface {
 	WaitForLastOperation(ctx context.Context) error
@@ -34,6 +38,9 @@ func (d *dummyWait) WaitForLastOperation(ctx context.Context) error {
 }
 
 func TestSimpleScaleUpDown(t *testing.T, backend broker.ResourcePoolBackend) {
+	if !*runBackendTests && os.Getenv("BACKEND_TESTING") == "" {
+		t.Skip("backend integration tests disabled; enable with -backend-testing or set BACKEND_TESTING=1")
+	}
 	var instanceName string
 	waiter, ok := backend.(hasWait)
 	if !ok {
@@ -84,6 +91,9 @@ func TestSimpleScaleUpDown(t *testing.T, backend broker.ResourcePoolBackend) {
 
 func TestScaleUpDownWithBuffer(t *testing.T, backend broker.ResourcePoolBackend,
 	waitBufferReady func()) {
+	if !*runBackendTests && os.Getenv("BACKEND_TESTING") == "" {
+		t.Skip("backend integration tests disabled; enable with -backend-testing or set BACKEND_TESTING=1")
+	}
 	var instanceName string
 	waiter, ok := backend.(hasWait)
 	if !ok {
