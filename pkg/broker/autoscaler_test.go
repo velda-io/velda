@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 )
 
 type FakeBackend struct {
+	mu sync.Mutex
 	// Ordered by creation time.
 	workers []WorkerStatus
 	pending []string
@@ -36,6 +38,8 @@ type FakeBackend struct {
 }
 
 func (f *FakeBackend) RequestScaleUp(ctx context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var name string
 	// Recycle deleted worker names if enabled
 	if f.recycleWorkerNames && len(f.deletedWorkers) > 0 {
@@ -58,6 +62,8 @@ func (f *FakeBackend) RequestScaleUp(ctx context.Context) (string, error) {
 }
 
 func (f *FakeBackend) GetPending(t *testing.T) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	require.NotEmpty(t, f.pending)
 	name := f.pending[0]
 	f.pending = f.pending[1:]
@@ -65,10 +71,14 @@ func (f *FakeBackend) GetPending(t *testing.T) string {
 }
 
 func (f *FakeBackend) NoPending() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return len(f.pending) == 0
 }
 
 func (f *FakeBackend) RequestDelete(ctx context.Context, workerName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for i, v := range f.workers {
 		if v.Name == workerName {
 			log.Printf("Fake backend: Scale down %s", workerName)
@@ -84,6 +94,8 @@ func (f *FakeBackend) RequestDelete(ctx context.Context, workerName string) erro
 }
 
 func (f *FakeBackend) ListWorkers(ctx context.Context) ([]WorkerStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var res []WorkerStatus
 	for _, v := range f.workers {
 		res = append(res, v)
@@ -92,12 +104,29 @@ func (f *FakeBackend) ListWorkers(ctx context.Context) ([]WorkerStatus, error) {
 }
 
 func (f *FakeBackend) HasWorker(workerName string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for _, v := range f.workers {
 		if v.Name == workerName {
 			return true
 		}
 	}
 	return false
+}
+
+func (f *FakeBackend) NumWorkers() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.workers)
+}
+
+func (f *FakeBackend) Worker(i int) WorkerStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i < 0 || i >= len(f.workers) {
+		return WorkerStatus{}
+	}
+	return f.workers[i]
 }
 
 func TestAutoScaler(t *testing.T) {
@@ -158,7 +187,7 @@ func TestAutoScaler(t *testing.T) {
 	t.Run("InitialWorkers", func(t *testing.T) {
 		pool.ReadyForIdleMaintenance()
 		// Should trigger a scale-up for min size.
-		assert.Equal(t, 2, len(backend.workers))
+		assert.Equal(t, 2, backend.NumWorkers())
 		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 1)
 		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 1)
 	})
@@ -166,7 +195,7 @@ func TestAutoScaler(t *testing.T) {
 	t.Run("RequestWorkerAndMaintainSize", func(t *testing.T) {
 		requireWorker(t)
 		// Should also trigger a scale-up for min-idle.
-		assert.Equal(t, 2, len(backend.workers))
+		assert.Equal(t, 2, backend.NumWorkers())
 	})
 
 	t.Run("RequestWorkerAndScaleUpForIdle", func(t *testing.T) {
@@ -174,21 +203,21 @@ func TestAutoScaler(t *testing.T) {
 			requireWorker(t)
 			log.Printf("Requesting worker %d: %d idle, %d pending", i, pool.idleSlots, pool.pendingSessions)
 			// Should also trigger a scale-up for min-idle.
-			assert.Equal(t, i+2, len(backend.workers))
+			assert.Equal(t, i+2, backend.NumWorkers())
 			pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 1)
 		}
 	})
 
 	t.Run("RequestWorkerMeetMaxSize", func(t *testing.T) {
 		requireWorker(t)
-		assert.Equal(t, 5, len(backend.workers))
+		assert.Equal(t, 5, backend.NumWorkers())
 		assert.Equal(t, 5, len(pool.runningWorkers))
 	})
 
 	t.Run("RequestWorkerNotAvailable", func(t *testing.T) {
 		err := pool.RequestWorker()
 		assert.NoError(t, err)
-		assert.Equal(t, 5, len(backend.workers))
+		assert.Equal(t, 5, backend.NumWorkers())
 	})
 
 	// Current the pool is full, with one pending session.
@@ -197,14 +226,14 @@ func TestAutoScaler(t *testing.T) {
 	assert.NoError(t, pool.RequestCancelled())
 
 	t.Run("TaskCompleted", func(t *testing.T) {
-		pool.MarkIdle(backend.workers[0].Name, 1)
-		pool.MarkIdle(backend.workers[1].Name, 1)
-		pool.MarkIdle(backend.workers[2].Name, 1)
+		pool.MarkIdle(backend.Worker(0).Name, 1)
+		pool.MarkIdle(backend.Worker(1).Name, 1)
+		pool.MarkIdle(backend.Worker(2).Name, 1)
 
-		pool.MarkIdle(backend.workers[3].Name, 1)
+		pool.MarkIdle(backend.Worker(3).Name, 1)
 		// Should trigger a scale-down for max-idle.
 		assert.Eventually(t, func() bool {
-			return len(backend.workers) == 4
+			return backend.NumWorkers() == 4
 		}, 3*time.Second, 10*time.Millisecond)
 	})
 
@@ -217,16 +246,16 @@ func TestAutoScaler(t *testing.T) {
 			pool.idleDecay = oldDecay
 		}()
 		// We force a scale-down to retrigger the idle decay.
-		pool.MarkIdle(backend.workers[3].Name, 1)
+		pool.MarkIdle(backend.Worker(3).Name, 1)
 
 		if !assert.Eventually(t, func() bool {
-			return len(backend.workers) == 2
+			return backend.NumWorkers() == 2
 		}, 3*time.Second, 10*time.Millisecond) {
-			assert.Failf(t, "", "Expected 2 worker, got %d", len(backend.workers))
+			assert.Failf(t, "", "Expected 2 worker, got %d", backend.NumWorkers())
 		}
 	})
 
-	assert.Equal(t, 2, len(backend.workers))
+	assert.Equal(t, 2, backend.NumWorkers())
 	assert.Equal(t, 2, len(pool.idleWorkers))
 
 	t.Run("CancelRequestDuringStarting", func(t *testing.T) {
@@ -267,26 +296,26 @@ func TestAutoScaler(t *testing.T) {
 		// Simulate a worker being killed in the cluster.
 		// Should not do anything, because busy workers are lost.
 		// It's up to the workload to re-request a new session if retry is needed.
-		pool.MarkLost(backend.workers[0].Name)
-		backend.RequestDelete(context.Background(), backend.workers[0].Name)
-		pool.MarkLost(backend.workers[0].Name)
-		backend.RequestDelete(context.Background(), backend.workers[0].Name)
-		pool.MarkLost(backend.workers[0].Name)
-		backend.RequestDelete(context.Background(), backend.workers[0].Name)
+		pool.MarkLost(backend.Worker(0).Name)
+		backend.RequestDelete(context.Background(), backend.Worker(0).Name)
+		pool.MarkLost(backend.Worker(0).Name)
+		backend.RequestDelete(context.Background(), backend.Worker(0).Name)
+		pool.MarkLost(backend.Worker(0).Name)
+		backend.RequestDelete(context.Background(), backend.Worker(0).Name)
 
 		// Scale up to meet min-size.
 		newWorker := backend.GetPending(t)
 		pool.NotifyAgentAvailable(newWorker, false, inspectChan, 1)
 
 		// Scale up again to meet min-size.
-		pool.MarkLost(backend.workers[0].Name)
-		backend.RequestDelete(context.Background(), backend.workers[0].Name)
+		pool.MarkLost(backend.Worker(0).Name)
+		backend.RequestDelete(context.Background(), backend.Worker(0).Name)
 		newWorker2 := backend.GetPending(t)
 		pool.NotifyAgentAvailable(newWorker2, false, inspectChan, 1)
 
 		// Should trigger a scale-up for min-idle & min-size.
 		assert.Equal(t, 0, len(pool.runningWorkers))
-		assert.Equal(t, 2, len(backend.workers))
+		assert.Equal(t, 2, backend.NumWorkers())
 	})
 
 	t.Run("Reconnect", func(t *testing.T) {
@@ -307,8 +336,8 @@ func TestAutoScaler(t *testing.T) {
 		// Should scale down a worker to meet max-idle.
 
 		assert.Eventually(t, func() bool {
-			log.Printf("len workers: %d", len(backend.workers))
-			return len(backend.workers) == 3
+			log.Printf("len workers: %d", backend.NumWorkers())
+			return backend.NumWorkers() == 3
 		}, 3*time.Second, 10*time.Millisecond)
 	})
 }
@@ -354,7 +383,7 @@ func TestAutoScalerWithMultipleSlots(t *testing.T) {
 		pool.ReadyForIdleMaintenance()
 		// Should trigger a scale-up for min-idle (2 slots),
 		// but only need 1 worker since each has 2 slots
-		assert.Equal(t, 1, len(backend.workers))
+		assert.Equal(t, 1, backend.NumWorkers())
 		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 2)
 
 		// Verify we have 2 idle slots as expected
@@ -365,33 +394,33 @@ func TestAutoScalerWithMultipleSlots(t *testing.T) {
 
 		// Request first worker - will consume one slot from existing worker
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[0].Name, 1)
-		assert.Equal(t, 2, len(backend.workers))
+		pool.MarkBusy(backend.Worker(0).Name, 1)
+		assert.Equal(t, 2, backend.NumWorkers())
 
 		// Request second worker - will consume the second slot from existing worker
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[0].Name, 0)
+		pool.MarkBusy(backend.Worker(0).Name, 0)
 
 		// Now we're out of slots, and need to scale up to maintain min-idle = 2
-		assert.Equal(t, 2, len(backend.workers))
+		assert.Equal(t, 2, backend.NumWorkers())
 		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 2)
 	})
 
 	t.Run("ScaleDownExcessIdleSlots", func(t *testing.T) {
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[1].Name, 1)
+		pool.MarkBusy(backend.Worker(1).Name, 1)
 
 		// Now we have 2 workers(4 total slots), 3 slot busy. Need to scale up to maintain min-idle = 2
 		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 2)
 
 		// Mark all workers to be idle
-		pool.MarkIdle(backend.workers[0].Name, 2)
-		pool.MarkIdle(backend.workers[1].Name, 2)
+		pool.MarkIdle(backend.Worker(0).Name, 2)
+		pool.MarkIdle(backend.Worker(1).Name, 2)
 
 		// We now have 6 idle slots from 3 workers
 		// This is over max-idle (4), so we should scale down
 		assert.Eventually(t, func() bool {
-			return len(backend.workers) == 2
+			return backend.NumWorkers() == 2
 		}, 3*time.Second, 10*time.Millisecond)
 
 		// We should have 4 idle slots now (2 workers × 2 slots each)
@@ -402,46 +431,46 @@ func TestAutoScalerWithMultipleSlots(t *testing.T) {
 	t.Run("PartialOccupancyTracking", func(t *testing.T) {
 		// Request one worker, which will use one slot
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[0].Name, 1)
+		pool.MarkBusy(backend.Worker(0).Name, 1)
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[0].Name, 0)
+		pool.MarkBusy(backend.Worker(0).Name, 0)
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[1].Name, 1)
+		pool.MarkBusy(backend.Worker(1).Name, 1)
 
 		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 2)
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[1].Name, 0)
+		pool.MarkBusy(backend.Worker(1).Name, 0)
 
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[2].Name, 1)
+		pool.MarkBusy(backend.Worker(2).Name, 1)
 
 		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 2)
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[2].Name, 0)
+		pool.MarkBusy(backend.Worker(2).Name, 0)
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[3].Name, 1)
+		pool.MarkBusy(backend.Worker(3).Name, 1)
 		pool.NotifyAgentAvailable(backend.GetPending(t), false, inspectChan, 2)
 		requireWorker(t)
-		pool.MarkBusy(backend.workers[4].Name, 1)
+		pool.MarkBusy(backend.Worker(4).Name, 1)
 
 		// Now we have 5 workers, 8 slots busy. 0-2 are fully used, 3-4 are partially used.
-		assert.Equal(t, 5, len(backend.workers))
+		assert.Equal(t, 5, backend.NumWorkers())
 		assert.Equal(t, 0, pool.pendingSessions)
 		assert.Equal(t, 2, pool.idleSlots)
 
 		// Mark 0-2 to be partially used.
-		pool.MarkBusy(backend.workers[0].Name, 1)
-		pool.MarkBusy(backend.workers[1].Name, 1)
-		pool.MarkBusy(backend.workers[2].Name, 1)
+		pool.MarkBusy(backend.Worker(0).Name, 1)
+		pool.MarkBusy(backend.Worker(1).Name, 1)
+		pool.MarkBusy(backend.Worker(2).Name, 1)
 
 		// No workers should be scaled down, despite we have 5 idle slots.
 		assert.Equal(t, 5, pool.idleSlots)
-		assert.Equal(t, 5, len(backend.workers))
-		toDelete := backend.workers[0].Name
-		pool.MarkIdle(backend.workers[0].Name, 2)
+		assert.Equal(t, 5, backend.NumWorkers())
+		toDelete := backend.Worker(0).Name
+		pool.MarkIdle(backend.Worker(0).Name, 2)
 		// Will scale down worker 0 only.
 		assert.Eventually(t, func() bool {
-			return len(backend.workers) == 4
+			return backend.NumWorkers() == 4
 		}, 3*time.Second, 10*time.Millisecond)
 		assert.False(t, backend.HasWorker(toDelete), "Worker %s should be deleted", toDelete)
 	})
@@ -479,7 +508,7 @@ func TestDeleteUnknownWorkers(t *testing.T) {
 
 	assert.NoError(t, pool.Reconnect(context.Background()))
 	// Should delete the lost worker, as it was not seen for 300ms.
-	assert.Equal(t, 0, len(backend.workers), time.Since(pool.lastKnownTime[lost]))
+	assert.Equal(t, 0, backend.NumWorkers(), time.Since(pool.lastKnownTime[lost]))
 }
 
 func TestCancelledDuringPending(t *testing.T) {
@@ -503,7 +532,7 @@ func TestCancelledDuringPending(t *testing.T) {
 	pool.RequestCancelled()
 	// Verify worker is deleted from backend
 	assert.Eventually(t, func() bool {
-		return len(backend.workers) == 0
+		return backend.NumWorkers() == 0
 	}, 3*time.Second, 10*time.Millisecond)
 }
 
@@ -592,7 +621,7 @@ func TestWorkerRestartWithSameID(t *testing.T) {
 		pool.MarkBusy(workerName, 0)
 
 		// Verify no extra node was provisioned
-		assert.Equal(t, 1, len(backend.workers),
+		assert.Equal(t, 1, backend.NumWorkers(),
 			"No extra worker should be provisioned on reconnect")
 	})
 }
