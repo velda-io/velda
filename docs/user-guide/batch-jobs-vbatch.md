@@ -121,8 +121,10 @@ The watch command is particularly useful for monitoring tasks with subtasks, as 
 ```bash
 # Cancel a running task
 velda task cancel task-abc123
+```
 
-# This will:
-# - Terminate the running task
-# - Cancel any pending subtasks
-# - Mark the task as TASK_STATUS_CANCELLED
+This will:
+
+- Terminate the running task (Status is failed since they already started)
+- Cancel any pending subtasks (Status will be Cancelled)
+- Mark the task as TASK_STATUS_CANCELLED
