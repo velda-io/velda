@@ -40,8 +40,8 @@ func RunVeldaRaw(args ...string) (*exec.Cmd, error) {
 		if err != nil {
 			// Fall back to binary in the project
 			veldaPath = filepath.Join("..", "..", "bin", "client")
-			if _, err := os.Stat(veldaPath); os.IsNotExist(err) {
-				return nil, fmt.Errorf("velda client binary not found: %v", err)
+			if _, err := os.Stat(veldaPath); err != nil {
+				return nil, fmt.Errorf("velda client binary not accessible: %w", err)
 			}
 		}
 	}
