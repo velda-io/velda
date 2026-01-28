@@ -33,6 +33,9 @@ import (
 	"golang.org/x/crypto/ssh"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+
 	"velda.io/velda/pkg/clientlib"
 	"velda.io/velda/pkg/proto"
 )
@@ -205,8 +208,33 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	}
 	DebugLog("Sending session request: %v", sessionReq)
 
-	resp, err := brokerClient.RequestSession(cmd.Context(), sessionReq)
-	if err != nil {
+	var resp *proto.ExecutionStatus
+	// Exponential backoff when broker returns RESOURCE_EXHAUSTED
+	// Start with 30s, double each retry, and give up after 5 minutes total.
+	maxTotalWait := 5 * time.Minute
+	delay := 5 * time.Second
+	for {
+		resp, err = brokerClient.RequestSession(cmd.Context(), sessionReq)
+		if err == nil {
+			break
+		}
+		// If context was cancelled/expired, return immediately.
+		st := grpcstatus.Convert(err)
+		if st.Code() == codes.ResourceExhausted {
+			if !quiet && !batch {
+				cmd.PrintErrf("Out of quota %v, retrying in %s...\n", st.Message(), delay)
+			}
+			select {
+			case <-cmd.Context().Done():
+				return err
+			case <-time.After(delay):
+			}
+			delay *= 2
+			if delay > maxTotalWait {
+				delay = maxTotalWait
+			}
+			continue
+		}
 		return err
 	}
 	if !quiet && !batch {
