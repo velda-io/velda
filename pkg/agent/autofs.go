@@ -241,9 +241,8 @@ func (a *AutoFS) ioctl(ioctlfd int32, command autofsIoctlCommand, arg1 uint32, a
 }
 
 func (a *AutoFS) Run() error {
-
 	fstab, err := ParseFstab("/etc/fstab")
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to parse fstab: %w", err)
 	}
 	for _, entry := range fstab {
@@ -260,6 +259,7 @@ func (a *AutoFS) Run() error {
 			return fmt.Errorf("failed to setup auto-mount %s: %w", entry.MountPoint, err)
 		}
 	}
+	log.Printf("AutoFS mounts detected %d entries from fstab\n", len(fstab))
 	return nil
 }
 
@@ -292,7 +292,9 @@ func (p *AutoFsMountPlugin) Run(ctx context.Context) error {
 	daemon := ctx.Value(p.daemonPlugin).(*AutoFS)
 	err := daemon.Run()
 	if err != nil {
-		return fmt.Errorf("Failed to run auto-mount %w", err)
+		// TODO: handle error properly
+		log.Printf("Failed to run auto-mount: %v", err)
+		return p.RunNext(ctx)
 	}
 	return p.RunNext(ctx)
 }

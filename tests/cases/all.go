@@ -40,4 +40,8 @@ func RunAllTests(t *testing.T, runner Runner) {
 	t.Run("Batch", func(t *testing.T) {
 		testBatch(t, runner)
 	})
+
+	t.Run("Mounts", func(t *testing.T) {
+		testMounts(t, runner)
+	})
 }

@@ -79,9 +79,9 @@ sandbox_config:
   disk_source:
     nfs_mount_source: 
       mount_options: nolock,acregmax=5,acregmin=1,acdirmax=5,acdirmin=1
-    cas_config:
-      cas_cache_dir: /tmp/velda_cas_cache
-      use_direct_protocol: true
+    #cas_config:
+      #cas_cache_dir: /tmp/velda_cas_cache
+      #use_direct_protocol: true
 daemon_config:
 pool: shell
 `)
@@ -124,6 +124,23 @@ agent_pools:
     max_agents: 5
     min_idle_agents: 0
     max_idle_agents: 3
+    idle_decay: 40s
+- name: "single"
+  auto_scaler:
+    backend:
+     command:
+       start: |
+          name=agent-single
+          docker run --rm -d --name $name --add-host=host.docker.internal:host-gateway  -e AGENT_NAME=$name -v %s/agent.yaml:/run/velda/velda.yaml -h $name  --mount type=volume,target=/tmp/agent -v %s:/velda --privileged -q veldaio/agent:latest --pool single > /dev/null
+          echo $name
+       stop: |
+         name=$1
+         docker rm -f $name -v >/dev/null
+       list: |
+         docker ps -a --format '{{.Names}}' | egrep "agent-single" || true
+    max_agents: 1
+    min_idle_agents: 0
+    max_idle_agents: 1
     idle_decay: 40s
 - name: "batch"
   auto_scaler:
@@ -176,7 +193,7 @@ agent_pools:
     min_idle_agents: 0
     max_idle_agents: 0
     idle_decay: 40s
-`, suiteName, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin)
+`, suiteName, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin)
 
 	if err := os.WriteFile(configFile, []byte(config), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
