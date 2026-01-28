@@ -210,9 +210,12 @@ func TestRequestScaleUp(t *testing.T) {
 	// Wait for creation to complete
 	time.Sleep(100 * time.Millisecond)
 
+	mgr := manager.(*asyncBackendManager)
+	mgr.mu.RLock()
 	if backend.createCallCount != 1 {
 		t.Errorf("Expected 1 create call, got %d", backend.createCallCount)
 	}
+	mgr.mu.RUnlock()
 
 	if backend.getWorkerCount() != 1 {
 		t.Errorf("Expected 1 worker, got %d", backend.getWorkerCount())
@@ -247,9 +250,12 @@ func TestRequestScaleUpMultiple(t *testing.T) {
 		nameSet[name] = true
 	}
 
+	mgr := manager.(*asyncBackendManager)
+	mgr.mu.RLock()
 	if backend.createCallCount != 5 {
 		t.Errorf("Expected 5 create calls, got %d", backend.createCallCount)
 	}
+	mgr.mu.RUnlock()
 
 	if backend.getWorkerCount() != 5 {
 		t.Errorf("Expected 5 workers, got %d", backend.getWorkerCount())
@@ -300,9 +306,12 @@ func TestRequestDelete(t *testing.T) {
 	// Wait for deletion to complete
 	time.Sleep(100 * time.Millisecond)
 
+	mgr := manager.(*asyncBackendManager)
+	mgr.mu.RLock()
 	if backend.deleteCallCount != 1 {
 		t.Errorf("Expected 1 delete call, got %d", backend.deleteCallCount)
 	}
+	mgr.mu.RUnlock()
 
 	if backend.getWorkerCount() != 0 {
 		t.Errorf("Expected 0 workers after delete, got %d", backend.getWorkerCount())
@@ -333,6 +342,8 @@ func TestRequestDeleteWaitsForCreation(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 
 	// Creation should complete before deletion
+	mgr := manager.(*asyncBackendManager)
+	mgr.mu.RLock()
 	if backend.createCallCount != 1 {
 		t.Errorf("Expected 1 create call, got %d", backend.createCallCount)
 	}
@@ -340,6 +351,7 @@ func TestRequestDeleteWaitsForCreation(t *testing.T) {
 	if backend.deleteCallCount != 1 {
 		t.Errorf("Expected 1 delete call, got %d", backend.deleteCallCount)
 	}
+	mgr.mu.RUnlock()
 
 	// Final state should have no workers
 	if backend.getWorkerCount() != 0 {
@@ -534,9 +546,12 @@ func TestConcurrentOperations(t *testing.T) {
 	// Wait for all operations to complete
 	time.Sleep(200 * time.Millisecond)
 
+	mgr := manager.(*asyncBackendManager)
+	mgr.mu.RLock()
 	if backend.createCallCount != 10 {
 		t.Errorf("Expected 10 create calls, got %d", backend.createCallCount)
 	}
+	mgr.mu.RUnlock()
 
 	workers, err := manager.ListWorkers(ctx)
 	if err != nil {
@@ -592,15 +607,17 @@ func TestSuspendWorker(t *testing.T) {
 	// Wait for suspend
 	time.Sleep(50 * time.Millisecond)
 
+	mgr := manager.(*asyncBackendManager)
+	mgr.mu.RLock()
 	if backend.deleteCallCount != 0 {
 		t.Errorf("Expected 0 delete calls, got %d", backend.deleteCallCount)
 	}
 	if backend.suspendCallCount != 1 {
 		t.Errorf("Expected 1 suspend call, got %d", backend.suspendCallCount)
 	}
+	mgr.mu.RUnlock()
 
 	// Check suspended workers
-	mgr := manager.(*asyncBackendManager)
 	mgr.mu.RLock()
 	if len(mgr.suspendedWorkers) != 1 {
 		t.Errorf("Expected 1 suspended worker, got %d", len(mgr.suspendedWorkers))
@@ -636,6 +653,8 @@ func TestResumeWorker(t *testing.T) {
 	// Wait for resume
 	time.Sleep(50 * time.Millisecond)
 
+	mgr := manager.(*asyncBackendManager)
+	mgr.mu.RLock()
 	if backend.createCallCount != 1 {
 		t.Errorf("Expected 1 create call, got %d", backend.createCallCount)
 	}
@@ -644,8 +663,6 @@ func TestResumeWorker(t *testing.T) {
 	}
 
 	// Check workers state
-	mgr := manager.(*asyncBackendManager)
-	mgr.mu.RLock()
 	if len(mgr.suspendedWorkers) != 0 {
 		t.Errorf("Expected 0 suspended workers, got %d", len(mgr.suspendedWorkers))
 	}
@@ -674,6 +691,8 @@ func TestSuspendMaxLimit(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 
+	mgr := manager.(*asyncBackendManager)
+	mgr.mu.RLock()
 	if backend.suspendCallCount != 2 {
 		t.Errorf("Expected 2 suspend calls, got %d", backend.suspendCallCount)
 	}
@@ -681,8 +700,6 @@ func TestSuspendMaxLimit(t *testing.T) {
 		t.Errorf("Expected 1 delete call, got %d", backend.deleteCallCount)
 	}
 
-	mgr := manager.(*asyncBackendManager)
-	mgr.mu.RLock()
 	if len(mgr.suspendedWorkers) != 2 {
 		t.Errorf("Expected 2 suspended workers, got %d", len(mgr.suspendedWorkers))
 	}
