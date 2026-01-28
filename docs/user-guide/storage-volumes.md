@@ -50,6 +50,7 @@ After saving `/etc/fstab`, accessing the directory (for example `ls /data`) trig
 ## Host mounts
 
 Velda supports projecting directories from the underlying host machine directly into your instance. This is useful for:
+
 - Accessing local datasets without network overhead.
 - Persisting intermediate artifacts to the host, e.g. caches or logs.
 - Sharing configuration files.
@@ -67,11 +68,12 @@ Example host mount (`/etc/fstab`):
 ## Ephemeral Volumes (EmptyDir)
 
 For temporary storage needs, Velda provides **EmptyDir** volumes. These are:
+
 - **Ephemeral**: Data is lost when the instance is stopped.
-- **Fast**: Backed by the host's local storage (or tmpfs when configured).
+- **Fast**: Backed by the host's local storage.
 - **Secure**: Created with isolated permissions (0777) for the instance.
 
-An EmptyDir is specified using a source pattern like `<empty>` together with `fstype: host`. When the agent sees a host mount request whose source matches the `<empty>` pattern, it creates a unique temporary directory on the host and mount to the host. It will be deleted once the session is terminated.
+An EmptyDir is specified using a source pattern like `<empty>` together with type `host`. When the agent sees a host mount request whose source matches the `<empty>` pattern, it creates a unique temporary directory on the host and mount to the host. It will be deleted once the session is terminated.
 
 Example empty dir mount (`/etc/fstab`):
 ```

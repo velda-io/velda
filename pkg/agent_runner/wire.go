@@ -27,16 +27,14 @@ import (
 type ShimRunner agent.AbstractPlugin
 type Pid1Runner agent.AbstractPlugin
 
-func provideShimRunner(requestPlugin *agent.SessionRequestPlugin, agentDaemonPlugin *agent.AgentDaemonPlugin, sandboxFsPlugin *agent.SandboxFsPlugin, rootfsPlugin *agent.RootfsPlugin, autofsDaemon *agent.AutoFsDaemonPlugin, sandboxPlugin *agent.LinuxNamespacePlugin, nvidiaPlugin *agent.DevicesPlugin, pid1Plugin *agent.RunPid1Plugin) ShimRunner {
+func provideShimRunner(requestPlugin *agent.SessionRequestPlugin, agentDaemonPlugin *agent.AgentDaemonPlugin, sandboxFsPlugin *agent.SandboxFsPlugin, rootfsPlugin *agent.RootfsPlugin, sandboxPlugin *agent.LinuxNamespacePlugin, nvidiaPlugin *agent.DevicesPlugin, pid1Plugin *agent.RunPid1Plugin) ShimRunner {
 	return agent.NewPluginRunner(
 		requestPlugin,
 		agentDaemonPlugin,
 		sandboxFsPlugin,
 		rootfsPlugin,
-		autofsDaemon,
 		sandboxPlugin,
 		nvidiaPlugin,
-		autofsDaemon.GetMountPlugin(),
 		pid1Plugin,
 	)
 }
@@ -49,7 +47,6 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 		agent.ProvideSandboxFsPlugin,
 		agent.ProvideMounter,
 		agent.ProvideRootfsPlugin,
-		agent.ProvideAutoFsDaemonPlugin,
 		agent.ProvideLinuxNamespacePlugin,
 		agent.ProvideNvidiaPlugin,
 		agent.ProvideRunPid1Plugin,
@@ -58,10 +55,12 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	return ShimRunner(nil) // This will never be reached, but is required for the wire build.
 }
 
-func providePid1Runner(requestPlugin *agent.SessionRequestPlugin, authPlugin agent.AuthPluginType, pivotRootPlugin *agent.PivotRootPlugin, waiterPlugin *agent.WaiterPlugin, completionSignalPlugin *agent.CompletionSignalPlugin, sshdPlugin *agent.SshdPlugin, statusPlugin *agent.ReportStatusPlugin, batchPlugin *agent.BatchPlugin, completionWaiter *agent.CompletionWaitPlugin) Pid1Runner {
+func providePid1Runner(requestPlugin *agent.SessionRequestPlugin, autofsDaemon *agent.AutoFsDaemonPlugin, authPlugin agent.AuthPluginType, pivotRootPlugin *agent.PivotRootPlugin, waiterPlugin *agent.WaiterPlugin, completionSignalPlugin *agent.CompletionSignalPlugin, sshdPlugin *agent.SshdPlugin, statusPlugin *agent.ReportStatusPlugin, batchPlugin *agent.BatchPlugin, completionWaiter *agent.CompletionWaitPlugin) Pid1Runner {
 	return agent.NewPluginRunner(
 		requestPlugin,
+		autofsDaemon,
 		pivotRootPlugin,
+		autofsDaemon.GetMountPlugin(),
 		authPlugin,
 		waiterPlugin,
 		completionSignalPlugin,
@@ -81,6 +80,7 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 		agent.ProvideWorkdir,
 		agent.ProvideAgentName,
 		agent.ProvideRequestPlugin,
+		agent.ProvideAutoFsDaemonPlugin,
 		agent.ProvideAuthPlugin,
 		agent.ProvidePivotRootPlugin,
 		agent.ProvideWaiterPlugin,

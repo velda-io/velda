@@ -22,17 +22,17 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	sandboxFsPlugin := agent2.ProvideSandboxFsPlugin(workDir, sandboxConfig, sessionRequestPlugin)
 	mounter := agent2.ProvideMounter(sandboxConfig)
 	rootfsPlugin := agent2.ProvideRootfsPlugin(workDir, mounter, sandboxConfig, sessionRequestPlugin)
-	autoFsDaemonPlugin := agent2.ProvideAutoFsDaemonPlugin()
 	linuxNamespacePlugin := agent2.ProvideLinuxNamespacePlugin(workDir, sandboxConfig, sessionRequestPlugin)
 	devicesPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
 	runPid1Plugin := agent2.ProvideRunPid1Plugin(workDir, sandboxConfig, agentDaemonPlugin, sessionRequestPlugin)
-	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, rootfsPlugin, autoFsDaemonPlugin, linuxNamespacePlugin, devicesPlugin, runPid1Plugin)
+	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, rootfsPlugin, linuxNamespacePlugin, devicesPlugin, runPid1Plugin)
 	return shimRunner
 }
 
 // NewPid1Runner creates a new Pid1Runner using dependency injection.
 func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent.SandboxConfig) Pid1Runner {
 	sessionRequestPlugin := agent2.ProvideRequestPlugin()
+	autoFsDaemonPlugin := agent2.ProvideAutoFsDaemonPlugin()
 	authPluginType := agent2.ProvideAuthPlugin(cmd, sessionRequestPlugin)
 	workDir := agent2.ProvideWorkdir(cmd)
 	pivotRootPlugin := agent2.ProvidePivotRootPlugin(workDir)
@@ -46,7 +46,7 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	batchPlugin := agent2.ProvideBatchPlugin(waiterPlugin, sessionRequestPlugin, completionSignalPlugin, commandModifier)
 	maxSessionTime := agent2.ProvideMaxSessionTime(cmd)
 	completionWaitPlugin := agent2.ProvideCompletionWaiterPlugin(completionSignalPlugin, maxSessionTime)
-	pid1Runner := providePid1Runner(sessionRequestPlugin, authPluginType, pivotRootPlugin, waiterPlugin, completionSignalPlugin, sshdPlugin, reportStatusPlugin, batchPlugin, completionWaitPlugin)
+	pid1Runner := providePid1Runner(sessionRequestPlugin, autoFsDaemonPlugin, authPluginType, pivotRootPlugin, waiterPlugin, completionSignalPlugin, sshdPlugin, reportStatusPlugin, batchPlugin, completionWaitPlugin)
 	return pid1Runner
 }
 
@@ -56,24 +56,24 @@ type ShimRunner agent2.AbstractPlugin
 
 type Pid1Runner agent2.AbstractPlugin
 
-func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPlugin *agent2.AgentDaemonPlugin, sandboxFsPlugin *agent2.SandboxFsPlugin, rootfsPlugin *agent2.RootfsPlugin, autofsDaemon *agent2.AutoFsDaemonPlugin, sandboxPlugin *agent2.LinuxNamespacePlugin, nvidiaPlugin *agent2.DevicesPlugin, pid1Plugin *agent2.RunPid1Plugin) ShimRunner {
+func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPlugin *agent2.AgentDaemonPlugin, sandboxFsPlugin *agent2.SandboxFsPlugin, rootfsPlugin *agent2.RootfsPlugin, sandboxPlugin *agent2.LinuxNamespacePlugin, nvidiaPlugin *agent2.DevicesPlugin, pid1Plugin *agent2.RunPid1Plugin) ShimRunner {
 	return agent2.NewPluginRunner(
 		requestPlugin,
 		agentDaemonPlugin,
 		sandboxFsPlugin,
 		rootfsPlugin,
-		autofsDaemon,
 		sandboxPlugin,
 		nvidiaPlugin,
-		autofsDaemon.GetMountPlugin(),
 		pid1Plugin,
 	)
 }
 
-func providePid1Runner(requestPlugin *agent2.SessionRequestPlugin, authPlugin agent2.AuthPluginType, pivotRootPlugin *agent2.PivotRootPlugin, waiterPlugin *agent2.WaiterPlugin, completionSignalPlugin *agent2.CompletionSignalPlugin, sshdPlugin *agent2.SshdPlugin, statusPlugin *agent2.ReportStatusPlugin, batchPlugin *agent2.BatchPlugin, completionWaiter *agent2.CompletionWaitPlugin) Pid1Runner {
+func providePid1Runner(requestPlugin *agent2.SessionRequestPlugin, autofsDaemon *agent2.AutoFsDaemonPlugin, authPlugin agent2.AuthPluginType, pivotRootPlugin *agent2.PivotRootPlugin, waiterPlugin *agent2.WaiterPlugin, completionSignalPlugin *agent2.CompletionSignalPlugin, sshdPlugin *agent2.SshdPlugin, statusPlugin *agent2.ReportStatusPlugin, batchPlugin *agent2.BatchPlugin, completionWaiter *agent2.CompletionWaitPlugin) Pid1Runner {
 	return agent2.NewPluginRunner(
 		requestPlugin,
+		autofsDaemon,
 		pivotRootPlugin,
+		autofsDaemon.GetMountPlugin(),
 		authPlugin,
 		waiterPlugin,
 		completionSignalPlugin,
