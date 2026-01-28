@@ -73,7 +73,7 @@ For temporary storage needs, Velda provides **EmptyDir** volumes. These are:
 - **Fast**: Backed by the host's local storage.
 - **Secure**: Created with isolated permissions (0777) for the instance.
 
-An EmptyDir is specified using a source pattern like `<empty>` together with type `host`. When the agent sees a host mount request whose source matches the `<empty>` pattern, it creates a unique temporary directory on the host and mount to the host. It will be deleted once the session is terminated.
+An EmptyDir is specified using a source pattern like `<empty>` together with type `host`. When the agent sees a host mount request whose source matches the `<empty>` pattern, it creates a unique temporary directory on the host and bind-mounts it from the host into the instance. The directory will be deleted once the session is terminated.
 
 Example empty dir mount (`/etc/fstab`):
 ```
