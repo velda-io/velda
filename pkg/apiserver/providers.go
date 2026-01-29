@@ -119,7 +119,7 @@ func ProvideStorage(cfg *configpb.Config) (storage.Storage, error) {
 	config := cfg.GetStorage()
 	switch config.Storage.(type) {
 	case *configpb.Storage_Zfs_:
-		return zfs.NewZfs(config.GetZfs().Pool)
+		return zfs.NewZfs(config.GetZfs().Pool, config.GetZfs().GetMaxDiskSizeGb())
 	case *configpb.Storage_Mini:
 		return mini.NewMiniStorage(config.GetMini().Root)
 	default:

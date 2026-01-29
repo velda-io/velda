@@ -27,12 +27,16 @@ import (
 )
 
 type Zfs struct {
-	pool string
+	pool             string
+	maxDiskSizeGb    int64
+	uid              int
 }
 
-func NewZfs(pool string) (*Zfs, error) {
+func NewZfs(pool string, maxDiskSizeGb int64) (*Zfs, error) {
 	z := &Zfs{
-		pool: pool,
+		pool:          pool,
+		maxDiskSizeGb: maxDiskSizeGb,
+		uid:           os.Geteuid(),
 	}
 	err := z.init()
 	if err != nil {
@@ -73,6 +77,17 @@ func (z *Zfs) CreateInstance(ctx context.Context, instanceId int64) error {
 	if err != nil {
 		return fmt.Errorf("failed to create ZFS instance %d: %w", instanceId, err)
 	}
+	// If a maximum disk size is configured, set refquota for this dataset (GB).
+	if z.maxDiskSizeGb > 0 {
+		if err := z.runCommand(
+			ctx,
+			"zfs",
+			"set",
+			fmt.Sprintf("refquota=%dG", z.maxDiskSizeGb),
+			fmt.Sprintf("%s/%d", z.pool, instanceId)); err != nil {
+			return fmt.Errorf("failed to set refquota for instance %d: %w", instanceId, err)
+		}
+	}
 	// Make a minimal filesystem structure
 	for _, dir := range []string{"proc", "sys", "dev", "run", "etc"} {
 		err = z.runCommand(
@@ -87,21 +102,49 @@ func (z *Zfs) CreateInstance(ctx context.Context, instanceId int64) error {
 }
 
 func (z *Zfs) CreateInstanceFromSnapshot(ctx context.Context, instanceId int64, snapshotInstanceId int64, snapshotName string) error {
-	return z.runCommand(
+	target := fmt.Sprintf("%s/%d", z.pool, instanceId)
+	if err := z.runCommand(
 		ctx,
 		"zfs",
 		"clone",
 		fmt.Sprintf("%s/%d@%s", z.pool, snapshotInstanceId, snapshotName),
-		fmt.Sprintf("%s/%d", z.pool, instanceId))
+		target); err != nil {
+		return err
+	}
+	if z.maxDiskSizeGb > 0 {
+		if err := z.runCommand(
+			ctx,
+			"zfs",
+			"set",
+			fmt.Sprintf("refquota=%dG", z.maxDiskSizeGb),
+			target); err != nil {
+			return fmt.Errorf("failed to set refquota for instance %d: %w", instanceId, err)
+		}
+	}
+	return nil
 }
 
 func (z *Zfs) CreateInstanceFromImage(ctx context.Context, instanceId int64, imageName string) error {
-	return z.runCommand(
+	target := fmt.Sprintf("%s/%d", z.pool, instanceId)
+	if err := z.runCommand(
 		ctx,
 		"zfs",
 		"clone",
 		fmt.Sprintf("%s/images/%s@image", z.pool, imageName),
-		fmt.Sprintf("%s/%d", z.pool, instanceId))
+		target); err != nil {
+		return err
+	}
+	if z.maxDiskSizeGb > 0 {
+		if err := z.runCommand(
+			ctx,
+			"zfs",
+			"set",
+			fmt.Sprintf("refquota=%dG", z.maxDiskSizeGb),
+			target); err != nil {
+			return fmt.Errorf("failed to set refquota for instance %d: %w", instanceId, err)
+		}
+	}
+	return nil
 }
 
 func (z *Zfs) DeleteInstance(ctx context.Context, instanceId int64) error {
@@ -180,13 +223,24 @@ func (z *Zfs) DeleteSnapshot(ctx context.Context, instanceId int64, snapshot_nam
 }
 
 func (z *Zfs) CreateImageFromSnapshot(ctx context.Context, imageName string, snapshotInstanceId int64, snapshotName string) error {
+	imageTarget := fmt.Sprintf("%s/images/%s", z.pool, imageName)
 	if err := z.runCommand(
 		ctx,
 		"zfs",
 		"clone",
 		fmt.Sprintf("%s/%d@%s", z.pool, snapshotInstanceId, snapshotName),
-		fmt.Sprintf("%s/images/%s", z.pool, imageName)); err != nil {
+		imageTarget); err != nil {
 		return err
+	}
+	if z.maxDiskSizeGb > 0 {
+		if err := z.runCommand(
+			ctx,
+			"zfs",
+			"set",
+			fmt.Sprintf("refquota=%dG", z.maxDiskSizeGb),
+			imageTarget); err != nil {
+			return fmt.Errorf("failed to set refquota for image %s: %w", imageName, err)
+		}
 	}
 	if err := z.runCommand(
 		ctx,
@@ -249,7 +303,15 @@ func (z *Zfs) ReadFile(ctx context.Context, instanceId int64, path string, optio
 }
 
 func (z *Zfs) runCommandGetOutput(ctx context.Context, command ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "sudo", command...)
+	if len(command) == 0 {
+		return "", fmt.Errorf("no command provided")
+	}
+	var cmd *exec.Cmd
+	if z.uid != 0 {
+		cmd = exec.CommandContext(ctx, "sudo", command...)
+	} else {
+		cmd = exec.CommandContext(ctx, command[0], command[1:]...)
+	}
 	var stderr bytes.Buffer
 	var stdout bytes.Buffer
 	cmd.Stderr = &stderr
@@ -262,7 +324,15 @@ func (z *Zfs) runCommandGetOutput(ctx context.Context, command ...string) (strin
 }
 
 func (z *Zfs) runCommand(ctx context.Context, command ...string) error {
-	cmd := exec.CommandContext(ctx, "sudo", command...)
+	if len(command) == 0 {
+		return fmt.Errorf("no command provided")
+	}
+	var cmd *exec.Cmd
+	if z.uid != 0 {
+		cmd = exec.CommandContext(ctx, "sudo", command...)
+	} else {
+		cmd = exec.CommandContext(ctx, command[0], command[1:]...)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()
