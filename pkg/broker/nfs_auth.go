@@ -34,7 +34,7 @@ type NfsExportAuth struct {
 
 func NewNfsExportAuth(disk LocalDiskProvider) (*NfsExportAuth, error) {
 	if _, err := os.Stat("/etc/exports.d"); os.IsNotExist(err) {
-		cmd := exec.Command("sudo", "mkdir", "-p", "/etc/exports.d")
+		cmd := runAsRootCommand("mkdir", "-p", "/etc/exports.d")
 		err := cmd.Run()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create exports directory: %w", err)
@@ -68,13 +68,13 @@ func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, se
 
 // exportNFS is a helper function to handle NFS export logic using exportfs command
 func exportNFS(path, host string, session *Session) error {
-	cmd := exec.Command("sudo", "sh", "-c", "echo '"+path+" "+host+"(rw,crossmnt,async,no_root_squash,no_subtree_check)' > "+exportFile(session))
+	cmd := runAsRootCommand("sh", "-c", "echo '"+path+" "+host+"(rw,crossmnt,async,no_root_squash,no_subtree_check)' > "+exportFile(session))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to write NFS export file for %s: %s", host, out)
 		return fmt.Errorf("failed to write NFS export file: %w", err)
 	}
-	cmd = exec.Command("sudo", "exportfs", "-ar")
+	cmd = runAsRootCommand("exportfs", "-ar")
 	out, err = cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to export NFS %s for host %s: %s", path, host, out)
@@ -103,19 +103,29 @@ func exportFile(s *Session) string {
 
 // unexportNFS is a helper function to handle NFS unexport logic using exportfs command
 func unexportNFS(path, host string, session *Session) error {
-	cmd := exec.Command("sudo", "rm", exportFile(session))
+	cmd := runAsRootCommand("rm", exportFile(session))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to remove NFS export file for %s: %s", host, out)
 		// Ignore error for now.
 	}
-	cmd = exec.Command("sudo", "exportfs", "-a")
+	cmd = runAsRootCommand("exportfs", "-a")
 	out, err = cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to export NFS %s for host %s: %s", path, host, out)
 		return fmt.Errorf("failed to export NFS: %w", err)
 	}
 	return nil
+}
+
+// runAsRootCommand returns an *exec.Cmd that runs the given command directly
+// if already running as root, otherwise it prepends "sudo".
+func runAsRootCommand(name string, args ...string) *exec.Cmd {
+	if os.Geteuid() == 0 {
+		return exec.Command(name, args...)
+	}
+	newArgs := append([]string{name}, args...)
+	return exec.Command("sudo", newArgs...)
 }
 
 func (n *NfsExportAuth) GrantAccessToClient(ctx context.Context, session *Session, status *proto.ExecutionStatus) error {
