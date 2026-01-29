@@ -2,10 +2,12 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"velda.io/velda/pkg/db"
 	"velda.io/velda/pkg/proto"
 )
@@ -120,6 +122,42 @@ func RunTestTaskWithDb(t *testing.T, sdb TaskDB, instanceId int64) {
 		tasks, _, err := sdb.ListTasks(ctx, &proto.ListTasksRequest{
 			ParentId: "job1",
 		})
+
+		t.Run("ListTasksMultiPage", func(t *testing.T) {
+			createTaskOfId(t, "multipage")
+			for i := 1; i <= 5; i++ {
+				id := fmt.Sprintf("multipage/s%d", i)
+				_, _, err := sdb.CreateTask(ctx, &proto.SessionRequest{
+					TaskId:     id,
+					Pool:       "pool",
+					InstanceId: instanceId,
+					Workload:   workload1,
+				})
+				assert.NoError(t, err)
+			}
+
+			// Page through with page size 2
+			tasks, token, err := sdb.ListTasks(ctx, &proto.ListTasksRequest{ParentId: "multipage", PageSize: 2})
+			assert.NoError(t, err)
+			assert.Len(t, tasks, 2)
+			assert.NotEmpty(t, token)
+
+			tasks2, token2, err := sdb.ListTasks(ctx, &proto.ListTasksRequest{ParentId: "multipage", PageSize: 2, PageToken: token})
+			assert.NoError(t, err)
+			assert.Len(t, tasks2, 2)
+
+			tasks3, token3, err := sdb.ListTasks(ctx, &proto.ListTasksRequest{ParentId: "multipage", PageSize: 2, PageToken: token2})
+			assert.NoError(t, err)
+			assert.Len(t, tasks3, 1)
+			assert.Equal(t, "", token3)
+
+			all := append(tasks, append(tasks2, tasks3...)...)
+			var ids []string
+			for _, tk := range all {
+				ids = append(ids, tk.Id)
+			}
+			assert.Equal(t, []string{"multipage/s1", "multipage/s2", "multipage/s3", "multipage/s4", "multipage/s5"}, ids)
+		})
 		assert.NoError(t, err)
 		assert.Len(t, tasks, 2)
 		assert.Equal(t, "job1/s1", tasks[0].Id)
@@ -134,10 +172,48 @@ func RunTestTaskWithDb(t *testing.T, sdb TaskDB, instanceId int64) {
 		tasks, _, err := sdb.SearchTasks(ctx, &proto.SearchTasksRequest{
 			LabelFilters: []string{"label1=value2"},
 		})
-		assert.NoError(t, err)
-		assert.Len(t, tasks, 2)
+		require.NoError(t, err)
+		require.Len(t, tasks, 2)
 		assert.Equal(t, "job2/s1", tasks[0].Id)
 		assert.Equal(t, "job1/s2", tasks[1].Id)
+	})
+
+	t.Run("SearchTasksMultiPage", func(t *testing.T) {
+		createTaskOfId(t, "searchmp")
+		for i := 1; i <= 5; i++ {
+			id := fmt.Sprintf("searchmp/s%d", i)
+			_, _, err := sdb.CreateTask(ctx, &proto.SessionRequest{
+				TaskId:     id,
+				Pool:       "pool",
+				InstanceId: instanceId,
+				Workload:   workload1,
+				Labels:     []string{"mp=1"},
+			})
+			assert.NoError(t, err)
+		}
+
+		// Page through with page size 2
+		tasks, token, err := sdb.SearchTasks(ctx, &proto.SearchTasksRequest{LabelFilters: []string{"mp=1"}, PageSize: 2})
+		require.NoError(t, err)
+		assert.Len(t, tasks, 2)
+		assert.NotEmpty(t, token)
+
+		var all []*proto.Task
+		all = append(all, tasks...)
+		next := token
+		for next != "" {
+			tks, nextTok, err := sdb.SearchTasks(ctx, &proto.SearchTasksRequest{LabelFilters: []string{"mp=1"}, PageSize: 2, PageToken: next})
+			require.NoError(t, err)
+			all = append(all, tks...)
+			next = nextTok
+		}
+
+		// SearchTasks returns newest-first
+		var ids []string
+		for _, tk := range all {
+			ids = append(ids, tk.Id)
+		}
+		assert.Equal(t, []string{"searchmp/s5", "searchmp/s4", "searchmp/s3", "searchmp/s2", "searchmp/s1"}, ids)
 	})
 
 	t.Run("DependencyMet", func(t *testing.T) {
