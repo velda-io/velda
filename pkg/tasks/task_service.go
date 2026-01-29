@@ -94,7 +94,19 @@ func (s *TaskServiceServer) GetTask(ctx context.Context, in *proto.GetTaskReques
 }
 
 func (s *TaskServiceServer) ListTasks(ctx context.Context, in *proto.ListTasksRequest) (*proto.TaskPageResult, error) {
-	tasks, nextCursor, err := s.db.ListTasks(ctx, in)
+	var tasks []*proto.Task
+	var nextCursor string
+	var err error
+	if in.ParentId == "" {
+		tasks, nextCursor, err = s.db.SearchTasks(ctx,
+			&proto.SearchTasksRequest{
+				PageSize:     in.PageSize,
+				PageToken:    in.PageToken,
+				LabelFilters: append(s.permission.SearchKeys(ctx), "job"),
+			})
+	} else {
+		tasks, nextCursor, err = s.db.ListTasks(ctx, in)
+	}
 	if err != nil {
 		return nil, err
 	}

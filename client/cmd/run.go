@@ -222,7 +222,7 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		st := grpcstatus.Convert(err)
 		if st.Code() == codes.ResourceExhausted {
 			if !quiet && !batch {
-				cmd.PrintErrf("Out of quota %v, retrying in %s...\n", st.Message(), delay)
+				cmd.PrintErrf("Out of quota: %v, retrying in %s...\n", st.Message(), delay)
 			}
 			select {
 			case <-cmd.Context().Done():

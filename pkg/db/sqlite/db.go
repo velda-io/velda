@@ -17,10 +17,12 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,8 +91,8 @@ func taskColumns(options columnOptions) string {
 
 var listTaskQuery = `SELECT ` + taskColumns(columnOptions{}) + `
 FROM tasks
-WHERE parent_id = ? AND task_id > ?
-ORDER BY create_time
+WHERE parent_id = ? AND (create_time > ? OR (create_time = ? AND task_id > ?))
+ORDER BY create_time, task_id
 LIMIT ?`
 
 var searchTaskQuery = `
@@ -110,8 +112,8 @@ hits AS (
 SELECT ` + taskColumns(columnOptions{}) + `
 FROM tasks
 JOIN hits ON hits.tid = tasks.task_id AND hits.pid = tasks.parent_id
-WHERE create_time < ?
-ORDER BY create_time DESC
+WHERE create_time < ? OR (create_time = ? AND parent_id || task_id > ?)
+ORDER BY create_time DESC, parent_id, task_id
 LIMIT ?`
 
 type SqliteDatabase struct {
@@ -480,8 +482,12 @@ func (s *SqliteDatabase) ListTasks(ctx context.Context, request *proto.ListTasks
 		pageSize = 50
 	}
 
-	startTask := request.PageToken
-	rows, err := s.db.QueryContext(ctx, listTaskQuery, request.ParentId, startTask, pageSize+1)
+	startTaskTime, startTask, err := decodeStrCursor(request.PageToken)
+	if err != nil {
+		return nil, "", err
+	}
+	startTask = path.Base(startTask)
+	rows, err := s.db.QueryContext(ctx, listTaskQuery, request.ParentId, startTaskTime.Format(time.RFC3339Nano), startTaskTime.Format(time.RFC3339Nano), startTask, pageSize+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -495,7 +501,7 @@ func (s *SqliteDatabase) ListTasks(ctx context.Context, request *proto.ListTasks
 		}
 		tasks = append(tasks, task)
 		if len(tasks) == pageSize {
-			nextCursor = path.Base(task.Id)
+			nextCursor = encodeTaskCursor(task.CreatedAt.AsTime(), task.Id)
 			break
 		}
 	}
@@ -515,15 +521,15 @@ func (s *SqliteDatabase) SearchTasks(ctx context.Context, request *proto.SearchT
 		labelFilter = "[\"" + strings.Join(request.GetLabelFilters(), "\",\"") + "\"]"
 	}
 
-	var startTime time.Time
-	if request.PageToken == "" {
-		startTime = time.Now().Add(time.Hour * 24)
-	} else {
-		// Simple cursor decoding
-		startTime = time.Now()
+	startTaskTime, startTask, err := decodeStrCursor(request.PageToken)
+	if err != nil {
+		return nil, "", err
+	}
+	if startTaskTime.IsZero() {
+		startTaskTime = time.Now().Add(time.Hour * 24)
 	}
 
-	rows, err := s.db.QueryContext(ctx, searchTaskQuery, labelFilter, startTime.Format(time.RFC3339Nano), pageSize+1)
+	rows, err := s.db.QueryContext(ctx, searchTaskQuery, labelFilter, startTaskTime.Format(time.RFC3339Nano), startTaskTime.Format(time.RFC3339Nano), startTask, pageSize+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -537,7 +543,7 @@ func (s *SqliteDatabase) SearchTasks(ctx context.Context, request *proto.SearchT
 		}
 		tasks = append(tasks, task)
 		if len(tasks) == pageSize {
-			nextCursor = path.Base(task.Id)
+			nextCursor = encodeTaskCursor(task.CreatedAt.AsTime(), task.Id)
 			break
 		}
 	}
@@ -1116,4 +1122,32 @@ func (s *SqliteDatabase) RunMaintenances(ctx context.Context) {
 			s.ReleaseExpiredLeaser(ctx, time.Now().Add(-time.Minute))
 		}
 	}
+}
+
+func decodeStrCursor(cursor string) (time.Time, string, error) {
+	if cursor == "" {
+		return time.Time{}, "", nil
+	}
+	b, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	s := string(b)
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return time.Time{}, "", fmt.Errorf("invalid cursor format")
+	}
+	// Try parsing as unix nano int first.
+	if n, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+		return time.Unix(0, n).UTC(), parts[1], nil
+	}
+	return time.Time{}, "", fmt.Errorf("invalid cursor time format")
+}
+
+func encodeTaskCursor(t time.Time, taskId string) string {
+	if t.IsZero() {
+		return ""
+	}
+	s := strconv.FormatInt(t.UnixNano(), 10)
+	return base64.RawURLEncoding.EncodeToString([]byte(s + ":" + taskId))
 }
