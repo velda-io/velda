@@ -154,25 +154,25 @@ func testUbuntu(t *testing.T, r Runner) {
 
 		// Create initial data
 		require.NoError(t, vrunCommand("sh", "-c", `
-mkdir -p /opt/vrun-test
-echo "original-data" > /opt/vrun-test/file.txt
+mkdir -p vrun-test
+echo "original-data" > vrun-test/file.txt
 `))
 
 		// Run vrun with writable-dir (only /tmp is writable)
 		// This should auto-create a snapshot and use overlay filesystem
 		output, err := vrunCommandGetOutput("vrun", "--writable-dir", "/tmp", "sh", "-c", `
-# Modify non-writable directory (should not persist)
-echo "modified-data" > /opt/vrun-test/file.txt
+# Modify non-writable home directory (should not persist)
+echo "modified-data" > vrun-test/file.txt
 # Write to writable directory (should persist)
 echo "vrun-writable" > /tmp/vrun-test.txt
 # Verify write succeeded in session
-cat /opt/vrun-test/file.txt
+cat vrun-test/file.txt
 `)
 		require.NoError(t, err, "vrun command should succeed")
 		assert.Equal(t, "modified-data\n", output, "Modification should be visible within the session")
 
 		// Verify the modification to non-writable directory is NOT persisted
-		output, err = vrunCommandGetOutput("cat", "/opt/vrun-test/file.txt")
+		output, err = vrunCommandGetOutput("cat", "vrun-test/file.txt")
 		require.NoError(t, err)
 		assert.Equal(t, "original-data\n", output, "Non-writable directory should not persist changes")
 
@@ -195,40 +195,40 @@ cat /opt/vrun-test/file.txt
 
 		// Create initial data and a snapshot
 		require.NoError(t, vrunCommand("sh", "-c", `
-mkdir -p /data/vrun-snapshot-test
-echo "snapshot-data" > /data/vrun-snapshot-test/file.txt
+mkdir -p vrun-snapshot-test
+echo "snapshot-data" > vrun-snapshot-test/file.txt
 `))
 
 		// Create snapshot
 		_, err := runVeldaWithOutput("snapshot", "create", snapshotName, "-i", instanceName)
 		require.NoError(t, err, "Failed to create snapshot")
+		t.Cleanup(func() {
+			// Clean up snapshot
+			_ = runVelda("snapshot", "delete", snapshotName, "-i", instanceName)
+		})
 
 		// Modify the data after snapshot creation
 		require.NoError(t, vrunCommand("sh", "-c", `
-echo "modified-after-snapshot" > /data/vrun-snapshot-test/file.txt
+echo "modified-after-snapshot" > vrun-snapshot-test/file.txt
 `))
 
 		// Run vrun with the existing snapshot (should see original snapshot data)
 		output, err := vrunCommandGetOutput("vrun", "--snapshot", snapshotName, "--writable-dir", "/tmp", "sh", "-c", `
-cat /data/vrun-snapshot-test/file.txt
+cat vrun-snapshot-test/file.txt
 `)
 		require.NoError(t, err, "vrun command should succeed")
 		assert.Equal(t, "snapshot-data\n", output, "Should see data from snapshot, not current state")
 
 		// Run vrun with the existing snapshot, but mount the modified data as well (should see modified data)
-		output, err = vrunCommandGetOutput("vrun", "--snapshot", snapshotName, "--writable-dir", "/data", "sh", "-c", `
-cat /data/vrun-snapshot-test/file.txt
+		output, err = vrunCommandGetOutput("vrun", "--snapshot", snapshotName, "--writable-dir", "/home", "sh", "-c", `
+cat vrun-snapshot-test/file.txt
 `)
 		require.NoError(t, err, "vrun command should succeed")
 		assert.Equal(t, "modified-after-snapshot\n", output, "Should see modified data when mounted as writable")
 
 		// Verify current state is unchanged (still has the modified data)
-		output, err = vrunCommandGetOutput("cat", "/data/vrun-snapshot-test/file.txt")
+		output, err = vrunCommandGetOutput("cat", "vrun-snapshot-test/file.txt")
 		require.NoError(t, err)
 		assert.Equal(t, "modified-after-snapshot\n", output, "Current state should be unaffected")
-
-		// Clean up snapshot
-		_ = runVelda("snapshot", "delete", snapshotName, "-i", instanceName)
-		time.Sleep(30 * time.Second) // Wait for snapshot deletion to complete
 	})
 }

@@ -106,6 +106,7 @@ server:
 storage:
   zfs:
     pool: "%s"
+    max_disk_size_gb: 10
 
 agent_pools:
 - name: "shell"

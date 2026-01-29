@@ -30,7 +30,14 @@ message Server {
 }
 
 message Storage {
-  message Zfs { string pool = 1; }
+  // ZFS storage configuration.
+  message Zfs {
+    string pool = 1;
+
+    // If `max_disk_size_gb` is set (non-zero),
+    // created instance datasets will have `refquota` set to this value.
+    int64 max_disk_size_gb = 2;
+  }
   message MiniVelda { string root = 1; }
   oneof storage {
     Zfs zfs = 1;
@@ -422,10 +429,12 @@ message AutoscalerBackendDigitalOceanDroplet {
   // Region to launch the droplet in (e.g., "atl1", "nyc1", "sfo3")
   string region = 2;
 
-  // Size/tier of the droplet (e.g., "gpu-mi300x1-192gb-devcloud", "s-1vcpu-1gb")
+  // Size/tier of the droplet (e.g., "gpu-mi300x1-192gb-devcloud",
+  // "s-1vcpu-1gb")
   string size = 3;
 
-  // Image to use for the droplet (e.g., "amd-rocm71software", "ubuntu-20-04-x64")
+  // Image to use for the droplet (e.g., "amd-rocm71software",
+  // "ubuntu-20-04-x64")
   string image = 4;
 
   // SSH key IDs to use for accessing droplets
