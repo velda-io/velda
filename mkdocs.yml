@@ -102,6 +102,9 @@ nav:
       - Gang Scheduling: user-guide/gang-scheduling.md
       - Snapshots & Overlays: user-guide/snapshots-and-overlays.md
       - Storage & Volumes: user-guide/storage-volumes.md
+  - Examples:
+      - Ray AutoScaled cluster: examples/ray-autoscaled-cluster.md
+      - Distributed hyperparam tuning with wandb: examples/wandb-integration.md
   - Deployment:
       - Deployment Overview: deployment/overview.md
       - Terraform Deployment: deployment/terraform-deployment.md
