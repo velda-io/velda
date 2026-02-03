@@ -189,7 +189,16 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 				cancel()
 				go session.Schedule(cancelCtx)
 			} else {
-				go session.Schedule(schedCtx)
+				go func() {
+					taskId := task.Id
+					if _, err := session.Schedule(schedCtx); err != nil {
+						log.Printf("Failed to schedule task %s: %v", taskId, err)
+						// TODO: Use a better code for this.
+						if err := t.db.UpdateTaskFinalResult(context.Background(), taskId, &db.BatchTaskResult{Cancelled: true}); err != nil {
+							log.Printf("Failed to mark cancelled task %s as cancelled: %v", taskId, err)
+						}
+					}
+				}()
 			}
 			return nil
 		}, t.regionId)
@@ -202,9 +211,6 @@ func (t *TaskTracker) tryBatchScheduling(ctx context.Context, req *proto.Session
 		log.Printf("Failed to get pool %s for task %s: %v", req.Pool, req.TaskId, err)
 		return nil
 	}
-	if err := scheduler.PoolManager.RequestBatch(ctx, int(req.Workload.TotalShards), req.TaskId); err != nil {
-		return fmt.Errorf("failed to request batch: %w", err)
-	}
 	req.Pool = fmt.Sprintf("%s:%s", req.Pool, req.TaskId)
 	newScheduler, err := t.scheduler.GetOrCreatePool(req.Pool)
 	if err != nil {
@@ -213,6 +219,9 @@ func (t *TaskTracker) tryBatchScheduling(ctx context.Context, req *proto.Session
 	}
 	log.Printf("New pool created: %s", req.Pool)
 	newScheduler.PoolManager = scheduler.PoolManager
+	if err := scheduler.PoolManager.RequestBatch(ctx, int(req.Workload.TotalShards), req.TaskId); err != nil {
+		return fmt.Errorf("failed to request batch: %w", err)
+	}
 	return nil
 }
 
