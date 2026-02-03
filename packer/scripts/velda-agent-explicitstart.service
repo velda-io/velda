@@ -2,9 +2,12 @@
 Description=Velda agent
 
 # Wait until the config is provided.
-After=cloud-init.service google-startup-scripts.service
+After=cloud-init.service
 
 After=nvidia-init.service
+
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
@@ -16,6 +19,3 @@ Environment="HOME=/root"
 StandardError=journal
 OOMPolicy=continue
 LimitNOFILE=524288:524288
-
-[Install]
-WantedBy=network-online.target

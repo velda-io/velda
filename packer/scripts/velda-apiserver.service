@@ -7,7 +7,7 @@ ExecStart=/usr/bin/velda apiserver --config /etc/velda.yaml --pidfile /run/velda
 PIDFile=/run/velda-apiserver.pid
 Restart=always
 RestartSec=5
-Environment="PATH=/usr/bin:/bin:/snap/bin"
+Environment="PATH=/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
 Environment="HOME=/root"
 StandardError=journal
 
