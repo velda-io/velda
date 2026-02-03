@@ -79,9 +79,9 @@ sandbox_config:
   disk_source:
     nfs_mount_source: 
       mount_options: nolock,acregmax=5,acregmin=1,acdirmax=5,acdirmin=1
-    #cas_config:
-      #cas_cache_dir: /tmp/velda_cas_cache
-      #use_direct_protocol: true
+    cas_config:
+      cas_cache_dir: /tmp/velda_cas_cache
+      use_direct_protocol: true
 daemon_config:
 pool: shell
 `)

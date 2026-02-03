@@ -133,7 +133,6 @@ pool: shell`, server, localPath)
 		cmd := exec.Command("docker", "run", "-d",
 			"--name", "local-velda-agent",
 			"--privileged",
-			"--platform", "linux/amd64",
 			"-h", "local-velda-main",
 			"--add-host=host.docker.internal:host-gateway",
 			"-v", fmt.Sprintf("%s:/run/velda", sandboxDir),
