@@ -141,6 +141,7 @@ func (sc *DirectFSClient) Mount(mountPoint string) (*VeldaServer, error) {
 			DirectMount: true,
 			Name:        "veldafs-snapshot",
 			FsName:      "snapshot",
+			Options:     []string{"default_permissions"},
 		},
 	}
 
