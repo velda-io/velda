@@ -33,7 +33,7 @@ build {
   provisioner "shell" {
     inline = [
       "sudo apt-get update",
-      "sudo apt-get install -y nfs-common --no-install-recommends",
+      "sudo apt-get install -y nfs-common mdadm --no-install-recommends",
       "mkdir -p /tmp/velda-install/extra_files"
     ]
   }
@@ -50,7 +50,14 @@ build {
   }
 
   provisioner "file" {
+    only        = ["amazon-ebs.velda-agent"]
     source      = "${path.root}/scripts/velda-agent.service"
+    destination = "/tmp/velda-install/velda-agent.service"
+  }
+  provisioner "file" {
+    # For GCP, the agent is started by cloud-init script.
+    only        = ["googlecompute.velda-agent"]
+    source      = "${path.root}/scripts/velda-agent-explicitstart.service"
     destination = "/tmp/velda-install/velda-agent.service"
   }
   provisioner "file" {
