@@ -121,6 +121,7 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 				MaxWrite:           1024 * 1024,
 				EnableLocks:        true,
 				DirectMountFlags:   syscall.MS_MGC_VAL,
+				Options:            []string{"default_permissions"},
 			},
 		},
 		SnapshotMode: false,
