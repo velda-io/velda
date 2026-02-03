@@ -50,13 +50,13 @@ build {
   }
 
   provisioner "file" {
-    only        = ["amazon-ebs.velda-agent"]
+    only        = ["amazon-ebs.velda"]
     source      = "${path.root}/scripts/velda-agent.service"
     destination = "/tmp/velda-install/velda-agent.service"
   }
   provisioner "file" {
     # For GCP, the agent is started by cloud-init script.
-    only        = ["googlecompute.velda-agent"]
+    only        = ["googlecompute.velda"]
     source      = "${path.root}/scripts/velda-agent-explicitstart.service"
     destination = "/tmp/velda-install/velda-agent.service"
   }
@@ -71,7 +71,7 @@ build {
   }
 
   provisioner "shell" {
-    only = ["googlecompute.velda-agent"]
+    only = ["googlecompute.velda"]
     inline = [
       "curl -sSO https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh",
       "sudo bash add-google-cloud-ops-agent-repo.sh --also-install",
@@ -122,15 +122,6 @@ build {
       "sudo systemctl enable nvidia-init",
       "sudo systemctl enable velda-agent",
     ]
-  }
-
-  post-processor "manifest" {
-    only   = ["amazon-ebs.velda-agent"]
-    output = "base-aws.json"
-  }
-  post-processor "manifest" {
-    only   = ["googlecompute.velda-agent"]
-    output = "base-gcp.json"
   }
 }
 
