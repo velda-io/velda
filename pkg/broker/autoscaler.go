@@ -161,6 +161,9 @@ type AutoScaledPool struct {
 	idleWorkers     map[string]int32
 	pendingWorkers  map[string]int32
 	deletingWorkers map[string]int32
+	// Count of pending workers without names (when scaleUp returns empty name).
+	// These will be assigned to unknown workers when they connect.
+	pendingUnknownWorkers int
 	// Includes all unknown, pending and lost workers (or workers without heartbeat with the server)
 	// Value is the last seen time.
 	// If the worker is not seen after killUnknownAfter, it will be deleted.
@@ -404,6 +407,11 @@ func (p *AutoScaledPool) NotifyAgentAvailable(name string, busy bool, statusChan
 	if oldStatus == WorkerStatusNone {
 		if p.backend == nil {
 			p.logPrintf("Worker %s Connected", name)
+		} else if p.pendingUnknownWorkers > 0 {
+			// Assign this worker to one of the pending unknown workers
+			p.pendingUnknownWorkers--
+			p.idleSlots -= p.defaultSlotsPerAgent
+			p.logPrintf("Worker %s connected, assigned to pending unknown worker. Remaining unknown: %d", name, p.pendingUnknownWorkers)
 		} else {
 			p.logPrintf("Worker %s starting while not in pool", name)
 		}
@@ -518,12 +526,18 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 	}
 	for !p.batch && (p.idleSizeLocked() < p.minIdle || p.sizeLocked() < p.minSize) && p.sizeLocked() < p.maxSize {
 		name, err := p.backend.RequestScaleUp(p.ctx)
-		p.logPrintf("Creating worker %s, before idle size: %d", name, p.idleSizeLocked())
 		if err != nil {
 			// TODO: Needs add backoff
 			p.logPrintf("Failed to scale up: %v", err)
 			break
+		}
+		if name == "" {
+			// Backend doesn't return worker name. Track as pending unknown worker.
+			p.pendingUnknownWorkers++
+			p.idleSlots += p.defaultSlotsPerAgent
+			p.logPrintf("Creating unknown worker, before idle size: %d, pending unknown: %d", p.idleSizeLocked(), p.pendingUnknownWorkers)
 		} else {
+			p.logPrintf("Creating worker %s, before idle size: %d", name, p.idleSizeLocked())
 			p.lastKnownTime[name] = time.Now()
 			p.setWorkerStatusLocked(name, WorkerStatusPending, p.defaultSlotsPerAgent)
 		}
@@ -645,7 +659,7 @@ func (p *AutoScaledPool) InspectWorkers(f InspectFunc) {
 }
 
 func (p *AutoScaledPool) sizeLocked() int {
-	return len(p.idleWorkers) + len(p.runningWorkers) + len(p.pendingWorkers) + len(p.workersByStatus[WorkerStatusUnknown])
+	return len(p.idleWorkers) + len(p.runningWorkers) + len(p.pendingWorkers) + len(p.workersByStatus[WorkerStatusUnknown]) + p.pendingUnknownWorkers
 }
 
 func (p *AutoScaledPool) idleSizeLocked() int {

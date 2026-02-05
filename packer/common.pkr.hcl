@@ -12,6 +12,10 @@ packer {
       source  = "github.com/hashicorp/docker"
       version = "~> 1"
     }
+    azure = {
+      source  = "github.com/hashicorp/azure"
+      version = "~> 2"
+    }
   }
 }
 
@@ -66,6 +70,31 @@ variable "docker_username" {
 }
 
 variable "docker_password" {
+  type    = string
+  default = null
+}
+
+variable "azure_resource_group" {
+  type    = string
+  default = null
+}
+
+variable "azure_subscription_id" {
+  type    = string
+  default = null
+}
+
+variable "azure_location" {
+  type    = string
+  default = "East US"
+}
+
+variable "azure_shared_image_gallery" {
+  type    = string
+  default = null
+}
+
+variable "azure_shared_image_gallery_resource_group" {
   type    = string
   default = null
 }

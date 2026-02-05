@@ -35,6 +35,8 @@ type FakeBackend struct {
 	// If true, deleted worker names can be reused
 	recycleWorkerNames bool
 	deletedWorkers     []string
+	// If true, RequestScaleUp will create a worker but return empty name
+	noWorkerName bool
 }
 
 func (f *FakeBackend) RequestScaleUp(ctx context.Context) (string, error) {
@@ -58,6 +60,10 @@ func (f *FakeBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	})
 	f.pending = append(f.pending, name)
 
+	if f.noWorkerName {
+		// simulate backend that doesn't return the instance name
+		return "", nil
+	}
 	return name, nil
 }
 
@@ -129,10 +135,11 @@ func (f *FakeBackend) Worker(i int) WorkerStatus {
 	return f.workers[i]
 }
 
-func TestAutoScaler(t *testing.T) {
+func testAutoScaler(t *testing.T, noWorkerName bool) {
 	backend := &FakeBackend{
-		workers: []WorkerStatus{},
-		clock:   time.Now,
+		workers:      []WorkerStatus{},
+		clock:        time.Now,
+		noWorkerName: noWorkerName,
 	}
 
 	pool := NewAutoScaledPool("pool", AutoScaledPoolConfig{
@@ -340,6 +347,14 @@ func TestAutoScaler(t *testing.T) {
 			return backend.NumWorkers() == 3
 		}, 3*time.Second, 10*time.Millisecond)
 	})
+}
+
+func TestAutoScaler(t *testing.T) {
+	testAutoScaler(t, false)
+}
+
+func TestAutoScalerNoWorkerName(t *testing.T) {
+	testAutoScaler(t, true)
 }
 
 func TestAutoScalerWithMultipleSlots(t *testing.T) {
