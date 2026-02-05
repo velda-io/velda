@@ -49,6 +49,9 @@ func RegisterProvisioner(f provisionerFactory) {
 	provisioners = append(provisioners, f)
 }
 func NewBackend(pool *proto.AgentPool, defaultBrokerInfo *agentpb.BrokerInfo) (broker.ResourcePoolBackend, error) {
+	if pool.AutoScaler == nil {
+		return nil, nil
+	}
 	for _, h := range handlers {
 		if h.CanHandle(pool.GetAutoScaler().GetBackend()) {
 			return h.NewBackend(pool, defaultBrokerInfo)
@@ -67,6 +70,9 @@ func NewProvisioner(pb *proto.Provisioner, schedulerSet *broker.SchedulerSet, br
 }
 
 func AutoScaledConfigFromConfig(ctx context.Context, cfg *proto.AgentPool, defaultBrokerInfo *agentpb.BrokerInfo) (*broker.AutoScaledPoolConfig, error) {
+	if cfg.AutoScaler == nil {
+		return nil, nil
+	}
 	backend, err := NewBackend(cfg, defaultBrokerInfo)
 	if err != nil {
 		return nil, err

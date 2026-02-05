@@ -261,6 +261,7 @@ message Provisioner {
     NebiusAutoProvisioner nebius_auto = 6;
     MithrilAutoProvisioner mithril_auto = 7;
     DigitalOceanAutoProvisioner digitalocean_auto = 8;
+    AzureProvisioner azure = 9;
   }
 }
 
@@ -612,6 +613,13 @@ message DigitalOceanAutoProvisioner {
 
 message GCSProvisioner {
   string bucket = 1;
+  string config_prefix = 2;
+  google.protobuf.Duration update_interval = 3;
+}
+
+// Use Azure App Configuration to provision agent pools.
+message AzureProvisioner {
+  string endpoint = 1;
   string config_prefix = 2;
   google.protobuf.Duration update_interval = 3;
 }
