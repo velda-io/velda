@@ -146,7 +146,7 @@ func (p *AzureAppConfigPoolProvisioner) update(ctx context.Context, key string, 
 	if err != nil {
 		return err
 	}
-	if new && obj.AutoScaler.GetInitialDelay() != nil {
+	if new && obj.AutoScaler != nil && obj.AutoScaler.GetInitialDelay() != nil {
 		time.AfterFunc(obj.AutoScaler.GetInitialDelay().AsDuration(), pool.PoolManager.ReadyForIdleMaintenance)
 	}
 	log.Printf("Updating pool from Azure App Configuration: %v", obj.Name)
