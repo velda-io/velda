@@ -44,3 +44,18 @@ source "docker" "velda" {
   commit = true
   platform = "linux/amd64"
 }
+
+source "azure-arm" "velda" {
+  subscription_id = var.azure_subscription_id
+  resource_group_name = var.azure_resource_group
+  location = var.azure_location
+  use_azure_cli_auth = true
+
+  managed_image_resource_group_name = var.azure_resource_group
+  
+  os_type = "Linux"
+  image_publisher = "Canonical"
+  image_offer = "ubuntu-24_04-lts"
+  image_sku = "server"
+  image_version = "latest"
+}

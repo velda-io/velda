@@ -18,6 +18,16 @@ build {
       name = "velda-controller"
     }
   }
+  source "azure-arm.velda" {
+    managed_image_name = "velda-controller-${local.version_sanitized}"
+
+    shared_image_gallery_destination {
+      image_name    = "velda-controller"
+      image_version = var.version
+    }
+
+    vm_size = "Standard_D2_v5"
+  }
 
   provisioner "shell" {
     inline = [

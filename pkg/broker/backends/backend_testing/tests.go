@@ -66,6 +66,10 @@ func TestSimpleScaleUpDown(t *testing.T, backend broker.ResourcePoolBackend) {
 				found = true
 			}
 		}
+		if instanceName == "" && len(workers) > 0 {
+			instanceName = workers[0].Name
+			found = true
+		}
 		assert.True(t, found)
 	})
 

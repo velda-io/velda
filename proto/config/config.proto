@@ -226,6 +226,17 @@ message AutoscalerBackendNebiusLaunchTemplate {
   TailscaleConfig tailscale_config = 15;
 }
 
+message AutoscalerBackendAzureVMSS {
+  // Azure subscription ID
+  string subscription_id = 1;
+
+  // Resource group name
+  string resource_group = 2;
+
+  // Virtual Machine Scale Set name
+  string vmss_name = 3;
+}
+
 message AutoscalerBackendKubernetes {
   string kubeconfig = 1;
   string context = 2;
@@ -612,6 +623,7 @@ message AutoscalerBackend {
     AutoscalerBackendNebiusLaunchTemplate nebius_launch_template = 5;
     AutoscalerBackendMithrilSpotBid mithril_spot_bid = 6;
     AutoscalerBackendDigitalOceanDroplet digitalocean_droplet = 7;
+    AutoscalerBackendAzureVMSS azure_vmss = 8;
     AutoscalerBackendKubernetes kubernetes = 2;
     AutoscalerBackendCommand command = 3;
   }
