@@ -2,9 +2,8 @@
 
 all: velda
 
-# By default, disabled grpctrace & k8s backend to reduce binary size
-# See https://github.com/golang/go/issues/62024
-TAGS ?= gce,aws,grpcnotrace
+# Full build
+TAGS ?= gce,aws,nebius,azure,k8s
 VERSION ?= dev-$(shell date +%Y%m%d-%H%M%S)
 VERSION_V := ${VERSION}
 velda:

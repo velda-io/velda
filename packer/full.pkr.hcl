@@ -15,15 +15,13 @@ build {
   }
 
   source "azure-arm.velda" {
-    managed_image_name = "velda-${local.version_sanitized}"
-
     shared_image_gallery_destination {
       subscription         = var.azure_subscription_id
       resource_group       = var.azure_shared_image_gallery_resource_group
       gallery_name         = var.azure_shared_image_gallery
       storage_account_type = "Premium_LRS"
       image_name           = "velda"
-      image_version        = var.version
+      image_version        = regex_replace(var.version, "^v", "")
     }
 
     vm_size = "Standard_D2as_v7"
