@@ -51,3 +51,11 @@ image: release-mini
 
 manifest: pkg/broker/backends/k8s/k8s_provisioner.go
 	controller-gen crd:generateEmbeddedObjectMeta=true paths=./pkg/broker/backends/k8s/ output:crd:dir=./misc
+
+upload-release: upload-release-aws upload-release-gcs
+
+upload-release-aws: release-mini
+	aws s3 cp bin/velda-${VERSION_V}-linux-amd64 s3://velda-release/velda-${VERSION_V}-linux-amd64
+
+upload-release-gcs: release-mini
+	gsutil cp bin/velda-${VERSION_V}-linux-amd64 gs://velda-release/velda-${VERSION_V}-linux-amd64

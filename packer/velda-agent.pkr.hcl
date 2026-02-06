@@ -18,16 +18,6 @@ build {
       name = "velda-agent"
     }
   }
-  source "azure-arm.velda" {
-    managed_image_name = "velda-agent-${local.version_sanitized}"
-
-    shared_image_gallery_destination {
-      image_name    = "velda-agent"
-      image_version = var.version
-    }
-
-    vm_size = "Standard_D2_v5"
-  }
 
   // Make boot faster
   provisioner "shell" {

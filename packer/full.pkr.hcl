@@ -1,36 +1,34 @@
 # Unified image for velda.
 # This is used for AWS Marketplace release as single AMI image.
-source "amazon-ebs" "velda-unified" {
-  region = "us-east-1"
-  source_ami_filter {
-    filters = {
-      name                = "ubuntu-minimal/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-minimal-*"
-      virtualization-type = "hvm"
-      root-device-type    = "ebs"
-    }
-    owners      = ["099720109477"] # Canonical
-    most_recent = true
-  }
-
-  instance_type   = "m5.large"
-  ssh_username    = "ubuntu"
-  ami_name        = "velda-${var.version}"
-  ami_description = "AMI for Velda unified image"
-  ami_regions     = var.ami_regions
-  ami_users       = var.ami_users
-  run_tags = {
-    Name = "Packer Builder for unified image"
-  }
-  tags = {
-    Name = "velda"
-  }
-}
-
 build {
   name = "velda"
-  sources = [
-    "source.amazon-ebs.velda-unified",
-  ]
+
+  source "amazon-ebs.velda" {
+    ami_description = "AMI for Velda ${var.version}"
+    ami_name        = "velda-${var.version}"
+    tags = {
+      Name    = "velda-${var.version}"
+      Version = var.version
+      App     = "velda"
+    }
+    instance_type = "m4.2xlarge"
+  }
+
+  source "azure-arm.velda" {
+    managed_image_name = "velda-${local.version_sanitized}"
+
+    shared_image_gallery_destination {
+      subscription         = var.azure_subscription_id
+      resource_group       = var.azure_shared_image_gallery_resource_group
+      gallery_name         = var.azure_shared_image_gallery
+      storage_account_type = "Premium_LRS"
+      image_name           = "velda"
+      image_version        = var.version
+    }
+
+    vm_size = "Standard_D2as_v7"
+  }
+
 
   provisioner "shell" {
     inline = [

@@ -21,7 +21,7 @@ func (s *PoolManagerServiceServer) ListPools(ctx context.Context, in *proto.List
 	poolNames := s.s.GetPools()
 	pools := make([]*proto.Pool, 0, len(poolNames))
 	for name, pool := range poolNames {
-		pools = append(pools, &proto.Pool{Name: name, Description: pool.Description})
+		pools = append(pools, &proto.Pool{Name: name, Description: pool.GetDescription()})
 	}
 	sort.Slice(pools, func(i, j int) bool {
 		return pools[i].Name < pools[j].Name
