@@ -44,7 +44,7 @@ build {
   }
 
   provisioner "file" {
-    only        = ["googlecompute.velda-agent"]
+    only        = ["googlecompute.velda"]
     source      = "${path.root}/ops_agent_config.yaml"
     destination = "/tmp/velda-install/ops_agent_config.yaml"
   }

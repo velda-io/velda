@@ -47,8 +47,7 @@ source "docker" "velda" {
 
 source "azure-arm" "velda" {
   subscription_id = var.azure_subscription_id
-  resource_group_name = var.azure_resource_group
-  location = var.azure_location
+  build_resource_group_name = var.azure_resource_group
   use_azure_cli_auth = true
 
   managed_image_resource_group_name = var.azure_resource_group

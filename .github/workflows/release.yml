@@ -2,8 +2,6 @@ name: Build and Release
 
 on:
   # Automated weekly release every Monday at 9:00 AM PST (17:00 UTC)
-  schedule:
-    - cron: '0 17 * * 1'
   push:
     tags:
       - 'v*.*.*'
@@ -150,6 +148,13 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Download build artifacts
         uses: actions/download-artifact@v5
         with:
@@ -170,7 +175,7 @@ jobs:
         run: packer init packer
 
       - name: Build images
-        run: exec packer build -var="version=${{ needs.build-package.outputs.version }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" -var="docker_password=${{ secrets.DOCKER_PASSWORD }}" -var-file=packer/prod.pkrvars.hcl packer
+        run: exec packer build -var="version=${{ needs.build-package.outputs.version }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" -var="docker_password=${{ secrets.DOCKER_PASSWORD }}" -var="azure_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" -var-file=packer/prod.pkrvars.hcl packer
 
       - name: Update permissions
         run: make -C packer update_permission
