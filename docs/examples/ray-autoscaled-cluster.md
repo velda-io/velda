@@ -82,7 +82,7 @@ For hosted or enterprise, the Ray dashboard is accessible at:
 https://8265-ray-velda-[instanceid].i.[velda-domain]
 ```
 
-For open-source, port-forwarding is required. Check [port-forwarding](../user-guide/port-forwarding.md) for detail.
+For open-source, port-forwarding is required. Check [port-forwarding](../user-guide/port-forwarding.md) for details.
 
 ### Tearing Down
 

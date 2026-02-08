@@ -5,7 +5,7 @@ Follow this guide to deploy a new Velda cluster in various cloud providers. It s
 ## Prerequisites
 * Choose your cloud provider, identify the VPC subnet.
 * Terraform installed. Check out the [terraform](https://developer.hashicorp.com/terraform/install) page to download terraform.
-* Permissions to apply the change. You likely need owner privelege for the initial deployment, because new roles are created for the Velda controller to create/delete instances.
+* Permissions to apply the change. You likely need owner privilege for the initial deployment, because new roles are created for the Velda controller to create/delete instances.
 
 ## Set up
 See [available terraform modules](https://github.com/velda-io/velda-terraform)
@@ -46,7 +46,7 @@ You can access the server through the IP and the SSH keys provided when provisio
 
 The following users are available for you to connect to the controller.
 
-* `velda-admin`: User with `sudu` access, this is the user to manage the entire cluster or access
+* `velda-admin`: User with `sudo` access, this is the user to manage the entire cluster or access
 the controller directly. Accessible with admin key.
 * `velda`: Login user, use that to access velda instance directly. Use access-key to connect to it.
 * `velda_jump`: The jump-proxy for forwarding when connecting from the CLI. Used if you would like the agent nodes not exposed through public IP. Accessible with the access-key.
@@ -55,7 +55,7 @@ the controller directly. Accessible with admin key.
 ```bash
 ssh velda-admin@[controller-ip]
 
-# Create a new instance from an container image, e.g. ubuntu:24.04
+# Create a new instance from a container image, e.g. ubuntu:24.04
 # You can install dependencies later in your instance
 velda instance create -d [docker-image] [instance-name]
 # Example
