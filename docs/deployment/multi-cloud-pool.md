@@ -78,7 +78,7 @@ tailscale_config:
 ## Network performance
 For optimal performance, it's strongly recommended to:
 
-* [Use snapshot & writable dir](user-guide/snapshots-and-overlays): This avoid the metadata lookup, all files not in writable dir will be cached.
+* [Use snapshot & writable dir](../user-guide/snapshots-and-overlays.md): This avoid the metadata lookup, all files not in writable dir will be cached.
 * Use local copy / cache of data sets if possible
 * Configure the pool to use suspended instance when scaling down. Suspended instance have cache of the data from snapshot and can be reused for future workloads.
 
