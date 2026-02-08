@@ -4,21 +4,6 @@
    spacing, code block styling, button shape) are preserved.
 */
 
-/* Typography variables (sizes/spacing only) */
-:root {
-  --type-header-xxl: 60px;
-  --type-header-xl: 48px;
-  --type-header-l: 40px;
-  --type-header-m: 30px;
-  --type-header-s: 20px;
-  --type-header-xs: 18px;
-
-  --type-text-l: 20px;
-  --type-text-m: 18px;
-  --type-text-s: 16px;
-  --type-text-xs: 14px;
-}
-
 :root>* {
   --md-accent-fg-color: #1B8696;
   /* velda-teal */
@@ -34,6 +19,9 @@ html {
 /* Enhanced code blocks */
 .md-typeset pre>code {
   border-radius: 0.5rem;
+}
+.md-typeset {
+  max-width: 760px;
 }
 
 .md-typeset code {
@@ -71,65 +59,65 @@ html {
 /* Typography mappings */
 .md-typeset h1 {
   font-weight: 700;
-  font-size: var(--type-header-m);
+  font-size: 38px;
   line-height: 1.2;
   margin: 0 0 0.6em 0;
 }
 
 .md-typeset h2 {
   font-weight: 700;
-  font-size: var(--type-header-m);
+  font-size: 28px;
   line-height: 1.2;
-  margin: 80px 0 20px 0;
+  margin: 2em 0 1em 0;
 }
 
 .md-typeset h3 {
   font-weight: 700;
-  font-size: var(--type-header-s);
+  font-size: 22px;
   line-height: 1.2;
   margin: 0 0 10px 0;
 }
 
 .md-typeset h4 {
   font-weight: 600;
-  font-size: var(--type-header-xs);
+  font-size: 18px;
   line-height: 1.5;
   margin: 0 0 10px 0;
 }
 
 .md-typeset h5 {
   font-weight: 600;
-  font-size: var(--type-header-xs);
+  font-size: 18px;
   line-height: 1.5;
   margin: 0 0 8px 0;
 }
 
 .md-typeset h6 {
   font-weight: 600;
-  font-size: var(--type-header-xs);
+  font-size: 18px;
   line-height: 1.5;
   margin: 0 0 8px 0;
 }
 
 .md-typeset p,
 .md-typeset li {
-  font-size: var(--type-text-m);
+  font-size: 17px;
   line-height: 1.5;
   margin: 0 0 1em 0;
 }
 
 .md-typeset small,
 .md-typeset .text-xs {
-  font-size: var(--type-text-xs);
+  font-size: 14px;
   line-height: 1.5;
 }
 
 .md-typeset .text-l {
-  font-size: var(--type-text-l);
+  font-size: 20px;
 }
 
 .md-typeset .text-s {
-  font-size: var(--type-text-s);
+  font-size: 16px;
 }
 
 /* Table enhancements (no color overrides) */
