@@ -32,6 +32,7 @@ type VeldaMountOptions struct {
 	NoCacheMode  bool
 	DirectFSMode bool
 	VerboseLog   bool
+	CacheSources []string // Additional cache sources (HTTP URLs, NFS paths, etc.)
 }
 
 type MountOptions func(*VeldaMountOptions)
@@ -86,6 +87,14 @@ func WithFuseOption(fn func(*fs.Options)) MountOptions {
 func WithVerboseLog() MountOptions {
 	return func(opts *VeldaMountOptions) {
 		opts.VerboseLog = true
+	}
+}
+
+// WithCacheSources configures additional cache sources (HTTP URLs, NFS paths, etc.)
+// Files will be fetched from these sources using file hash as key before falling back to fileserver
+func WithCacheSources(sources []string) MountOptions {
+	return func(opts *VeldaMountOptions) {
+		opts.CacheSources = sources
 	}
 }
 
@@ -151,7 +160,7 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 	var rootNode fs.InodeEmbedder
 	// Handle DirectFS mode
 	if veldaOpts.DirectFSMode {
-		client := NewDirectFSClient(baseDir, cache, veldaOpts.VerboseLog)
+		client := NewDirectFSClient(baseDir, cache, veldaOpts.CacheSources, veldaOpts.VerboseLog)
 		rootNode, err = client.Connect()
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to DirectFS server: %w", err)

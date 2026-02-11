@@ -247,7 +247,7 @@ func (fs *FileServer) responseSender() {
 		case <-fs.ctx.Done():
 			return
 		case resp := <-fs.respQueueHigh:
-			resp.Session.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
 			_, err := resp.Session.Write(resp.Data)
 			if err != nil {
 				fmt.Printf("Write response error: %v\n", err)
@@ -258,13 +258,13 @@ func (fs *FileServer) responseSender() {
 			case <-fs.ctx.Done():
 				return
 			case resp := <-fs.respQueueHigh:
-				resp.Session.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
 				_, err := resp.Session.Write(resp.Data)
 				if err != nil {
 					fmt.Printf("Write response error: %v\n", err)
 				}
 			case resp := <-fs.respQueueLow:
-				resp.Session.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
 				_, err := resp.Session.Write(resp.Data)
 				if err != nil {
 					fmt.Printf("Write response error: %v\n", err)

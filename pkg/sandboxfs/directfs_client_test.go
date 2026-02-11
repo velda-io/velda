@@ -59,7 +59,7 @@ func setupTestServerClient(t *testing.T, srcDir, cacheDir, mountDir string, work
 	cache, err := NewDirectoryCacheManager(cacheDir)
 	require.NoError(t, err)
 
-	client := NewDirectFSClient(server.Addr().String(), cache, false)
+	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
 
 	veldaServer, err := client.Mount(mountDir)
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func setupTestServerClientWithCache(t *testing.T, srcDir string, cache *Director
 
 	time.Sleep(100 * time.Millisecond)
 
-	client := NewDirectFSClient(server.Addr().String(), cache, false)
+	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
 
 	veldaServer, err := client.Mount(mountDir)
 	require.NoError(t, err)
@@ -371,7 +371,7 @@ func TestSnapshotClientTimestamps(t *testing.T) {
 	cache, err := NewDirectoryCacheManager(cacheDir)
 	require.NoError(t, err)
 
-	client := NewDirectFSClient(server.Addr().String(), cache, false)
+	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
 
 	veldaServer, err := client.Mount(mountDir)
 	defer client.Stop()
