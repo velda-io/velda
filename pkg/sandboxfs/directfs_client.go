@@ -230,13 +230,13 @@ func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
 	// Re-send mount request
 	mountReq := fileserver.MountRequest{
 		Version: fileserver.ProtocolVersion,
-		Flags:   fileserver.FlagReadOnly,
+		Flags:   fileserver.MountFlagReadOnly,
 		Path:    path,
 	}
 
 	var mountResp fileserver.MountResponse
 	seq := sc.nextSeq()
-	data, err := fileserver.SerializeWithHeader(fileserver.OpMount, seq, &mountReq)
+	data, err := fileserver.SerializeWithHeader(fileserver.OpMount, seq, 0, &mountReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize request: %w", err)
 	}
@@ -329,7 +329,7 @@ func (sc *DirectFSClient) processPrefetchJob(job *prefetchJob) {
 		return
 	}
 
-	// Read entire file from server
+	// Read entire file from server with low priority QoS
 	readReq := fileserver.ReadRequest{
 		Fh:     job.fh,
 		Offset: 0,
@@ -337,7 +337,7 @@ func (sc *DirectFSClient) processPrefetchJob(job *prefetchJob) {
 	}
 
 	readResp := fileserver.ReadResponse{}
-	err = sc.SendRequest(&readReq, &readResp)
+	err = sc.SendRequestWithFlags(&readReq, &readResp, fileserver.FlagQosLow)
 	if err != nil {
 		return
 	}
@@ -378,9 +378,9 @@ func (sc *DirectFSClient) nextSeq() uint32 {
 }
 
 // sendRequestWithData sends pre-serialized data and waits for response
-func (sc *DirectFSClient) sendRequestWithData(opCode uint32, req fileserver.Serializable, res fileserver.Serializable) error {
+func (sc *DirectFSClient) sendRequestWithData(opCode uint32, flags uint32, req fileserver.Serializable, res fileserver.Serializable) error {
 	seq := sc.nextSeq()
-	data, err := fileserver.SerializeWithHeader(opCode, seq, req)
+	data, err := fileserver.SerializeWithHeader(opCode, seq, flags, req)
 	if err != nil {
 		return fmt.Errorf("failed to serialize request: %w", err)
 	}
@@ -431,6 +431,11 @@ func (sc *DirectFSClient) sendRequestWithData(opCode uint32, req fileserver.Seri
 
 // SendRequest sends a request and waits for response
 func (sc *DirectFSClient) SendRequest(req fileserver.Serializable, res fileserver.Serializable) error {
+	return sc.SendRequestWithFlags(req, res, fileserver.FlagNone)
+}
+
+// SendRequestWithFlags sends a request with specified flags and waits for response
+func (sc *DirectFSClient) SendRequestWithFlags(req fileserver.Serializable, res fileserver.Serializable, flags uint32) error {
 	// Don't retry mount requests - they're part of reconnection
 	_, isMountReq := req.(*fileserver.MountRequest)
 
@@ -457,7 +462,7 @@ func (sc *DirectFSClient) SendRequest(req fileserver.Serializable, res fileserve
 	}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		err := sc.sendRequestWithData(opCode, req, res)
+		err := sc.sendRequestWithData(opCode, flags, req, res)
 		if err == nil {
 			return nil
 		}

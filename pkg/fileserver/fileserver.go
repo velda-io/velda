@@ -44,9 +44,10 @@ type FileServer struct {
 	mu       sync.RWMutex
 	sessions map[*Session]bool
 
-	// Request and response queues
-	reqQueue  chan Request
-	respQueue chan Response
+	// Request and response queues (separate queues for high and low priority)
+	reqQueue      chan Request
+	respQueueHigh chan Response
+	respQueueLow  chan Response
 
 	// Pre-loading queue for metadata
 	preloadQueue chan PreLoadItem
@@ -60,9 +61,10 @@ type FileServer struct {
 
 // Request wrapper for dispatching
 type Request struct {
-	Session *Session
-	Header  Header
-	Data    []byte
+	Session       *Session
+	Header        Header
+	Data          []byte
+	IsLowPriority bool // True if this request has low QoS priority
 }
 
 // Response wrapper for sending
@@ -76,14 +78,15 @@ func NewFileServer(rootPath string, numWorkers int) *FileServer {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &FileServer{
-		rootPath:     rootPath,
-		sessions:     make(map[*Session]bool),
-		reqQueue:     make(chan Request, 100),
-		respQueue:    make(chan Response, 100),
-		preloadQueue: make(chan PreLoadItem, 1000),
-		numWorkers:   numWorkers,
-		ctx:          ctx,
-		cancel:       cancel,
+		rootPath:      rootPath,
+		sessions:      make(map[*Session]bool),
+		reqQueue:      make(chan Request, 100),
+		respQueueHigh: make(chan Response, 100),
+		respQueueLow:  make(chan Response, 100),
+		preloadQueue:  make(chan PreLoadItem, 1000),
+		numWorkers:    numWorkers,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 }
 
@@ -243,11 +246,29 @@ func (fs *FileServer) responseSender() {
 		select {
 		case <-fs.ctx.Done():
 			return
-		case resp := <-fs.respQueue:
+		case resp := <-fs.respQueueHigh:
 			resp.Session.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			_, err := resp.Session.Write(resp.Data)
 			if err != nil {
 				fmt.Printf("Write response error: %v\n", err)
+			}
+		default:
+			// If no high-priority responses, check low-priority queue
+			select {
+			case <-fs.ctx.Done():
+				return
+			case resp := <-fs.respQueueHigh:
+				resp.Session.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				_, err := resp.Session.Write(resp.Data)
+				if err != nil {
+					fmt.Printf("Write response error: %v\n", err)
+				}
+			case resp := <-fs.respQueueLow:
+				resp.Session.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				_, err := resp.Session.Write(resp.Data)
+				if err != nil {
+					fmt.Printf("Write response error: %v\n", err)
+				}
 			}
 		}
 	}
@@ -360,15 +381,15 @@ func (fs *FileServer) sendDirData(ino uint64, entries []DirEntry, session *Sessi
 		Entries: entries,
 	}
 
-	respBytes, err := SerializeWithHeader(OpDirDataNotification, 0, notification)
+	respBytes, err := SerializeWithHeader(OpDirDataNotification, 0, FlagQosLow, notification)
 	if err != nil {
 		log.Printf("Failed to serialize DirData notification: %v", err)
 		return
 	}
 
-	// Send via response queue
+	// Send via response queue as low priority (preload notifications)
 	select {
-	case fs.respQueue <- Response{Session: session, Data: respBytes}:
+	case fs.respQueueLow <- Response{Session: session, Data: respBytes}:
 	case <-fs.ctx.Done():
 	}
 }
@@ -437,22 +458,29 @@ func (fs *FileServer) handleRequest(req Request) {
 	} else {
 		var serErr error
 		// Use opcode=0 for success responses
-		respBytes, serErr = SerializeWithHeader(0, req.Header.Seq, resp)
+		respBytes, serErr = SerializeWithHeader(0, req.Header.Seq, req.Header.Flags, resp)
 		if serErr != nil {
 			log.Printf("Failed to serialize response for opcode=%d seq=%d: %v", req.Header.Opcode, req.Header.Seq, serErr)
 			respBytes = fs.makeErrorResponse(req.Header.Seq, syscall.EIO)
 		}
 	}
 
-	select {
-	case fs.respQueue <- Response{Session: req.Session, Data: respBytes}:
-	case <-fs.ctx.Done():
+	// Route response to appropriate priority queue based on request priority
+	if req.IsLowPriority {
+		select {
+		case fs.respQueueLow <- Response{Session: req.Session, Data: respBytes}:
+		case <-fs.ctx.Done():
+		}
+	} else {
+		select {
+		case fs.respQueueHigh <- Response{Session: req.Session, Data: respBytes}:
+		case <-fs.ctx.Done():
+		}
 	}
 }
 
-// serializeResponse converts a response to bytes
-// SerializeWithHeader serializes a Serializable payload, prepends a header with correct size, and returns the full bytes
-func SerializeWithHeader(op uint32, seq uint32, resp Serializable) ([]byte, error) {
+// SerializeWithHeader serializes a Serializable payload with flags, prepends a header with correct size, and returns the full bytes
+func SerializeWithHeader(op uint32, seq uint32, flags uint32, resp Serializable) ([]byte, error) {
 	var body bytes.Buffer
 	if err := resp.Serialize(&body); err != nil {
 		return nil, fmt.Errorf("Failed to serialize response body: %w", err)
@@ -460,7 +488,7 @@ func SerializeWithHeader(op uint32, seq uint32, resp Serializable) ([]byte, erro
 
 	totalSize := HeaderSize + body.Len()
 	var out bytes.Buffer
-	header := Header{Opcode: op, Size: uint32(totalSize), Seq: seq}
+	header := Header{Opcode: op, Size: uint32(totalSize), Flags: flags, Seq: seq}
 	if err := header.Serialize(&out); err != nil {
 		return nil, fmt.Errorf("failed to serialize header: %w", err)
 	}
@@ -516,7 +544,7 @@ func (fs *FileServer) handleMount(mountReq *MountRequest, session *Session) (Ser
 	// Build response
 	resp := &MountResponse{
 		Version: ProtocolVersion,
-		Flags:   mountReq.Flags & FlagReadOnly,
+		Flags:   mountReq.Flags & MountFlagReadOnly,
 		Fh:      fh,
 		Attr:    attr,
 	}

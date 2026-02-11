@@ -91,7 +91,7 @@ func TestMountRequestSerialization(t *testing.T) {
 			name: "basic mount request",
 			req: MountRequest{
 				Version: ProtocolVersion,
-				Flags:   FlagReadOnly,
+				Flags:   MountFlagReadOnly,
 				Path:    "/data",
 			},
 		},
@@ -160,7 +160,7 @@ func TestMountResponseSerialization(t *testing.T) {
 			name: "successful mount",
 			resp: MountResponse{
 				Version: ProtocolVersion,
-				Flags:   FlagReadOnly,
+				Flags:   MountFlagReadOnly,
 				Fh:      fh,
 				Attr:    testAttr,
 			},
@@ -657,7 +657,7 @@ func TestSerializeWithHeader(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Serialize with header
-			data, err := SerializeWithHeader(0, tt.seq, tt.resp)
+			data, err := SerializeWithHeader(0, tt.seq, 0, tt.resp)
 			if err != nil {
 				t.Fatalf("SerializeWithHeader failed: %v", err)
 			}

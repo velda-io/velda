@@ -34,7 +34,7 @@ const (
 const (
 	ProtocolVersion = 1
 	FlagNone        = 0
-	FlagReadOnly    = 1 << 0
+	FlagQosLow      = 1 << 0 // Low priority QoS for this request
 )
 
 // Header represents the common header for all requests/responses
@@ -52,6 +52,10 @@ type Serializable interface {
 	Serialize(io.Writer) error
 	Deserialize(io.Reader) error
 }
+
+const (
+	MountFlagReadOnly = 1 << 0
+)
 
 // MountRequest represents a mount request
 type MountRequest struct {
