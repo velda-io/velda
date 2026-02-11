@@ -76,6 +76,8 @@ type DirectFSClient struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
+
+	verbose bool
 }
 
 // prefetchJob represents a background job to prefetch and cache a small file
@@ -86,7 +88,7 @@ type prefetchJob struct {
 }
 
 // NewDirectFSClient creates a new direct filesystem client
-func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager) *DirectFSClient {
+func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager, verbose bool) *DirectFSClient {
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &DirectFSClient{
 		serverAddr:    serverAddr,
@@ -96,6 +98,7 @@ func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager) *DirectF
 		prefetchQueue: make(chan *prefetchJob, 1000),
 		ctx:           ctx,
 		cancel:        cancel,
+		verbose:       verbose,
 	}
 
 	// Start prefetch workers
@@ -616,7 +619,13 @@ func (sc *DirectFSClient) handleDirDataNotification(data []byte) {
 		parentInode.AddChild(entry.Name, childInode, false)
 	}
 
-	log.Printf("Pre-loaded %d entries for inode %d", len(notification.Entries), notification.Ino)
+	sc.DebugLog("Pre-loaded %d entries for inode %d", len(notification.Entries), notification.Ino)
+}
+
+func (sc *DirectFSClient) DebugLog(format string, args ...interface{}) {
+	if sc.verbose {
+		log.Printf(format, args...)
+	}
 }
 
 // SnapshotNode implements fs.InodeEmbedder for persistent inodes
@@ -878,6 +887,7 @@ func (n *SnapshotNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, u
 		fh:     n.fh,
 		attr:   n.attr,
 		cache:  n.client.cache,
+		path:   n.Path(nil),
 	}
 
 	// Start eager fetch in background
@@ -953,6 +963,8 @@ type SnapshotFile struct {
 	// Eager fetch state
 	fetchMu     sync.Mutex
 	cacheWriter CacheWriter // Active cache writer for pread access during fetch
+
+	path string // For logging purposes
 }
 
 // Ensure SnapshotFile implements required interfaces
@@ -1019,6 +1031,7 @@ func (f *SnapshotFile) eagerFetchAndCache(hasExistingKey bool, expectedSHA strin
 			abort()
 			return
 		}
+		f.client.DebugLog("Pre-fetched %d bytes for %s at offset %d", len(readResp.Data), f.path, offset)
 
 		offset += uint64(len(readResp.Data))
 
@@ -1104,6 +1117,7 @@ func (f *SnapshotFile) Read(ctx context.Context, dest []byte, off int64) (fuse.R
 	if err != nil {
 		return nil, fs.ToErrno(err)
 	}
+	f.client.DebugLog("Read %d bytes for file %s at offset %d", len(readResp.Data), f.path, off)
 
 	return fuse.ReadResultData(readResp.Data), fs.OK
 }

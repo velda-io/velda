@@ -28,6 +28,7 @@ message HostMount {
 message CasConfig {
   string cas_cache_dir = 1; // The directory to use for CAS cache.
   bool use_direct_protocol = 2; // Whether to use the direct protocol for CAS.
+  repeated string flags = 3; // Additional flags for CAS configuration.
 }
 
 message AgentDiskSource {

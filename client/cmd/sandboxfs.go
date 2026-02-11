@@ -51,6 +51,8 @@ var sandboxfsCmd = &cobra.Command{
 		mountOpts = append(mountOpts, func(opt *sandboxfs.VeldaMountOptions) {
 			opt.FuseOptions.FsName, _ = cmd.Flags().GetString("name")
 			opt.FuseOptions.Debug = clientlib.Debug
+			verbose, _ := cmd.Flags().GetBool("verbose")
+			opt.VerboseLog = verbose
 		})
 
 		switch mode {
@@ -94,4 +96,5 @@ func init() {
 	sandboxfsCmd.Flags().String("name", "", "Name of the mount")
 	sandboxfsCmd.Flags().String("cache-dir", "/tmp/velda_cas_cache", "Directory for caching")
 	sandboxfsCmd.Flags().String("mode", "standard", "Mount mode: standard, snapshot, nocache, directfs or directfs-snapshot")
+	sandboxfsCmd.Flags().Bool("verbose", false, "Verbose logging options")
 }

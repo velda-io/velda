@@ -31,6 +31,7 @@ type VeldaMountOptions struct {
 	SnapshotMode bool
 	NoCacheMode  bool
 	DirectFSMode bool
+	VerboseLog   bool
 }
 
 type MountOptions func(*VeldaMountOptions)
@@ -79,6 +80,12 @@ func WithDirectFSMode() MountOptions {
 func WithFuseOption(fn func(*fs.Options)) MountOptions {
 	return func(opts *VeldaMountOptions) {
 		fn(opts.FuseOptions)
+	}
+}
+
+func WithVerboseLog() MountOptions {
+	return func(opts *VeldaMountOptions) {
+		opts.VerboseLog = true
 	}
 }
 
@@ -144,7 +151,7 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 	var rootNode fs.InodeEmbedder
 	// Handle DirectFS mode
 	if veldaOpts.DirectFSMode {
-		client := NewDirectFSClient(baseDir, cache)
+		client := NewDirectFSClient(baseDir, cache, veldaOpts.VerboseLog)
 		rootNode, err = client.Connect()
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to DirectFS server: %w", err)
