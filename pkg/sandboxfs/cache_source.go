@@ -83,16 +83,11 @@ func NewHTTPCacheSource(baseURL string) *HTTPCacheSource {
 func (h *HTTPCacheSource) Fetch(ctx context.Context, size int64, hash string) (io.ReadCloser, int64, error) {
 	// Honor configured minSize: if file is smaller, treat as not present
 	if h.minSize > 0 && size < h.minSize {
-		return nil, 0, fmt.Errorf("file not found in HTTP cache")
+		return nil, 0, fmt.Errorf("file not meet size requirement")
 	}
 
-	// Build URL as: <baseURL>/<hash>?size=<size>
-	sizeStr := strconv.FormatInt(size, 10)
-	reqURL := fmt.Sprintf("%s/%s", h.baseURL, hash)
-	q := (url.Values{"size": {sizeStr}}).Encode()
-	if q != "" {
-		reqURL = reqURL + "?" + q
-	}
+	// Build URL as: <baseURL>/<size>/<hash>
+	reqURL := fmt.Sprintf("%s/%d/%s", h.baseURL, size, hash)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {

@@ -47,6 +47,11 @@ type Response struct {
 	data  []byte
 }
 
+// partialMessage holds accumulated data for a multi-packet message
+type partialMessage struct {
+	chunks [][]byte
+}
+
 // DirectFSClient manages a FUSE filesystem that connects to a remote fileserver
 // using the fileserver protocol and uses sandboxfs cache manager
 type DirectFSClient struct {
@@ -54,11 +59,12 @@ type DirectFSClient struct {
 	conn       net.Conn
 
 	// Connection state
-	mu       sync.Mutex
-	seq      uint32
-	pending  map[uint32]chan Response
-	rootFh   unix.FileHandle
-	rootAttr fileserver.FileAttr
+	mu             sync.Mutex
+	seq            uint32
+	pending        map[uint32]chan Response
+	partialPackets map[uint32]*partialMessage // Buffer for assembling partial packets
+	rootFh         unix.FileHandle
+	rootAttr       fileserver.FileAttr
 
 	// Reconnection tracking
 	reconnectMu sync.Mutex
@@ -102,6 +108,7 @@ func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager, cacheSou
 	client := &DirectFSClient{
 		serverAddr:         serverAddr,
 		pending:            make(map[uint32]chan Response),
+		partialPackets:     make(map[uint32]*partialMessage),
 		inodes:             make(map[uint64]*fs.Inode),
 		cache:              cache,
 		cacheSources:       cacheSources,
@@ -237,6 +244,7 @@ func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
 	// Start new response reader
 	sc.wg.Add(1)
 	sc.pending = make(map[uint32]chan Response)
+	sc.partialPackets = make(map[uint32]*partialMessage) // Clear partial packets on reconnect
 	go sc.readResponses(conn, sc.pending)
 
 	// Re-send mount request
@@ -560,6 +568,44 @@ func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]ch
 				log.Printf("Read data error: %v", err)
 				return
 			}
+		}
+
+		// Handle partial packets - only lock if it's part of a multi-packet message
+		isMultiPacket := (header.Flags&fileserver.FlagHasMore != 0) || (header.Flags&fileserver.FlagEndOfMultiPacket != 0)
+
+		if isMultiPacket {
+			sc.mu.Lock()
+			if header.Flags&fileserver.FlagHasMore != 0 {
+				// This is a partial packet - accumulate it
+				partial, exists := sc.partialPackets[header.Seq]
+				if !exists {
+					partial = &partialMessage{chunks: make([][]byte, 0)}
+					sc.partialPackets[header.Seq] = partial
+				}
+				partial.chunks = append(partial.chunks, data)
+				sc.mu.Unlock()
+				continue // Wait for more chunks
+			} else if header.Flags&fileserver.FlagEndOfMultiPacket != 0 {
+				// This is the final chunk of a partial message
+				partial, hasPartial := sc.partialPackets[header.Seq]
+				if hasPartial {
+					// Assemble all chunks
+					partial.chunks = append(partial.chunks, data)
+					totalSize := 0
+					for _, chunk := range partial.chunks {
+						totalSize += len(chunk)
+					}
+					assembled := make([]byte, 0, totalSize)
+					for _, chunk := range partial.chunks {
+						assembled = append(assembled, chunk...)
+					}
+					data = assembled
+					delete(sc.partialPackets, header.Seq)
+				} else {
+					log.Printf("Warning: received END_OF_MULTIPACKET for seq %d but no partial message found", header.Seq)
+				}
+			}
+			sc.mu.Unlock()
 		}
 
 		// Decompress data if compressed
@@ -1235,7 +1281,7 @@ func (f *SnapshotFile) PassthroughFd() (int, bool) {
 // tryFetchFromCacheSources attempts to fetch file from configured cache sources
 // Returns true if successfully fetched and cached, false otherwise
 func (f *SnapshotFile) tryFetchFromCacheSources(hash string, writer CacheWriter) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	for _, source := range f.client.cacheSourceClients {

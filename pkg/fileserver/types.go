@@ -32,15 +32,19 @@ const (
 
 // Protocol version and flags
 const (
-	ProtocolVersion = 1
-	FlagNone        = 0
-	FlagQosLow      = 1 << 0 // Low priority QoS for this request
-	FlagCompressed  = 1 << 1 // Payload is compressed with zstd
+	ProtocolVersion      = 1
+	FlagNone             = 0
+	FlagQosLow           = 1 << 0 // Low priority QoS for this request
+	FlagCompressed       = 1 << 1 // Payload is compressed with zstd
+	FlagHasMore          = 1 << 2 // More packets follow for this message (partial packet)
+	FlagEndOfMultiPacket = 1 << 3 // This is the final packet of a multi-packet message
 )
 
 const (
 	// CompressionThreshold is the minimum payload size for compression (32KB)
 	CompressionThreshold = 32 * 1024
+	// ChunkSize is the maximum size of each packet chunk after compression (32KB)
+	ChunkSize = 32 * 1024
 )
 
 // Header represents the common header for all requests/responses

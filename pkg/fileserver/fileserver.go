@@ -264,28 +264,115 @@ func (fs *FileServer) responseSender() {
 		case <-fs.ctx.Done():
 			return
 		case resp := <-fs.respQueueHigh:
-			resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
-			_, err := resp.Session.Write(resp.Data)
-			if err != nil {
-				fmt.Printf("Write response error: %v\n", err)
-			}
+			fs.sendResponse(resp)
 		default:
 			// If no high-priority responses, check low-priority queue
 			select {
 			case <-fs.ctx.Done():
 				return
 			case resp := <-fs.respQueueHigh:
-				resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
-				_, err := resp.Session.Write(resp.Data)
-				if err != nil {
-					fmt.Printf("Write response error: %v\n", err)
-				}
+				fs.sendResponse(resp)
 			case resp := <-fs.respQueueLow:
-				resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
-				_, err := resp.Session.Write(resp.Data)
-				if err != nil {
-					fmt.Printf("Write response error: %v\n", err)
-				}
+				fs.sendResponseChunked(resp)
+			}
+		}
+	}
+}
+
+// sendResponse sends a single response packet
+func (fs *FileServer) sendResponse(resp Response) {
+	resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	_, err := resp.Session.Write(resp.Data)
+	if err != nil {
+		fmt.Printf("Write response error: %v\n", err)
+	}
+}
+
+// sendResponseChunked splits large low-priority responses into chunks
+// to allow high-priority packets to be interleaved
+func (fs *FileServer) sendResponseChunked(resp Response) {
+	data := resp.Data
+
+	// If data fits in one chunk, send it directly
+	if len(data) <= ChunkSize+HeaderSize {
+		fs.sendResponse(resp)
+		return
+	}
+
+	// Parse the header from the original packet.
+	var header Header
+	if err := header.Deserialize(bytes.NewReader(data[:HeaderSize])); err != nil || header.Seq == 0 {
+		fmt.Printf("Failed to parse header for chunking: %v\n", err)
+		fs.sendResponse(resp)
+		return
+	}
+
+	payload := data[HeaderSize:]
+	offset := 0
+	isFirstChunk := true
+
+	for offset < len(payload) {
+		// Calculate chunk size
+		remaining := len(payload) - offset
+		chunkPayloadSize := ChunkSize
+		if remaining < ChunkSize {
+			chunkPayloadSize = remaining
+		}
+
+		// Determine if there are more chunks
+		isLastChunk := (offset + chunkPayloadSize) >= len(payload)
+
+		// Set flags for multi-packet messages
+		flags := header.Flags
+		if !isFirstChunk || !isLastChunk {
+			// Mark as part of multi-packet sequence
+			if !isLastChunk {
+				flags |= FlagHasMore
+			} else {
+				flags |= FlagEndOfMultiPacket
+			}
+		}
+
+		// Create chunk packet with header
+		var out bytes.Buffer
+		chunkHeader := Header{
+			Opcode: header.Opcode,
+			Size:   uint32(HeaderSize + chunkPayloadSize),
+			Flags:  flags,
+			Seq:    header.Seq,
+		}
+		if err := chunkHeader.Serialize(&out); err != nil {
+			fmt.Printf("Failed to serialize chunk header: %v\n", err)
+			return
+		}
+		if _, err := out.Write(payload[offset : offset+chunkPayloadSize]); err != nil {
+			fmt.Printf("Failed to write chunk payload: %v\n", err)
+			return
+		}
+
+		// Send chunk
+		chunkData := out.Bytes()
+		resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
+		_, err := resp.Session.Write(chunkData)
+		if err != nil {
+			fmt.Printf("Write chunk error: %v\n", err)
+			return
+		}
+
+		offset += chunkPayloadSize
+		isFirstChunk = false
+
+		// Yield to allow high-priority packets to be sent
+		if !isLastChunk {
+			// Check if there are high-priority packets waiting
+			select {
+			case <-fs.ctx.Done():
+				return
+			case highPrioResp := <-fs.respQueueHigh:
+				// High-priority packet available, send it and continue
+				fs.sendResponse(highPrioResp)
+			default:
+				// No high-priority packets, continue with next chunk
 			}
 		}
 	}
