@@ -35,6 +35,12 @@ const (
 	ProtocolVersion = 1
 	FlagNone        = 0
 	FlagQosLow      = 1 << 0 // Low priority QoS for this request
+	FlagCompressed  = 1 << 1 // Payload is compressed with zstd
+)
+
+const (
+	// CompressionThreshold is the minimum payload size for compression (32KB)
+	CompressionThreshold = 32 * 1024
 )
 
 // Header represents the common header for all requests/responses

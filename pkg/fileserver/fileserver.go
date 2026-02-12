@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sys/unix"
 )
 
@@ -213,6 +214,22 @@ func (fs *FileServer) handleConnection(session *Session) {
 				fmt.Printf("Read data error: %v\n", err)
 				return
 			}
+		}
+
+		// Decompress data if compressed
+		if header.Flags&FlagCompressed != 0 {
+			decoder, err := zstd.NewReader(nil)
+			if err != nil {
+				fmt.Printf("Failed to create zstd decoder: %v\n", err)
+				return
+			}
+			decompressed, err := decoder.DecodeAll(data, nil)
+			decoder.Close()
+			if err != nil {
+				fmt.Printf("Failed to decompress data: %v\n", err)
+				return
+			}
+			data = decompressed
 		}
 
 		// Dispatch request to handling queue
@@ -484,22 +501,46 @@ func (fs *FileServer) handleRequest(req Request) {
 }
 
 // SerializeWithHeader serializes a Serializable payload with flags, prepends a header with correct size, and returns the full bytes
+// If the payload is larger than 32KB, it will be compressed using zstd and FlagCompressed will be set
 func SerializeWithHeader(op uint32, seq uint32, flags uint32, resp Serializable) ([]byte, error) {
 	var body bytes.Buffer
 	if err := resp.Serialize(&body); err != nil {
 		return nil, fmt.Errorf("Failed to serialize response body: %w", err)
 	}
 
-	totalSize := HeaderSize + body.Len()
+	payload := body.Bytes()
+
+	// Compress payload if it exceeds threshold
+	if len(payload) > CompressionThreshold {
+		encoder, err := zstd.NewWriter(nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create zstd encoder: %w", err)
+		}
+		compressed := encoder.EncodeAll(payload, make([]byte, 0, len(payload)))
+		encoder.Close()
+
+		// Only use compression if it actually reduces size
+		if len(compressed) < len(payload) {
+			payload = compressed
+			flags |= FlagCompressed
+		}
+	}
+
+	totalSize := HeaderSize + len(payload)
 	var out bytes.Buffer
 	header := Header{Opcode: op, Size: uint32(totalSize), Flags: flags, Seq: seq}
 	if err := header.Serialize(&out); err != nil {
 		return nil, fmt.Errorf("failed to serialize header: %w", err)
 	}
-	if _, err := out.Write(body.Bytes()); err != nil {
+	if _, err := out.Write(payload); err != nil {
 		return nil, fmt.Errorf("failed to write body: %w", err)
 	}
 	return out.Bytes(), nil
+}
+
+// NewZstdDecoder creates a new zstd decoder for decompression
+func NewZstdDecoder() (*zstd.Decoder, error) {
+	return zstd.NewReader(nil)
 }
 
 // handleMount handles mount requests

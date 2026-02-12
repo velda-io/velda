@@ -30,6 +30,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sys/unix"
 	"velda.io/velda/pkg/fileserver"
 )
@@ -559,6 +560,22 @@ func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]ch
 				log.Printf("Read data error: %v", err)
 				return
 			}
+		}
+
+		// Decompress data if compressed
+		if header.Flags&fileserver.FlagCompressed != 0 {
+			decoder, err := zstd.NewReader(nil)
+			if err != nil {
+				log.Printf("Failed to create zstd decoder: %v", err)
+				return
+			}
+			decompressed, err := decoder.DecodeAll(data, nil)
+			decoder.Close()
+			if err != nil {
+				log.Printf("Failed to decompress data: %v", err)
+				return
+			}
+			data = decompressed
 		}
 
 		// Check if this is a DirDataNotification (opcode indicates notification)
