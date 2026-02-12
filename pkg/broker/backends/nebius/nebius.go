@@ -17,9 +17,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 
 	"github.com/nebius/gosdk"
+	"github.com/nebius/gosdk/auth"
 	"github.com/nebius/gosdk/config/reader"
 	common "github.com/nebius/gosdk/proto/nebius/common/v1"
 	compute "github.com/nebius/gosdk/proto/nebius/compute/v1"
@@ -516,11 +518,18 @@ func (f *nebiusLaunchTemplatePoolFactory) NewBackend(pool *proto.AgentPool, brok
 		nebiusTemplate.InstanceNamePrefix = fmt.Sprintf("velda-%s", pool.GetName())
 	}
 
-	cfgReader := reader.NewConfigReader(reader.WithoutBrowserOpen())
-	if err := cfgReader.Load(ctx); err != nil {
-		return nil, fmt.Errorf("failed to load Nebius config: %w", err)
+	var cfgOption gosdk.Option
+	if key := os.Getenv("NEBIUS_SERVICE_ACCOUNT_KEY"); key != "" {
+		cfgOption = gosdk.WithCredentials(
+			gosdk.ServiceAccountReader(auth.NewServiceAccountCredentialsFileParser(nil, key)))
+	} else {
+		cfgReader := reader.NewConfigReader(reader.WithoutBrowserOpen())
+		if err := cfgReader.Load(ctx); err != nil {
+			return nil, fmt.Errorf("failed to load Nebius config: %w", err)
+		}
+		cfgOption = gosdk.WithConfigReader(cfgReader)
 	}
-	sdk, err := gosdk.New(ctx, gosdk.WithConfigReader(cfgReader))
+	sdk, err := gosdk.New(ctx, cfgOption)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize Nebius SDK: %w", err)
 	}

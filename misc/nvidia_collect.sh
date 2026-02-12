@@ -47,7 +47,7 @@ bind_file_readonly() {
 
 	# ensure dest directory exists
 	sudo mkdir -p "$(dirname "$dest")"
-	[ ! -e "$dest" ] && sudo ln "$src" "$dest"
+	[ ! -e "$dest" ] && sudo ln "$src" "$dest" || true
 }
 
 for FILE in "${FILELIST[@]}"; do
