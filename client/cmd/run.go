@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -170,7 +171,10 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	if snapshotName != "" {
 		sessionReq.SnapshotName = snapshotName
 	}
-	sessionReq.WritableDirs = writableDirs
+	sessionReq.WritableDirs, err = sanitizeWritableDirs(writableDirs)
+	if err != nil {
+		return err
+	}
 
 	if batch {
 		workload, err := getWorkload(cmd, args)
@@ -702,4 +706,48 @@ func streamTaskLogs(ctx context.Context, taskClient proto.TaskServiceClient, tas
 			return
 		}
 	}
+}
+
+// Convert writable dirs to absolute paths and verify they are on the same mount as root.
+func sanitizeWritableDirs(dirs []string) ([]string, error) {
+	if len(dirs) == 0 {
+		return dirs, nil
+	}
+	var rootSt syscall.Stat_t
+	if err := syscall.Stat("/", &rootSt); err != nil {
+		return nil, fmt.Errorf("Error stating root filesystem: %v", err)
+	}
+	rootDev := rootSt.Dev
+
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		if d == "/dev/null" {
+			out = append(out, d)
+			continue
+		}
+		abs, err := filepath.EvalSymlinks(d)
+		if err != nil {
+			return nil, fmt.Errorf("Error evaluating symlinks for %s: %v", d, err)
+		}
+		abs, err = filepath.Abs(abs)
+		if err != nil {
+			return nil, fmt.Errorf("Error getting absolute path for %s: %v", d, err)
+		}
+
+		var st syscall.Stat_t
+		if err := syscall.Stat(abs, &st); err != nil {
+			return nil, fmt.Errorf("Error stating writable directory %s: %v", abs, err)
+		}
+		if (st.Mode & syscall.S_IFMT) != syscall.S_IFDIR {
+			return nil, fmt.Errorf("Writable path %s is not a directory", abs)
+		}
+		if st.Dev != rootDev {
+			return nil, fmt.Errorf("Writable directory %s is on a different mount (device %d) than root (device %d)", abs, st.Dev, rootDev)
+		}
+		out = append(out, abs)
+	}
+	return out, nil
 }
