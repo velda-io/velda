@@ -22,12 +22,13 @@ import (
 // CacheMetrics tracks cache hit/miss/save statistics
 type CacheMetrics struct {
 	// Read operations
-	fuseLatency   *prometheus.SummaryVec
-	CacheHit      prometheus.Counter
-	CacheMiss     prometheus.Counter
-	CacheNotExist prometheus.Counter
-	CacheFetched  prometheus.Counter
-	CacheStale    prometheus.Counter
+	fuseLatency       *prometheus.SummaryVec
+	CacheHit          prometheus.Counter
+	CacheMiss         prometheus.Counter
+	CacheNotExist     prometheus.Counter
+	CacheFetched      prometheus.Counter
+	CacheStale        prometheus.Counter
+	ReadDirFromClient prometheus.Counter
 
 	// Write operations (after file close)
 	CacheSaved   prometheus.Counter
@@ -75,6 +76,10 @@ func NewCacheMetrics() *CacheMetrics {
 			Name: "velda_cache_aborted_total",
 			Help: "Number of cache operations aborted (non-sequential writes, errors, etc.)",
 		}),
+		ReadDirFromClient: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "velda_readdir_from_client_total",
+			Help: "Number of readdir requests sent from client to server",
+		}),
 	}
 }
 
@@ -88,6 +93,7 @@ func (m *CacheMetrics) Register() {
 	prometheus.MustRegister(m.CacheSaved)
 	prometheus.MustRegister(m.CacheDup)
 	prometheus.MustRegister(m.CacheAborted)
+	prometheus.MustRegister(m.ReadDirFromClient)
 }
 
 func (m *CacheMetrics) Unregister() {
@@ -100,6 +106,7 @@ func (m *CacheMetrics) Unregister() {
 	prometheus.Unregister(m.CacheSaved)
 	prometheus.Unregister(m.CacheDup)
 	prometheus.Unregister(m.CacheAborted)
+	prometheus.Unregister(m.ReadDirFromClient)
 }
 
 func (m *CacheMetrics) Add(name string, dt time.Duration) {

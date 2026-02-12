@@ -607,35 +607,42 @@ func (sc *DirectFSClient) handleDirDataNotification(data []byte) {
 		return
 	}
 
-	// Add all child inodes to the FUSE inode tree
-	ctx := context.Background()
-	for _, entry := range notification.Entries {
-		// Check if child already exists
-		existingChild := parentInode.GetChild(entry.Name)
-		if existingChild != nil {
-			// Child already exists, skip
-			continue
+	parentNode.dirFetched.Do(func() {
+		// Add all child inodes to the FUSE inode tree
+		ctx := context.Background()
+		for _, entry := range notification.Entries {
+			// Check if child already exists
+			existingChild := parentInode.GetChild(entry.Name)
+			if existingChild != nil {
+				// Child already exists, skip
+				continue
+			}
+
+			// Create child node
+			childNode := &SnapshotNode{
+				client: sc,
+				fh:     entry.Fh,
+				attr:   entry.Attr,
+			}
+
+			// Create persistent inode
+			stable := fs.StableAttr{
+				Mode: entry.Attr.Mode,
+				Ino:  entry.Attr.Ino,
+			}
+			childInode := parentNode.NewPersistentInode(ctx, childNode, stable)
+
+			// Register inode in the map for future notifications
+			sc.inodeMu.Lock()
+			sc.inodes[entry.Attr.Ino] = childInode
+			sc.inodeMu.Unlock()
+
+			// Add to parent's children (this makes it visible to readdir)
+			parentInode.AddChild(entry.Name, childInode, false)
 		}
 
-		// Create child node
-		childNode := &SnapshotNode{
-			client: sc,
-			fh:     entry.Fh,
-			attr:   entry.Attr,
-		}
-
-		// Create persistent inode
-		stable := fs.StableAttr{
-			Mode: entry.Attr.Mode,
-			Ino:  entry.Attr.Ino,
-		}
-		childInode := parentNode.NewPersistentInode(ctx, childNode, stable)
-
-		// Add to parent's children (this makes it visible to readdir)
-		parentInode.AddChild(entry.Name, childInode, false)
-	}
-
-	sc.DebugLog("Pre-loaded %d entries for inode %d", len(notification.Entries), notification.Ino)
+		sc.DebugLog("Pre-loaded %d entries for inode %d", len(notification.Entries), notification.Ino)
+	})
 }
 
 func (sc *DirectFSClient) DebugLog(format string, args ...interface{}) {
@@ -684,6 +691,10 @@ func (n *SnapshotNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.A
 func (n *SnapshotNode) fetchDirIfNeeded(ctx context.Context) {
 	n.dirFetched.Do(func() {
 		n.client.DebugLog("Fetching directory entries for inode %d", n.attr.Ino)
+		// Increment counter for readdir request from client
+		if GlobalCacheMetrics != nil {
+			GlobalCacheMetrics.ReadDirFromClient.Inc()
+		}
 		// Send readdir request
 		readDirReq := fileserver.ReadDirRequest{
 			Fh: n.fh,
@@ -709,6 +720,11 @@ func (n *SnapshotNode) fetchDirIfNeeded(ctx context.Context) {
 				Ino:  entry.Attr.Ino,
 			}
 			child := n.NewPersistentInode(ctx, childNode, stable)
+
+			// Register inode in the map for potential DirDataNotification
+			n.client.inodeMu.Lock()
+			n.client.inodes[entry.Attr.Ino] = child
+			n.client.inodeMu.Unlock()
 
 			// Add to children, don't replace existing child if it already exists
 			n.AddChild(entry.Name, child, false)
@@ -776,6 +792,12 @@ func (n *SnapshotNode) Lookup(ctx context.Context, name string, out *fuse.EntryO
 		Ino:  lookupResp.Attr.Ino,
 	}
 	child := n.NewPersistentInode(ctx, childNode, stable)
+
+	// Register inode in the map for potential DirDataNotification
+	n.client.inodeMu.Lock()
+	n.client.inodes[lookupResp.Attr.Ino] = child
+	n.client.inodeMu.Unlock()
+
 	return child, fs.OK
 }
 

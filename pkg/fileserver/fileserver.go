@@ -291,7 +291,7 @@ func (fs *FileServer) preloadWorker() {
 // handlePreload walks the directory tree and sends metadata to client
 func (fs *FileServer) handlePreload(item PreLoadItem) {
 	// Walk from the inode up to 2 levels deep
-	// fs.walkAndSendDirectory(item.Fh, item.Ino, item.Session, 0, 2, 1000)
+	fs.walkAndSendDirectory(item.Fh, item.Ino, item.Session, 0, 2, 1000)
 }
 
 // walkAndSendDirectory recursively walks directory and sends DirData
@@ -319,6 +319,10 @@ func (fs *FileServer) walkAndSendDirectory(fh unix.FileHandle, ino uint64, sessi
 
 	// Determine how many entries to process
 	entriesToProcess := len(entries)
+	// Skip this dir: request client to read it directly to get full entries
+	if len(entries) > maxEntries {
+		return
+	}
 
 	// Build directory entries
 	dirEntries := make([]DirEntry, 0, entriesToProcess)
