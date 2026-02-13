@@ -62,10 +62,9 @@ type FileServer struct {
 
 // Request wrapper for dispatching
 type Request struct {
-	Session       *Session
-	Header        Header
-	Data          []byte
-	IsLowPriority bool // True if this request has low QoS priority
+	Session *Session
+	Header  Header
+	Data    []byte
 }
 
 // Response wrapper for sending
@@ -574,7 +573,7 @@ func (fs *FileServer) handleRequest(req Request) {
 	}
 
 	// Route response to appropriate priority queue based on request priority
-	if req.IsLowPriority {
+	if req.Header.Flags&FlagQosLow != 0 {
 		select {
 		case fs.respQueueLow <- Response{Session: req.Session, Data: respBytes}:
 		case <-fs.ctx.Done():

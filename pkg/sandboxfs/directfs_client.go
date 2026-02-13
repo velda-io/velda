@@ -1338,6 +1338,7 @@ func (f *SnapshotFile) tryFetchFromCacheSources(hash string, writer CacheWriter)
 		// Update file state
 		f.fetchMu.Lock()
 		f.cachedBackingFile = fs.NewLoopbackFile(fd).(*fs.LoopbackFile)
+		f.cacheWriter = nil
 		f.fetchMu.Unlock()
 
 		if GlobalCacheMetrics != nil {

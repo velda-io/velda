@@ -81,9 +81,8 @@ func NewHTTPCacheSource(baseURL string) *HTTPCacheSource {
 
 // Fetch retrieves a file from the HTTP cache source
 func (h *HTTPCacheSource) Fetch(ctx context.Context, size int64, hash string) (io.ReadCloser, int64, error) {
-	// Honor configured minSize: if file is smaller, treat as not present
 	if h.minSize > 0 && size < h.minSize {
-		return nil, 0, fmt.Errorf("file not meet size requirement")
+		return nil, 0, fmt.Errorf("file does not meet size requirement")
 	}
 
 	// Build URL as: <baseURL>/<size>/<hash>
