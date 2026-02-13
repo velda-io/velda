@@ -46,12 +46,21 @@ var sandboxfsCmd = &cobra.Command{
 		target := args[1]
 		cacheDir, _ := cmd.Flags().GetString("cache-dir")
 		mode, _ := cmd.Flags().GetString("mode")
+		cacheSources, _ := cmd.Flags().GetStringSlice("cache-source")
 
 		var mountOpts []sandboxfs.MountOptions
 		mountOpts = append(mountOpts, func(opt *sandboxfs.VeldaMountOptions) {
 			opt.FuseOptions.FsName, _ = cmd.Flags().GetString("name")
 			opt.FuseOptions.Debug = clientlib.Debug
+			verbose, _ := cmd.Flags().GetBool("verbose")
+			opt.VerboseLog = verbose
+			log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 		})
+
+		// Add cache sources if provided
+		if len(cacheSources) > 0 {
+			mountOpts = append(mountOpts, sandboxfs.WithCacheSources(cacheSources))
+		}
 
 		switch mode {
 		case "snapshot":
@@ -94,4 +103,6 @@ func init() {
 	sandboxfsCmd.Flags().String("name", "", "Name of the mount")
 	sandboxfsCmd.Flags().String("cache-dir", "/tmp/velda_cas_cache", "Directory for caching")
 	sandboxfsCmd.Flags().String("mode", "standard", "Mount mode: standard, snapshot, nocache, directfs or directfs-snapshot")
+	sandboxfsCmd.Flags().Bool("verbose", false, "Verbose logging options")
+	sandboxfsCmd.Flags().StringSlice("cache-source", []string{}, "Additional cache sources (HTTP URLs, NFS paths, etc.)")
 }

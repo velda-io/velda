@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sys/unix"
 )
 
@@ -44,9 +45,10 @@ type FileServer struct {
 	mu       sync.RWMutex
 	sessions map[*Session]bool
 
-	// Request and response queues
-	reqQueue  chan Request
-	respQueue chan Response
+	// Request and response queues (separate queues for high and low priority)
+	reqQueue      chan Request
+	respQueueHigh chan Response
+	respQueueLow  chan Response
 
 	// Pre-loading queue for metadata
 	preloadQueue chan PreLoadItem
@@ -76,14 +78,15 @@ func NewFileServer(rootPath string, numWorkers int) *FileServer {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &FileServer{
-		rootPath:     rootPath,
-		sessions:     make(map[*Session]bool),
-		reqQueue:     make(chan Request, 100),
-		respQueue:    make(chan Response, 100),
-		preloadQueue: make(chan PreLoadItem, 1000),
-		numWorkers:   numWorkers,
-		ctx:          ctx,
-		cancel:       cancel,
+		rootPath:      rootPath,
+		sessions:      make(map[*Session]bool),
+		reqQueue:      make(chan Request, 100),
+		respQueueHigh: make(chan Response, 100),
+		respQueueLow:  make(chan Response, 100),
+		preloadQueue:  make(chan PreLoadItem, 1000),
+		numWorkers:    numWorkers,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 }
 
@@ -212,6 +215,22 @@ func (fs *FileServer) handleConnection(session *Session) {
 			}
 		}
 
+		// Decompress data if compressed
+		if header.Flags&FlagCompressed != 0 {
+			decoder, err := zstd.NewReader(nil)
+			if err != nil {
+				fmt.Printf("Failed to create zstd decoder: %v\n", err)
+				return
+			}
+			decompressed, err := decoder.DecodeAll(data, nil)
+			decoder.Close()
+			if err != nil {
+				fmt.Printf("Failed to decompress data: %v\n", err)
+				return
+			}
+			data = decompressed
+		}
+
 		// Dispatch request to handling queue
 		select {
 		case fs.reqQueue <- Request{Session: session, Header: header, Data: data}:
@@ -243,11 +262,116 @@ func (fs *FileServer) responseSender() {
 		select {
 		case <-fs.ctx.Done():
 			return
-		case resp := <-fs.respQueue:
-			resp.Session.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			_, err := resp.Session.Write(resp.Data)
-			if err != nil {
-				fmt.Printf("Write response error: %v\n", err)
+		case resp := <-fs.respQueueHigh:
+			fs.sendResponse(resp)
+		default:
+			// If no high-priority responses, check low-priority queue
+			select {
+			case <-fs.ctx.Done():
+				return
+			case resp := <-fs.respQueueHigh:
+				fs.sendResponse(resp)
+			case resp := <-fs.respQueueLow:
+				fs.sendResponseChunked(resp)
+			}
+		}
+	}
+}
+
+// sendResponse sends a single response packet
+func (fs *FileServer) sendResponse(resp Response) {
+	resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	_, err := resp.Session.Write(resp.Data)
+	if err != nil {
+		fmt.Printf("Write response error: %v\n", err)
+	}
+}
+
+// sendResponseChunked splits large low-priority responses into chunks
+// to allow high-priority packets to be interleaved
+func (fs *FileServer) sendResponseChunked(resp Response) {
+	data := resp.Data
+
+	// If data fits in one chunk, send it directly
+	if len(data) <= ChunkSize+HeaderSize {
+		fs.sendResponse(resp)
+		return
+	}
+
+	// Parse the header from the original packet.
+	var header Header
+	if err := header.Deserialize(bytes.NewReader(data[:HeaderSize])); err != nil || header.Seq == 0 {
+		fmt.Printf("Failed to parse header for chunking: %v\n", err)
+		fs.sendResponse(resp)
+		return
+	}
+
+	payload := data[HeaderSize:]
+	offset := 0
+	isFirstChunk := true
+
+	for offset < len(payload) {
+		// Calculate chunk size
+		remaining := len(payload) - offset
+		chunkPayloadSize := ChunkSize
+		if remaining < ChunkSize {
+			chunkPayloadSize = remaining
+		}
+
+		// Determine if there are more chunks
+		isLastChunk := (offset + chunkPayloadSize) >= len(payload)
+
+		// Set flags for multi-packet messages
+		flags := header.Flags
+		if !isFirstChunk || !isLastChunk {
+			// Mark as part of multi-packet sequence
+			if !isLastChunk {
+				flags |= FlagHasMore
+			} else {
+				flags |= FlagEndOfMultiPacket
+			}
+		}
+
+		// Create chunk packet with header
+		var out bytes.Buffer
+		chunkHeader := Header{
+			Opcode: header.Opcode,
+			Size:   uint32(HeaderSize + chunkPayloadSize),
+			Flags:  flags,
+			Seq:    header.Seq,
+		}
+		if err := chunkHeader.Serialize(&out); err != nil {
+			fmt.Printf("Failed to serialize chunk header: %v\n", err)
+			return
+		}
+		if _, err := out.Write(payload[offset : offset+chunkPayloadSize]); err != nil {
+			fmt.Printf("Failed to write chunk payload: %v\n", err)
+			return
+		}
+
+		// Send chunk
+		chunkData := out.Bytes()
+		resp.Session.SetWriteDeadline(time.Now().Add(30 * time.Second))
+		_, err := resp.Session.Write(chunkData)
+		if err != nil {
+			fmt.Printf("Write chunk error: %v\n", err)
+			return
+		}
+
+		offset += chunkPayloadSize
+		isFirstChunk = false
+
+		// Yield to allow high-priority packets to be sent
+		if !isLastChunk {
+			// Check if there are high-priority packets waiting
+			select {
+			case <-fs.ctx.Done():
+				return
+			case highPrioResp := <-fs.respQueueHigh:
+				// High-priority packet available, send it and continue
+				fs.sendResponse(highPrioResp)
+			default:
+				// No high-priority packets, continue with next chunk
 			}
 		}
 	}
@@ -270,7 +394,7 @@ func (fs *FileServer) preloadWorker() {
 // handlePreload walks the directory tree and sends metadata to client
 func (fs *FileServer) handlePreload(item PreLoadItem) {
 	// Walk from the inode up to 2 levels deep
-	// fs.walkAndSendDirectory(item.Fh, item.Ino, item.Session, 0, 2, 1000)
+	fs.walkAndSendDirectory(item.Fh, item.Ino, item.Session, 0, 2, 1000)
 }
 
 // walkAndSendDirectory recursively walks directory and sends DirData
@@ -298,6 +422,10 @@ func (fs *FileServer) walkAndSendDirectory(fh unix.FileHandle, ino uint64, sessi
 
 	// Determine how many entries to process
 	entriesToProcess := len(entries)
+	// Skip this dir: request client to read it directly to get full entries
+	if len(entries) > maxEntries {
+		return
+	}
 
 	// Build directory entries
 	dirEntries := make([]DirEntry, 0, entriesToProcess)
@@ -360,15 +488,15 @@ func (fs *FileServer) sendDirData(ino uint64, entries []DirEntry, session *Sessi
 		Entries: entries,
 	}
 
-	respBytes, err := SerializeWithHeader(OpDirDataNotification, 0, notification)
+	respBytes, err := SerializeWithHeader(OpDirDataNotification, 0, FlagQosLow, notification)
 	if err != nil {
 		log.Printf("Failed to serialize DirData notification: %v", err)
 		return
 	}
 
-	// Send via response queue
+	// Send via response queue as low priority (preload notifications)
 	select {
-	case fs.respQueue <- Response{Session: session, Data: respBytes}:
+	case fs.respQueueLow <- Response{Session: session, Data: respBytes}:
 	case <-fs.ctx.Done():
 	}
 }
@@ -437,37 +565,68 @@ func (fs *FileServer) handleRequest(req Request) {
 	} else {
 		var serErr error
 		// Use opcode=0 for success responses
-		respBytes, serErr = SerializeWithHeader(0, req.Header.Seq, resp)
+		respBytes, serErr = SerializeWithHeader(0, req.Header.Seq, req.Header.Flags, resp)
 		if serErr != nil {
 			log.Printf("Failed to serialize response for opcode=%d seq=%d: %v", req.Header.Opcode, req.Header.Seq, serErr)
 			respBytes = fs.makeErrorResponse(req.Header.Seq, syscall.EIO)
 		}
 	}
 
-	select {
-	case fs.respQueue <- Response{Session: req.Session, Data: respBytes}:
-	case <-fs.ctx.Done():
+	// Route response to appropriate priority queue based on request priority
+	if req.Header.Flags&FlagQosLow != 0 {
+		select {
+		case fs.respQueueLow <- Response{Session: req.Session, Data: respBytes}:
+		case <-fs.ctx.Done():
+		}
+	} else {
+		select {
+		case fs.respQueueHigh <- Response{Session: req.Session, Data: respBytes}:
+		case <-fs.ctx.Done():
+		}
 	}
 }
 
-// serializeResponse converts a response to bytes
-// SerializeWithHeader serializes a Serializable payload, prepends a header with correct size, and returns the full bytes
-func SerializeWithHeader(op uint32, seq uint32, resp Serializable) ([]byte, error) {
+// SerializeWithHeader serializes a Serializable payload with flags, prepends a header with correct size, and returns the full bytes
+// If the payload is larger than 32KB, it will be compressed using zstd and FlagCompressed will be set
+func SerializeWithHeader(op uint32, seq uint32, flags uint32, resp Serializable) ([]byte, error) {
 	var body bytes.Buffer
 	if err := resp.Serialize(&body); err != nil {
 		return nil, fmt.Errorf("Failed to serialize response body: %w", err)
 	}
 
-	totalSize := HeaderSize + body.Len()
+	payload := body.Bytes()
+
+	// Compress payload if it exceeds threshold
+	if len(payload) > CompressionThreshold {
+		encoder, err := zstd.NewWriter(nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create zstd encoder: %w", err)
+		}
+		compressed := encoder.EncodeAll(payload, make([]byte, 0, len(payload)))
+		encoder.Close()
+
+		// Only use compression if it actually reduces size
+		if len(compressed) < len(payload) {
+			payload = compressed
+			flags |= FlagCompressed
+		}
+	}
+
+	totalSize := HeaderSize + len(payload)
 	var out bytes.Buffer
-	header := Header{Opcode: op, Size: uint32(totalSize), Seq: seq}
+	header := Header{Opcode: op, Size: uint32(totalSize), Flags: flags, Seq: seq}
 	if err := header.Serialize(&out); err != nil {
 		return nil, fmt.Errorf("failed to serialize header: %w", err)
 	}
-	if _, err := out.Write(body.Bytes()); err != nil {
+	if _, err := out.Write(payload); err != nil {
 		return nil, fmt.Errorf("failed to write body: %w", err)
 	}
 	return out.Bytes(), nil
+}
+
+// NewZstdDecoder creates a new zstd decoder for decompression
+func NewZstdDecoder() (*zstd.Decoder, error) {
+	return zstd.NewReader(nil)
 }
 
 // handleMount handles mount requests
@@ -516,7 +675,7 @@ func (fs *FileServer) handleMount(mountReq *MountRequest, session *Session) (Ser
 	// Build response
 	resp := &MountResponse{
 		Version: ProtocolVersion,
-		Flags:   mountReq.Flags & FlagReadOnly,
+		Flags:   mountReq.Flags & MountFlagReadOnly,
 		Fh:      fh,
 		Attr:    attr,
 	}

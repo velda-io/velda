@@ -43,7 +43,7 @@ const (
 	ActionDeleteSnapshot    = "instance.delete_snapshot"
 )
 
-var validNameRegex = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+var validNameRegex = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 type InstanceDb interface {
 	CreateInstance(ctx context.Context, in *proto.Instance) (*proto.Instance, db.Committer, error)
@@ -235,7 +235,7 @@ func checkInstanceName(name string) error {
 	}
 
 	if !validNameRegex.MatchString(name) {
-		return fmt.Errorf("instance name must start with a lowercase letter and can only contain lowercase letters, numbers, '-', and '_'")
+		return fmt.Errorf("instance name must start with a lowercase letter and can only contain lowercase letters, numbers, and '-'")
 	}
 	return nil
 }

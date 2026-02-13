@@ -211,6 +211,12 @@ func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, works
 		"--name",
 		name,
 	}
+	args = append(args, m.sandboxConfig.GetDiskSource().GetCasConfig().GetFlags()...)
+
+	// Add cache sources if configured
+	for _, cacheSource := range m.sandboxConfig.GetDiskSource().GetCasConfig().GetCacheSources() {
+		args = append(args, "--cache-source", cacheSource)
+	}
 
 	if m.sandboxConfig.GetDiskSource().GetCasConfig().GetCasCacheDir() != "" {
 		args = append(args, "--cache-dir", m.sandboxConfig.GetDiskSource().GetCasConfig().GetCasCacheDir())

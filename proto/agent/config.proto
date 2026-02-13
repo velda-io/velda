@@ -28,6 +28,11 @@ message HostMount {
 message CasConfig {
   string cas_cache_dir = 1; // The directory to use for CAS cache.
   bool use_direct_protocol = 2; // Whether to use the direct protocol for CAS.
+  repeated string flags = 3; // Additional flags for CAS configuration.
+
+  // Additional cache sources for sandboxfs (e.g., HTTP URLs, NFS paths).
+  // Files will be fetched from these sources using size/hash as key before falling back to fileserver.
+  repeated string cache_sources = 4;
 }
 
 message AgentDiskSource {

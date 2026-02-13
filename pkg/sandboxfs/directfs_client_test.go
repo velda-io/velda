@@ -19,6 +19,7 @@ package sandboxfs
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -59,7 +60,7 @@ func setupTestServerClient(t *testing.T, srcDir, cacheDir, mountDir string, work
 	cache, err := NewDirectoryCacheManager(cacheDir)
 	require.NoError(t, err)
 
-	client := NewDirectFSClient(server.Addr().String(), cache)
+	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
 
 	veldaServer, err := client.Mount(mountDir)
 	require.NoError(t, err)
@@ -83,7 +84,7 @@ func setupTestServerClientWithCache(t *testing.T, srcDir string, cache *Director
 
 	time.Sleep(100 * time.Millisecond)
 
-	client := NewDirectFSClient(server.Addr().String(), cache)
+	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
 
 	veldaServer, err := client.Mount(mountDir)
 	require.NoError(t, err)
@@ -371,7 +372,7 @@ func TestSnapshotClientTimestamps(t *testing.T) {
 	cache, err := NewDirectoryCacheManager(cacheDir)
 	require.NoError(t, err)
 
-	client := NewDirectFSClient(server.Addr().String(), cache)
+	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
 
 	veldaServer, err := client.Mount(mountDir)
 	defer client.Stop()
@@ -468,4 +469,129 @@ func TestSnapshotClientReadlink(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, syscall.EINVAL)
 	})
+}
+
+// TestSnapshotClientDirPrefetchWithNotification tests that directory data is prefetched via server-side push notification
+// After the server sends DirDataNotification, subsequent readdir calls should be avoided (counter should not increase)
+func TestSnapshotClientDirPrefetchWithNotification(t *testing.T) {
+	checkCapSysAdmin(t)
+	if testing.Short() {
+		t.Skip("Skipping DirectFS test in short mode")
+	}
+
+	// Create test directories
+	testDir := t.TempDir()
+	srcDir := filepath.Join(testDir, "src")
+	cacheDir := filepath.Join(testDir, "cache")
+	mountDir := filepath.Join(testDir, "mount")
+
+	require.NoError(t, os.MkdirAll(srcDir, 0755))
+	require.NoError(t, os.MkdirAll(cacheDir, 0755))
+	require.NoError(t, os.MkdirAll(mountDir, 0755))
+
+	// Initialize global metrics
+	GlobalCacheMetrics = NewCacheMetrics()
+	GlobalCacheMetrics.Register()
+	defer GlobalCacheMetrics.Unregister()
+
+	// Create test directory structure with files
+	dir1 := filepath.Join(srcDir, "dir1")
+	dir2 := filepath.Join(srcDir, "dir2")
+	require.NoError(t, os.MkdirAll(dir1, 0755))
+	require.NoError(t, os.MkdirAll(dir2, 0755))
+
+	// Create files in dir1
+	numFiles := 30
+	for i := 0; i < numFiles; i++ {
+		filename := filepath.Join(dir1, fmt.Sprintf("file%03d.txt", i))
+		content := []byte(fmt.Sprintf("content for file %d in dir1", i))
+		require.NoError(t, os.WriteFile(filename, content, 0644))
+	}
+
+	// Create files in dir2
+	for i := 0; i < numFiles; i++ {
+		filename := filepath.Join(dir2, fmt.Sprintf("file%03d.txt", i))
+		content := []byte(fmt.Sprintf("content for file %d in dir2", i))
+		require.NoError(t, os.WriteFile(filename, content, 0644))
+	}
+
+	// Start DirectFS server and client with workers (this enables preloading/notifications)
+	server := fileserver.NewFileServer(srcDir, 4) // 4 workers to enable preloading
+	require.NoError(t, server.Start("localhost:0"))
+	defer server.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	cache, err := NewDirectoryCacheManager(cacheDir)
+	require.NoError(t, err)
+
+	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
+	veldaServer, err := client.Mount(mountDir)
+	require.NoError(t, err)
+	require.NoError(t, veldaServer.WaitMount())
+	defer func() {
+		require.NoError(t, client.Unmount())
+		client.Stop()
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Get initial readdir counter value
+	initialReadDirCount := getCounterValue(GlobalCacheMetrics.ReadDirFromClient)
+	t.Logf("Initial ReadDirFromClient counter: %.0f", initialReadDirCount)
+
+	// First access to dir1 - this will trigger a Lookup which should cause server to send DirDataNotification
+	mountedDir1 := filepath.Join(mountDir, "dir1")
+	_, err = os.Stat(mountedDir1)
+	require.NoError(t, err)
+
+	// Give time for server to send DirDataNotification and client to process it
+	time.Sleep(300 * time.Millisecond)
+
+	// Check counter after Lookup - this should have increased because Lookup causes parent dir (root) to be fetched
+	afterLookupCount := getCounterValue(GlobalCacheMetrics.ReadDirFromClient)
+	t.Logf("After Lookup of dir1, ReadDirFromClient counter: %.0f (fetched root directory)", afterLookupCount)
+	require.Greater(t, afterLookupCount, initialReadDirCount,
+		"Counter should increase when root directory is fetched during Lookup")
+
+	// Now call ReadDir on dir1 - if notification was processed, this should NOT send ReadDirRequest to server
+	// because dir1's entries are already preloaded via DirDataNotification
+	entries, err := os.ReadDir(mountedDir1)
+	require.NoError(t, err)
+	require.Equal(t, numFiles, len(entries), "Expected %d entries in dir1", numFiles)
+
+	// Give a moment for any async operations
+	time.Sleep(100 * time.Millisecond)
+
+	// Check counter after ReadDir of dir1
+	afterReadDirCount := getCounterValue(GlobalCacheMetrics.ReadDirFromClient)
+	t.Logf("After ReadDir of dir1, ReadDirFromClient counter: %.0f", afterReadDirCount)
+
+	// The counter should NOT have increased because dir1 was prefetched via notification
+	require.Equal(t, afterLookupCount, afterReadDirCount,
+		"ReadDirFromClient counter should not increase for dir1 because it was prefetched via notification")
+
+	// Test dir2 to verify the same behavior
+	mountedDir2 := filepath.Join(mountDir, "dir2")
+	_, err = os.Stat(mountedDir2)
+	require.NoError(t, err)
+
+	time.Sleep(300 * time.Millisecond)
+
+	beforeDir2ReadDir := getCounterValue(GlobalCacheMetrics.ReadDirFromClient)
+	entries2, err := os.ReadDir(mountedDir2)
+	require.NoError(t, err)
+	require.Equal(t, numFiles, len(entries2), "Expected %d entries in dir2", numFiles)
+
+	time.Sleep(100 * time.Millisecond)
+
+	afterDir2ReadDir := getCounterValue(GlobalCacheMetrics.ReadDirFromClient)
+	t.Logf("Dir2 - Before ReadDir: %.0f, After ReadDir: %.0f", beforeDir2ReadDir, afterDir2ReadDir)
+
+	require.Equal(t, beforeDir2ReadDir, afterDir2ReadDir,
+		"ReadDirFromClient counter should not increase for dir2 either (prefetched via notification)")
+
+	t.Logf("Successfully verified directory prefetch via server-side push notification")
+	t.Logf("Total ReadDir requests from client: %.0f", afterDir2ReadDir-initialReadDirCount)
+	t.Logf("Explanation: 1 request for root dir during Lookup, then 0 for dir1 and dir2 (both prefetched)")
 }
