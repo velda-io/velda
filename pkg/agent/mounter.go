@@ -403,8 +403,8 @@ func (m *SimpleMounter) bindWritableDirs(session *proto.SessionRequest, workspac
 	}()
 
 	for _, writableDir := range session.WritableDirs {
-		// Skip root directory
-		if writableDir == "/" {
+		// Skip sentiel directory for the entire-workspace settings.
+		if writableDir == "/" || writableDir == "/dev/null" {
 			continue
 		}
 
