@@ -25,6 +25,10 @@ import (
 	agentpb "velda.io/velda/pkg/proto/agent"
 )
 
+type Mounter interface {
+	Mount(ctx context.Context, session *proto.SessionRequest, workspaceDir string) (cleanup func(), err error)
+}
+
 type SimpleMounter struct {
 	sandboxConfig *agentpb.SandboxConfig
 }
@@ -40,9 +44,6 @@ func (m *SimpleMounter) Mount(ctx context.Context, session *proto.SessionRequest
 		if err == nil {
 			if remountErr := syscall.Mount("", workspaceDir, "", syscall.MS_REC|syscall.MS_SHARED, ""); remountErr != nil {
 				err = fmt.Errorf("Remount workspace: %w", remountErr)
-				if cleanup != nil {
-					cleanup()
-				}
 			}
 		}
 	}()
@@ -116,40 +117,15 @@ func (m *SimpleMounter) mountInternal(ctx context.Context, session *proto.Sessio
 
 		casCleanup, err := m.runVeldafsWrapper(ctx, dataDir, instanceName, targetDir, mType)
 		if err != nil {
-			if baseCleanup != nil {
-				baseCleanup()
-			}
-			return nil, fmt.Errorf("mount veldafs: %w", err)
+			return baseCleanup, fmt.Errorf("mount veldafs: %w", err)
 		}
 
 		return func() {
-			if casCleanup != nil {
-				if err := func() (err error) {
-					defer func() {
-						if r := recover(); r != nil {
-							err = fmt.Errorf("panic in casCleanup: %v", r)
-						}
-					}()
-					casCleanup()
-					return nil
-				}(); err != nil {
-					fmt.Fprintf(os.Stderr, "Error during casCleanup: %v\n", err)
-					return
-				}
-			}
 			if baseCleanup != nil {
-				if err := func() (err error) {
-					defer func() {
-						if r := recover(); r != nil {
-							err = fmt.Errorf("panic in baseCleanup: %v", r)
-						}
-					}()
-					baseCleanup()
-					return nil
-				}(); err != nil {
-					fmt.Fprintf(os.Stderr, "Error during baseCleanup: %v\n", err)
-					return
-				}
+				defer baseCleanup()
+			}
+			if casCleanup != nil {
+				defer casCleanup()
 			}
 		}, nil
 	} else {
@@ -188,11 +164,6 @@ func (m *SimpleMounter) mountDirect(ctx context.Context, session *proto.SessionR
 			return nil, fmt.Errorf("mount bind disk: %w", err)
 		}
 
-		if isSnapshot {
-			return func() {
-				syscall.Unmount(targetDir, syscall.MNT_DETACH)
-			}, nil
-		}
 		return nil, nil
 
 	case *agentpb.AgentDiskSource_NfsMountSource_:
@@ -220,11 +191,6 @@ func (m *SimpleMounter) mountDirect(ctx context.Context, session *proto.SessionR
 			return nil, fmt.Errorf("mount NFS disk: %v, output: %s", err, output)
 		}
 
-		if isSnapshot {
-			return func() {
-				syscall.Unmount(targetDir, syscall.MNT_DETACH)
-			}, nil
-		}
 		return nil, nil
 
 	default:
@@ -342,9 +308,6 @@ func (m *SimpleMounter) mountWithSnapshot(ctx context.Context, session *proto.Se
 	if err := syscall.Mount("overlay", workspaceDir, "overlay", 0, overlayOpts); err != nil {
 		return nil, fmt.Errorf("mount overlay: %w", err)
 	}
-	cleanupFuncs = append(cleanupFuncs, func() {
-		syscall.Unmount(workspaceDir, syscall.MNT_DETACH)
-	})
 
 	if err := syscall.Mount("", workspaceDir, "", syscall.MS_REC|syscall.MS_SHARED, ""); err != nil {
 		return nil, fmt.Errorf("remount workspace: %w", err)
@@ -392,15 +355,6 @@ func (m *SimpleMounter) mountWithSnapshot(ctx context.Context, session *proto.Se
 
 // bindWritableDirs bind mounts writable directories from cur to workspace
 func (m *SimpleMounter) bindWritableDirs(session *proto.SessionRequest, workspaceDir, curDir string) (cleanup func(), err error) {
-	var cleanupFuncs []func()
-	defer func() {
-		if err != nil {
-			// Cleanup on error
-			for i := len(cleanupFuncs) - 1; i >= 0; i-- {
-				cleanupFuncs[i]()
-			}
-		}
-	}()
 
 	for _, writableDir := range session.WritableDirs {
 		// Skip sentiel directory for the entire-workspace settings.
@@ -428,26 +382,43 @@ func (m *SimpleMounter) bindWritableDirs(session *proto.SessionRequest, workspac
 		if err := syscall.Mount(source, target, "bind", syscall.MS_BIND, ""); err != nil {
 			return nil, fmt.Errorf("mount bind %s to %s: %w", source, target, err)
 		}
-
-		cleanupFuncs = append(cleanupFuncs, func() {
-			syscall.Unmount(target, syscall.MNT_DETACH)
-		})
 	}
 
-	return func() {
-		for i := len(cleanupFuncs) - 1; i >= 0; i-- {
-			if err := func() (err error) {
-				defer func() {
-					if r := recover(); r != nil {
-						err = fmt.Errorf("panic in cleanup function %d: %v", i, r)
-					}
-				}()
-				cleanupFuncs[i]()
-				return nil
-			}(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error during cleanup step %d: %v\n", i, err)
-				return
+	return nil, nil
+}
+
+func umountAll(dir string) error {
+	// Read /proc/mounts to get all mounted filesystems under dir
+	f, err := os.Open("/proc/mounts")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var mounts []string
+	for {
+		var (
+			fs   string
+			path string
+		)
+		_, err := fmt.Fscanf(f, "%s %s", &fs, &path)
+		if err != nil {
+			break
+		}
+		// Skip remaining fields on the line
+		var ignore string
+		fmt.Fscanln(f, &ignore)
+
+		if len(path) >= len(dir) && path[:len(dir)] == dir {
+			mounts = append(mounts, path)
+		}
+	}
+	// Unmount all mounts in reverse order (deepest first)
+	for i := len(mounts) - 1; i >= 0; i-- {
+		if err := syscall.Unmount(mounts[i], 0); err != nil {
+			if err2 := syscall.Unmount(mounts[i], syscall.MNT_DETACH); err2 != nil {
+				return fmt.Errorf("failed to unmount %s: %v (also failed with MNT_DETACH: %v)", mounts[i], err, err2)
 			}
 		}
-	}, nil
+	}
+	return nil
 }

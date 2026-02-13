@@ -16,6 +16,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path"
 	"syscall"
@@ -28,13 +29,15 @@ import (
 
 type SandboxFsPlugin struct {
 	PluginBase
+	mounter       Mounter
 	WorkspaceDir  string
 	SandboxConfig *agentpb.SandboxConfig
 	requestPlugin interface{}
 }
 
-func NewSandboxFsPlugin(workspaceDir string, sandboxConfig *agentpb.SandboxConfig, requestPlugin interface{}) *SandboxFsPlugin {
+func NewSandboxFsPlugin(workspaceDir string, mounter Mounter, sandboxConfig *agentpb.SandboxConfig, requestPlugin interface{}) *SandboxFsPlugin {
 	return &SandboxFsPlugin{
+		mounter:       mounter,
 		WorkspaceDir:  workspaceDir,
 		SandboxConfig: sandboxConfig,
 		requestPlugin: requestPlugin,
@@ -48,40 +51,29 @@ func (p *SandboxFsPlugin) Run(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("InitAgentDir: %w", err)
 	}
-	defer func() {
-		// Unmount velda binary first
-		if unmountErr := syscall.Unmount(path.Join(p.WorkspaceDir, "velda/velda"), syscall.MNT_DETACH); unmountErr != nil {
-			err = fmt.Errorf("unmount velda: %w", unmountErr)
-			return
-		}
 
-		// For mount directory, rmdir each subdir under it first, then RemoveAll the rest
-		mountDir := path.Join(path.Dir(p.WorkspaceDir), "mount")
-		if fi, statErr := os.Stat(mountDir); statErr == nil && fi.IsDir() {
-			entries, readErr := os.ReadDir(mountDir)
-			if readErr != nil {
-				err = fmt.Errorf("read mount dir: %w", readErr)
-				return
+	// Mount workspace
+	workspaceDir := path.Join(p.WorkspaceDir, "workspace")
+	if err := os.Mkdir(workspaceDir, 0755); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("Mkdir workspace: %w", err)
+	}
+	cleanup, err := p.mounter.Mount(context.Background(), session, workspaceDir)
+
+	// This should run regardless if previous return function returns error
+	defer func() {
+		// Unmount all workspace mounts first
+		err := umountAll(p.WorkspaceDir)
+		if err != nil {
+			err = fmt.Errorf("umount workspace: %w", err)
+			if cleanup != nil {
+				cleanup()
 			}
-			for _, e := range entries {
-				child := path.Join(mountDir, e.Name())
-				if rmdirErr := syscall.Rmdir(child); rmdirErr != nil {
-					err = fmt.Errorf("rmdir mount child %s: %w", child, rmdirErr)
-					return
-				}
-			}
-			// Remove any remaining files/dirs under mountDir
-			if removeErr := os.RemoveAll(mountDir); removeErr != nil {
-				err = fmt.Errorf("removeall mount dir %s: %w", mountDir, removeErr)
-				return
-			}
-		} else if statErr != nil && !os.IsNotExist(statErr) {
-			err = fmt.Errorf("stat mount dir: %w", statErr)
+			// Do not remove workspace dir if unmounting fails, to avoid potential data loss. Log the error and return.
+			log.Printf("Error unmounting workspace: %v. Workspace dir %s will not be removed.", err, workspaceDir)
 			return
 		}
-		if removeErr := syscall.Rmdir(path.Join(p.WorkspaceDir, "workspace")); removeErr != nil && removeErr != syscall.ENOENT {
-			err = fmt.Errorf("rmdir workspace: %w", removeErr)
-			return
+		if cleanup != nil {
+			cleanup()
 		}
 
 		// Finally remove the workspace directory tree
@@ -90,6 +82,9 @@ func (p *SandboxFsPlugin) Run(ctx context.Context) (err error) {
 			return
 		}
 	}()
+	if err != nil {
+		return fmt.Errorf("Mount workspace: %w", err)
+	}
 	return p.RunNext(ctx)
 }
 

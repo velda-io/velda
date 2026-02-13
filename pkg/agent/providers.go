@@ -42,8 +42,8 @@ func ProvideAgentDaemonPlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxCon
 	return NewAgentDaemonPlugin(string(workDir), sandboxConfig)
 }
 
-func ProvideSandboxFsPlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig, requestPlugin *SessionRequestPlugin) *SandboxFsPlugin {
-	return NewSandboxFsPlugin(string(workDir), sandboxConfig, requestPlugin)
+func ProvideSandboxFsPlugin(workDir WorkDir, mounter Mounter, sandboxConfig *agentpb.SandboxConfig, requestPlugin *SessionRequestPlugin) *SandboxFsPlugin {
+	return NewSandboxFsPlugin(string(workDir), mounter, sandboxConfig, requestPlugin)
 }
 
 func ProvideAuthPlugin(cmd *cobra.Command, requestPlugin *SessionRequestPlugin) AuthPluginType {
@@ -51,10 +51,6 @@ func ProvideAuthPlugin(cmd *cobra.Command, requestPlugin *SessionRequestPlugin) 
 }
 func ProvideMounter(sandboxConfig *agentpb.SandboxConfig) Mounter {
 	return NewSimpleMounter(sandboxConfig)
-}
-
-func ProvideRootfsPlugin(workDir WorkDir, mounter Mounter, sandboxConfig *agentpb.SandboxConfig, requestPlugin *SessionRequestPlugin) *RootfsPlugin {
-	return NewRootfsPlugin(string(workDir), mounter, sandboxConfig, requestPlugin)
 }
 
 func ProvideAutoFsDaemonPlugin() *AutoFsDaemonPlugin {

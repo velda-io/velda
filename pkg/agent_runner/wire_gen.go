@@ -19,13 +19,12 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	sessionRequestPlugin := agent2.ProvideRequestPlugin()
 	workDir := agent2.ProvideWorkdir(cmd)
 	agentDaemonPlugin := agent2.ProvideAgentDaemonPlugin(workDir, sandboxConfig)
-	sandboxFsPlugin := agent2.ProvideSandboxFsPlugin(workDir, sandboxConfig, sessionRequestPlugin)
 	mounter := agent2.ProvideMounter(sandboxConfig)
-	rootfsPlugin := agent2.ProvideRootfsPlugin(workDir, mounter, sandboxConfig, sessionRequestPlugin)
+	sandboxFsPlugin := agent2.ProvideSandboxFsPlugin(workDir, mounter, sandboxConfig, sessionRequestPlugin)
 	linuxNamespacePlugin := agent2.ProvideLinuxNamespacePlugin(workDir, sandboxConfig, sessionRequestPlugin)
 	devicesPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
 	runPid1Plugin := agent2.ProvideRunPid1Plugin(workDir, sandboxConfig, agentDaemonPlugin, sessionRequestPlugin)
-	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, rootfsPlugin, linuxNamespacePlugin, devicesPlugin, runPid1Plugin)
+	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, linuxNamespacePlugin, devicesPlugin, runPid1Plugin)
 	return shimRunner
 }
 
@@ -56,12 +55,11 @@ type ShimRunner agent2.AbstractPlugin
 
 type Pid1Runner agent2.AbstractPlugin
 
-func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPlugin *agent2.AgentDaemonPlugin, sandboxFsPlugin *agent2.SandboxFsPlugin, rootfsPlugin *agent2.RootfsPlugin, sandboxPlugin *agent2.LinuxNamespacePlugin, nvidiaPlugin *agent2.DevicesPlugin, pid1Plugin *agent2.RunPid1Plugin) ShimRunner {
+func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPlugin *agent2.AgentDaemonPlugin, sandboxFsPlugin *agent2.SandboxFsPlugin, sandboxPlugin *agent2.LinuxNamespacePlugin, nvidiaPlugin *agent2.DevicesPlugin, pid1Plugin *agent2.RunPid1Plugin) ShimRunner {
 	return agent2.NewPluginRunner(
 		requestPlugin,
 		agentDaemonPlugin,
 		sandboxFsPlugin,
-		rootfsPlugin,
 		sandboxPlugin,
 		nvidiaPlugin,
 		pid1Plugin,

@@ -27,12 +27,11 @@ import (
 type ShimRunner agent.AbstractPlugin
 type Pid1Runner agent.AbstractPlugin
 
-func provideShimRunner(requestPlugin *agent.SessionRequestPlugin, agentDaemonPlugin *agent.AgentDaemonPlugin, sandboxFsPlugin *agent.SandboxFsPlugin, rootfsPlugin *agent.RootfsPlugin, sandboxPlugin *agent.LinuxNamespacePlugin, nvidiaPlugin *agent.DevicesPlugin, pid1Plugin *agent.RunPid1Plugin) ShimRunner {
+func provideShimRunner(requestPlugin *agent.SessionRequestPlugin, agentDaemonPlugin *agent.AgentDaemonPlugin, sandboxFsPlugin *agent.SandboxFsPlugin, sandboxPlugin *agent.LinuxNamespacePlugin, nvidiaPlugin *agent.DevicesPlugin, pid1Plugin *agent.RunPid1Plugin) ShimRunner {
 	return agent.NewPluginRunner(
 		requestPlugin,
 		agentDaemonPlugin,
 		sandboxFsPlugin,
-		rootfsPlugin,
 		sandboxPlugin,
 		nvidiaPlugin,
 		pid1Plugin,
@@ -44,9 +43,8 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 		agent.ProvideWorkdir,
 		agent.ProvideRequestPlugin,
 		agent.ProvideAgentDaemonPlugin,
-		agent.ProvideSandboxFsPlugin,
 		agent.ProvideMounter,
-		agent.ProvideRootfsPlugin,
+		agent.ProvideSandboxFsPlugin,
 		agent.ProvideLinuxNamespacePlugin,
 		agent.ProvideNvidiaPlugin,
 		agent.ProvideRunPid1Plugin,
