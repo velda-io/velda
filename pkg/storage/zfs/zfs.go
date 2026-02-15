@@ -27,9 +27,9 @@ import (
 )
 
 type Zfs struct {
-	pool             string
-	maxDiskSizeGb    int64
-	uid              int
+	pool          string
+	maxDiskSizeGb int64
+	uid           int
 }
 
 func NewZfs(pool string, maxDiskSizeGb int64) (*Zfs, error) {
@@ -344,4 +344,8 @@ func (z *Zfs) runCommand(ctx context.Context, command ...string) error {
 
 func (z *Zfs) GetRoot(instanceId int64) string {
 	return fmt.Sprintf("/%s/%d", z.pool, instanceId)
+}
+
+func (z *Zfs) GetSnapshotRoot(instanceId int64, snapshotName string) string {
+	return fmt.Sprintf("/%s/%d/.zfs/snapshot/%s", z.pool, instanceId, snapshotName)
 }

@@ -176,6 +176,7 @@ message AgentSessionInfo {
   message NfsMount {
     string nfs_server = 1;
     string nfs_path = 2;
+    string nfs_snapshot_path = 3;
   }
   oneof file_mount { NfsMount nfs_mount = 1; }
 }

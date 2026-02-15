@@ -93,7 +93,11 @@ func (m *SimpleMounter) mountInternal(ctx context.Context, session *proto.Sessio
 			// DirectFS will directly mount from the server, no need for base mount
 			baseCleanup = nil
 			mountErr = nil
-			dataDir = fmt.Sprintf("%s:7655@%s/.zfs/snapshot/%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsPath, snapshotName)
+			if session.AgentSessionInfo.GetNfsMount().NfsSnapshotPath != "" {
+				dataDir = fmt.Sprintf("%s:7655@%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsSnapshotPath)
+			} else {
+				dataDir = fmt.Sprintf("%s:7655@%s/.zfs/snapshot/%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsPath, snapshotName)
+			}
 		} else {
 			if err := os.MkdirAll(dataDir, 0755); err != nil {
 				return nil, fmt.Errorf("mkdir %s: %w", dataDir, err)
@@ -175,7 +179,12 @@ func (m *SimpleMounter) mountDirect(ctx context.Context, session *proto.SessionR
 
 		var nfsPath, option string
 		if isSnapshot {
-			nfsPathWithSnapshot := path.Join(nfsMount.NfsPath, ".zfs/snapshot", snapshotName)
+			var nfsPathWithSnapshot string
+			if nfsMount.NfsSnapshotPath != "" {
+				nfsPathWithSnapshot = nfsMount.NfsSnapshotPath
+			} else {
+				nfsPathWithSnapshot = fmt.Sprintf("%s/.zfs/snapshot/%s", nfsMount.NfsPath, snapshotName)
+			}
 			nfsPath = fmt.Sprintf("%s:%s", nfsMount.NfsServer, nfsPathWithSnapshot)
 			option = nfsSource.SnapshotMountOptions
 		} else {

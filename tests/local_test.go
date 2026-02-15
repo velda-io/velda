@@ -34,3 +34,7 @@ func TestMiniE2E(t *testing.T) {
 	runner := runner.NewClusterCmdE2ERunner()
 	cases.RunAllTests(t, runner)
 }
+func TestLocalBtrfs(t *testing.T) {
+	runner := runner.NewLocalBtrfsRunner()
+	cases.RunAllTests(t, runner)
+}

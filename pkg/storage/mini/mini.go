@@ -354,3 +354,7 @@ func (z *MiniStorage) ReadFile(ctx context.Context, instanceId int64, path strin
 func (z *MiniStorage) GetRoot(instanceId int64) string {
 	return z.getInstanceRootPath(instanceId)
 }
+
+func (z *MiniStorage) GetSnapshotRoot(instanceId int64, snapshotName string) string {
+	return z.getSnapshotPath(instanceId, snapshotName)
+}
