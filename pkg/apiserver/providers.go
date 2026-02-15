@@ -43,6 +43,7 @@ import (
 	configpb "velda.io/velda/pkg/proto/config"
 	"velda.io/velda/pkg/rbac"
 	"velda.io/velda/pkg/storage"
+	"velda.io/velda/pkg/storage/btrfs"
 	"velda.io/velda/pkg/storage/mini"
 	"velda.io/velda/pkg/storage/zfs"
 	"velda.io/velda/pkg/tasks"
@@ -120,6 +121,8 @@ func ProvideStorage(cfg *configpb.Config) (storage.Storage, error) {
 	switch config.Storage.(type) {
 	case *configpb.Storage_Zfs_:
 		return zfs.NewZfs(config.GetZfs().Pool, config.GetZfs().GetMaxDiskSizeGb())
+	case *configpb.Storage_Btrfs_:
+		return btrfs.NewBtrfs(config.GetBtrfs().RootPath, config.GetBtrfs().GetMaxDiskSizeGb())
 	case *configpb.Storage_Mini:
 		return mini.NewMiniStorage(config.GetMini().Root)
 	default:
@@ -135,6 +138,8 @@ func ProvideDb(s storage.Storage, ctx context.Context) (database, error) {
 	var db database
 	if zfsdb, ok := s.(*zfs.Zfs); ok {
 		db = zfs.NewZfsInstanceDb(zfsdb)
+	} else if btrfsdb, ok := s.(*btrfs.Btrfs); ok {
+		db = btrfs.NewBtrfsInstanceDb(btrfsdb)
 	} else if minidb, ok := s.(*mini.MiniStorage); ok {
 		db = mini.NewMiniInstanceDb(minidb)
 	} else {

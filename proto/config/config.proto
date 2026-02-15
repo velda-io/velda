@@ -38,10 +38,19 @@ message Storage {
     // created instance datasets will have `refquota` set to this value.
     int64 max_disk_size_gb = 2;
   }
+  // BTRFS storage configuration.
+  message Btrfs {
+    string root_path = 1;
+
+    // If `max_disk_size_gb` is set (non-zero),
+    // created instance subvolumes will have quota limit set to this value.
+    int64 max_disk_size_gb = 2;
+  }
   message MiniVelda { string root = 1; }
   oneof storage {
     Zfs zfs = 1;
     MiniVelda mini = 4;
+    Btrfs btrfs = 5;
   }
   reserved 2, 3;
 }

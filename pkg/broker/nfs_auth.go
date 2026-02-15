@@ -26,6 +26,7 @@ import (
 
 type LocalDiskProvider interface {
 	GetRoot(instanceId int64) string
+	GetSnapshotRoot(instanceId int64, snapshotName string) string
 }
 
 type NfsExportAuth struct {
@@ -48,18 +49,25 @@ func NewNfsExportAuth(disk LocalDiskProvider) (*NfsExportAuth, error) {
 func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
 	instanceID := session.Request.InstanceId
 	exportPath := n.disk.GetRoot(instanceID)
+	paths := []string{exportPath}
 	agentHost := agent.Host
 
+	var snapshotPath string
+	if session.Request.SnapshotName != "" {
+		snapshotPath = n.disk.GetSnapshotRoot(instanceID, session.Request.SnapshotName)
+		paths = append(paths, snapshotPath)
+	}
 	// Use exportfs command to export NFS
-	err := exportNFS(exportPath, agentHost.String(), session)
+	err := exportNFS(paths, agentHost.String(), session)
 	if err != nil {
 		return fmt.Errorf("failed to export NFS: %w", err)
 	}
 	session.Request.AgentSessionInfo = &proto.AgentSessionInfo{
 		FileMount: &proto.AgentSessionInfo_NfsMount_{
 			NfsMount: &proto.AgentSessionInfo_NfsMount{
-				NfsServer: agent.PeerInfo.LocalAddr.(*net.TCPAddr).IP.String(),
-				NfsPath:   exportPath,
+				NfsServer:       agent.PeerInfo.LocalAddr.(*net.TCPAddr).IP.String(),
+				NfsPath:         exportPath,
+				NfsSnapshotPath: snapshotPath,
 			},
 		},
 	}
@@ -67,8 +75,12 @@ func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, se
 }
 
 // exportNFS is a helper function to handle NFS export logic using exportfs command
-func exportNFS(path, host string, session *Session) error {
-	cmd := runAsRootCommand("sh", "-c", "echo '"+path+" "+host+"(rw,crossmnt,async,no_root_squash,no_subtree_check)' > "+exportFile(session))
+func exportNFS(path []string, host string, session *Session) error {
+	exportData := ""
+	for _, p := range path {
+		exportData += fmt.Sprintf("%s %s(rw,async,no_root_squash,no_subtree_check)\n", p, host)
+	}
+	cmd := runAsRootCommand("sh", "-c", fmt.Sprintf("echo '%s' > %s", exportData, exportFile(session)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to write NFS export file for %s: %s", host, out)
