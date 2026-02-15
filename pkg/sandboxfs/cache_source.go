@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // CacheSource represents a source from which cached files can be fetched
@@ -108,12 +110,40 @@ func (h *HTTPCacheSource) Fetch(ctx context.Context, size int64, hash string) (i
 		return nil, 0, fmt.Errorf("HTTP cache returned status %d", resp.StatusCode)
 	}
 
-	respSize := resp.ContentLength
-	if respSize < 0 {
-		respSize = 0
+	// The HTTP cache always serves zstd-compressed payloads. Create a streaming
+	// zstd reader that wraps the response body so callers can read decompressed
+	// data without buffering the entire payload.
+	decoder, err := zstd.NewReader(resp.Body)
+	if err != nil {
+		resp.Body.Close()
+		return nil, 0, fmt.Errorf("failed to create zstd reader: %w", err)
 	}
 
-	return resp.Body, respSize, nil
+	// Wrap decoder and resp.Body so Close() closes both the decoder and the
+	// underlying response body.
+	rc := &zstdReadCloser{
+		decoder:  decoder,
+		respBody: resp.Body,
+	}
+
+	// Return the expected original (decompressed) size passed into Fetch.
+	return rc, size, nil
+}
+
+// zstdReadCloser ensures both the zstd decoder and the original response
+// body are closed when Close() is called.
+type zstdReadCloser struct {
+	decoder  *zstd.Decoder
+	respBody io.ReadCloser
+}
+
+func (z *zstdReadCloser) Read(p []byte) (int, error) {
+	return z.decoder.Read(p)
+}
+
+func (z *zstdReadCloser) Close() error {
+	z.decoder.Close()
+	return z.respBody.Close()
 }
 
 // Type returns the type of this cache source
