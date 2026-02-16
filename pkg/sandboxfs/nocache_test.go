@@ -36,6 +36,9 @@ func TestNoCacheMode(t *testing.T) {
 	if err := os.WriteFile(testFile, testContent, 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(srcDir, "emptyfile.txt"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	disallowOther := WithFuseOption(func(opts *fs.Options) {
 		opts.MountOptions.AllowOther = false
@@ -96,8 +99,10 @@ func TestNoCacheMode(t *testing.T) {
 		t.Fatal("File should exist in source directory")
 	}
 
-	// Give some time for any async operations
-	time.Sleep(100 * time.Millisecond)
+	// Overwrite the old file
+	if err := os.WriteFile(filepath.Join(mountDir, "testfile.txt"), []byte("Overwriting test file"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Verify NO cache metrics were updated (no cache hits, misses, or saves in no-cache mode)
 	if getCounterValue(GlobalCacheMetrics.CacheHit) != initialHits {
@@ -155,6 +160,14 @@ func TestNoCacheMode(t *testing.T) {
 	missesBeforeRead := getCounterValue(GlobalCacheMetrics.CacheMiss)
 	staleBeforeRead := getCounterValue(GlobalCacheMetrics.CacheStale)
 
+	emptyRead, err := os.ReadFile(filepath.Join(mountDir2, "emptyfile.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(emptyRead) != 0 {
+		t.Fatalf("Expected empty content, got %d bytes", len(emptyRead))
+	}
+
 	// Read the file that has the cache key set
 	readContent2, err := os.ReadFile(filepath.Join(mountDir2, "newfile.txt"))
 	if err != nil {
@@ -163,6 +176,15 @@ func TestNoCacheMode(t *testing.T) {
 
 	if string(readContent2) != string(newContent) {
 		t.Fatalf("Content mismatch after remount: got %q, want %q", readContent2, newContent)
+	}
+
+	readContent3, err := os.ReadFile(filepath.Join(mountDir2, "testfile.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(readContent3) != "Overwriting test file" {
+		t.Fatalf("Content mismatch after remount: got %q, want %q", readContent3, "Overwriting test file")
 	}
 
 	// Give some time for metrics to update
