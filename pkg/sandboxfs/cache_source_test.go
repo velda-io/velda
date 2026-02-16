@@ -49,6 +49,7 @@ func TestHTTPCache(t *testing.T) {
 
 	sum := sha256.Sum256(data)
 	got := hex.EncodeToString(sum[:])
+	assert.Equal(t, 4439912, len(data))
 	expected := "787c955dce49091ead850e4536666594095ea9f92a8a08879d8ddad466674657"
 	assert.Equal(t, expected, got)
 }

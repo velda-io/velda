@@ -354,17 +354,6 @@ func (m *SimpleMounter) mountWithSnapshot(ctx context.Context, session *proto.Se
 				return
 			}
 		}
-		// Attempt to rmdir each subdirectory under mount (requires empty)
-		// After that, remove any remaining contents under mount with RemoveAll.
-		for _, d := range []string{upperDir, workDir, baseDir, curDir} {
-			if err := syscall.Rmdir(d); err != nil {
-				fmt.Fprintf(os.Stderr, "Error rmdir %s: %v (directory not empty or still mounted?)\n", d, err)
-			}
-		}
-		// Try to remove the mount directory tree (remaining files) using RemoveAll
-		if err := os.RemoveAll(mountDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error RemoveAll mountDir %s: %v\n", mountDir, err)
-		}
 	}, nil
 }
 

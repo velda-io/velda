@@ -43,6 +43,7 @@ var _ = (fs.FileReleaser)((*NoCacheFileHandle)(nil))
 var _ = (fs.FileWriter)((*NoCacheFileHandle)(nil))
 var _ = (fs.FileFlusher)((*NoCacheFileHandle)(nil))
 var _ = (fs.FileFsyncer)((*NoCacheFileHandle)(nil))
+var _ = (fs.FilePassthroughFder)((*NoCacheFileHandle)(nil))
 
 // Write implements FileWriter - computes hash for cache key but does not write to cache
 func (f *NoCacheFileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
@@ -113,4 +114,11 @@ func (f *NoCacheFileHandle) Release(ctx context.Context) syscall.Errno {
 	oldfile := f.LoopbackFile
 	f.LoopbackFile = nil
 	return oldfile.Release(ctx)
+}
+
+func (f *NoCacheFileHandle) PassthroughFd() (int, bool) {
+	fd, _ := f.LoopbackFile.PassthroughFd()
+	// Disable passthrough so writes go through the FUSE Write path, ensuring our hasher
+	// and cache-key (xattr) update logic runs correctly. Do not re-enable passthrough here.
+	return fd, false
 }
