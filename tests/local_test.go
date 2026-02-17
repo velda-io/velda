@@ -25,7 +25,7 @@ import (
 
 var zfsRoot = flag.String("zfs-root", "zpool/tests", "ZFS root pool for local tests")
 
-func TestLocal(t *testing.T) {
+func TestLocalZfs(t *testing.T) {
 	runner := runner.NewLocalRunner(*zfsRoot)
 	cases.RunAllTests(t, runner)
 }

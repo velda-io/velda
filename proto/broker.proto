@@ -252,7 +252,10 @@ message ExecutionStatus {
     // before connecting to the agent.
     bytes host_key = 3;
 
-    reserved 4, 5;
+    // If provided, it will be used as a jump server to connect to the agent.
+    // This is not used with user-based authentication.
+    string jump_host = 4;
+    bytes jump_host_key = 5;
   }
   SshConnection ssh_connection = 5;
 }

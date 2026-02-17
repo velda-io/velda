@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//  http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@ package clientlib
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,36 +23,75 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 	"velda.io/velda/pkg/proto"
 )
 
-type OssAuthProvider struct{}
-
-func (o OssAuthProvider) GetAuthInterceptor() grpc.UnaryClientInterceptor {
-	return unaryAuthInterceptor
+func SshConnect(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error) {
+	ctx := cmd.Context()
+	_, err := GetAccessToken(ctx)
+	if errors.Is(err, NotLoginnedError) {
+		return sshDialWithoutAuth(cmd, sshConn, user)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("Error getting access token: %v", err)
+	}
+	return SshConnectWithAuth(ctx, sshConn, user)
 }
 
-func (o OssAuthProvider) GetStreamAuthInterceptor() grpc.StreamClientInterceptor {
-	return streamAuthInterceptor
-}
+func SshConnectWithAuth(ctx context.Context, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error) {
+	token, err := GetAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("Error getting access token: %v", err)
+	}
+	hostKey, err := ssh.ParsePublicKey(sshConn.HostKey)
+	if err != nil {
+		return nil, fmt.Errorf("Error parsing host key: %v", err)
+	}
 
-func (o OssAuthProvider) GetAccessToken(ctx context.Context) (string, error) {
-	return "", nil
-}
+	clientConfig := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{
+			ssh.Password(token),
+		},
+		HostKeyCallback: ssh.FixedHostKey(hostKey),
+	}
 
-func (o OssAuthProvider) RenameProfile(oldName, newName string) error {
-	return nil
-}
+	// Jump host is only used when connecting from the external client.
+	if !IsInSession() && sshConn.JumpHost != "" {
+		// Connect using jump host
+		jumpHostKey, err := ssh.ParsePublicKey(sshConn.JumpHostKey)
+		if err != nil {
+			return nil, fmt.Errorf("Error parsing jump host key: %v", err)
+		}
+		jumpClient, err := ssh.Dial("tcp", sshConn.JumpHost, &ssh.ClientConfig{
+			User: "forwarding",
+			Auth: []ssh.AuthMethod{
+				ssh.Password(token),
+			},
+			HostKeyCallback: ssh.FixedHostKey(jumpHostKey),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("Error dialing jump host: %v", err)
+		}
+		jumpConn, err := jumpClient.Dial("tcp", fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port))
+		if err != nil {
+			return nil, fmt.Errorf("Error dialing jump host: %v", err)
+		}
+		conn, channels, reqs, err := ssh.NewClientConn(jumpConn, fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port), clientConfig)
+		if err != nil {
+			return nil, fmt.Errorf("Error dialing ssh: %v", err)
+		}
 
-func (o OssAuthProvider) DeleteProfile(profile string) error {
-	return nil
-}
+		client := &SshClient{Client: ssh.NewClient(conn, channels, nil)}
+		go client.HandleGlobalRequests(reqs)
+		return client, nil
+	}
 
-func (o OssAuthProvider) BindSession(ctx context.Context, session *proto.SessionRequest) context.Context {
-	ctx = context.WithValue(ctx, "instanceId", session.InstanceId)
-	return ctx
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port), clientConfig)
+	if err != nil {
+		return nil, fmt.Errorf("Error dialing ssh: %v", err)
+	}
+	return &SshClient{Client: client}, nil
 }
 
 type jumpConn struct {
@@ -133,7 +173,7 @@ func dialJumpServer(jumpProxy, jumpIdentityFile, targetHost string, targetPort i
 	return &jumpConn{Conn: conn, client: jumpClient}, nil
 }
 
-func (o OssAuthProvider) SshDial(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error) {
+func sshDialWithoutAuth(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error) {
 	hostKey, err := ssh.ParsePublicKey(sshConn.HostKey)
 	if err != nil {
 		return nil, fmt.Errorf("Error parsing host key: %v", err)
@@ -200,24 +240,4 @@ func (o OssAuthProvider) SshDial(cmd *cobra.Command, sshConn *proto.ExecutionSta
 		}
 	}
 	return &SshClient{Client: client, ShutdownMessage: ""}, nil
-}
-
-func (o OssAuthProvider) HandleServerInfo(ctx context.Context, info *proto.ServerInfo) error {
-	return nil
-}
-
-func unaryAuthInterceptor(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-	if IsInSession() {
-		sessionInfo := fmt.Sprintf("%d:%s:%s", agentConfig.Instance, agentConfig.Session, agentConfig.TaskId)
-		ctx = metadata.AppendToOutgoingContext(ctx, "velda-session", sessionInfo)
-	}
-	return invoker(ctx, method, req, reply, cc, opts...)
-}
-
-func streamAuthInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-	if IsInSession() {
-		sessionInfo := fmt.Sprintf("%d:%s:%s", agentConfig.Instance, agentConfig.Session, agentConfig.TaskId)
-		ctx = metadata.AppendToOutgoingContext(ctx, "velda-session", sessionInfo)
-	}
-	return streamer(ctx, desc, cc, method, opts...)
 }

@@ -4,25 +4,25 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package utils
+package cmd
 
-// ANSI color codes
-const (
-	ColorReset     = "\033[0m"
-	ColorRed       = "\033[31m"
-	ColorGreen     = "\033[32m"
-	ColorYellow    = "\033[33m"
-	ColorBlue      = "\033[34m"
-	ColorPurple    = "\033[35m"
-	ColorCyan      = "\033[36m"
-	ColorWhite     = "\033[37m"
-	ColorBold      = "\033[1m"
-	ColorLightGray = "\033[37;2m" // Light gray for verbose output
+import (
+	"github.com/spf13/cobra"
 )
+
+// authCmd represents the auth command
+var authCmd = &cobra.Command{
+	Use:   "auth",
+	Short: "Manage OAuth credentials for the CLI",
+}
+
+func init() {
+	RootCmd.AddCommand(authCmd)
+}
