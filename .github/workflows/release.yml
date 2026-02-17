@@ -47,19 +47,19 @@ jobs:
         if: github.event_name == 'schedule'
         run: |
           set -euo pipefail
-          
+
           # Get the latest tag
           latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          
+
           if [ -z "$latest_tag" ]; then
             echo "skip_release=false" >> "$GITHUB_OUTPUT"
             echo "No previous release found, proceeding with first release"
           else
             # Count commits since last tag
             commit_count=$(git rev-list --count "${latest_tag}..HEAD" || echo "0")
-            
+
             echo "Commits since $latest_tag: $commit_count"
-            
+
             if [ "$commit_count" -eq 0 ]; then
               echo "skip_release=true" >> "$GITHUB_OUTPUT"
               echo "⚠️ No changes detected since last release. Skipping release creation."
@@ -111,6 +111,16 @@ jobs:
         env:
           VERSION: ${{ env.VERSION }}
 
+      # File used to initialize agents. Only amd64 is needed.
+      - name: R2 Upload
+        uses: gemwalletcom/r2-upload@v1.0.0
+        with:
+          bucket: "velda-release"
+          access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint: "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          file: "./bin/velda-${{ env.VERSION }}-linux-amd64"
+
       - name: Upload build artifacts
         if: steps.check-changes.outputs.skip_release != 'true'
         uses: actions/upload-artifact@v4
@@ -161,11 +171,6 @@ jobs:
           name: release-bin
           path: ./bin
 
-      - name: Upload to corresponding buckets
-        run: |
-          gsutil cp ./bin/velda-${{ needs.build-package.outputs.version }}-linux-amd64 gs://velda-release/velda-${{ needs.build-package.outputs.version }}-linux-amd64
-          aws s3 cp ./bin/velda-${{ needs.build-package.outputs.version }}-linux-amd64 s3://velda-release/velda-${{ needs.build-package.outputs.version }}-linux-amd64
-
       - name: Install packer
         uses: hashicorp/setup-packer@v3
         with:
@@ -211,7 +216,7 @@ jobs:
             # Find last regular tag (v*)
             from_tag=$(git tag --list "v*" --sort=-v:refname | grep -v "^$current_version$" | head -n 1)
           fi
-          
+
           if [ -z "$from_tag" ]; then
              echo "No previous tag found for this series. Changelog will be from the beginning."
           else

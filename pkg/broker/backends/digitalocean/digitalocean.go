@@ -226,7 +226,7 @@ VELDA_CONFIG_EOF
 
 nvidia-smi || true
 
-curl -fsSL https://velda-release.s3.us-west-1.amazonaws.com/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh || true
+curl -fsSL https://releases.velda.io/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh || true
 `}
 
 	if tc := d.cfg.GetTailscaleConfig(); tc != nil && tc.GetPreAuthKey() != "" {
@@ -242,13 +242,13 @@ tailscale up --login-server=%s --authkey=%s --accept-routes
 
 	veldaSetup := fmt.Sprintf(`
 if [ "$(/bin/velda version 2>/dev/null || true)" != "%s" ]; then
-    curl -fsSL https://velda-release.s3.us-west-1.amazonaws.com/velda-%s-linux-amd64 -o /tmp/velda
+    curl -fsSL https://releases.velda.io/velda-%s-linux-amd64 -o /tmp/velda
     chmod +x /tmp/velda
     mv /tmp/velda /bin/velda
 fi
 
 if [ ! -e /usr/lib/systemd/system/velda-agent.service ]; then
-    curl -fsSL https://velda-release.s3.us-west-1.amazonaws.com/velda-agent.service -o /usr/lib/systemd/system/velda-agent.service
+    curl -fsSL https://releases.velda.io/velda-agent.service -o /usr/lib/systemd/system/velda-agent.service
     systemctl daemon-reload
     systemctl enable velda-agent.service
     systemctl start velda-agent.service &
