@@ -281,9 +281,21 @@ func (p *AutoScaledPool) Reconnect(ctx context.Context) error {
 		name := status.Name
 		currentStatus, ok := p.workerStatus[name]
 		if !ok {
-			p.setWorkerStatusLocked(name, WorkerStatusUnknown, 0)
-			p.lastKnownTime[name] = time.Now()
-			p.logPrintf("Found unknown worker %s", name)
+			if p.pendingUnknownWorkers > 0 {
+				// Assign this worker to one of the pending unknown workers
+				p.setWorkerStatusLocked(name, WorkerStatusPending, p.defaultSlotsPerAgent)
+				p.pendingUnknownWorkers--
+
+				// Remove duplicated counting since pending-unknown are counted separately.
+				p.idleSlots -= p.defaultSlotsPerAgent
+				p.logPrintf("Worker %s found, assigned to pending unknown worker. Remaining unknown: %d", name, p.pendingUnknownWorkers)
+
+				p.workersByStatus[WorkerStatusPending][name] = curVersion
+			} else {
+				p.setWorkerStatusLocked(name, WorkerStatusUnknown, 0)
+				p.lastKnownTime[name] = time.Now()
+				p.logPrintf("Found unknown worker %s", name)
+			}
 		} else {
 			p.workersByStatus[currentStatus][name] = curVersion
 		}
@@ -410,6 +422,7 @@ func (p *AutoScaledPool) NotifyAgentAvailable(name string, busy bool, statusChan
 		} else if p.pendingUnknownWorkers > 0 {
 			// Assign this worker to one of the pending unknown workers
 			p.pendingUnknownWorkers--
+			// Remove duplicated counting.
 			p.idleSlots -= p.defaultSlotsPerAgent
 			p.logPrintf("Worker %s connected, assigned to pending unknown worker. Remaining unknown: %d", name, p.pendingUnknownWorkers)
 		} else {
@@ -534,6 +547,7 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 		if name == "" {
 			// Backend doesn't return worker name. Track as pending unknown worker.
 			p.pendingUnknownWorkers++
+			// Idle slots for pending-unknown are counted separately.
 			p.idleSlots += p.defaultSlotsPerAgent
 			p.logPrintf("Creating unknown worker, before idle size: %d, pending unknown: %d", p.idleSizeLocked(), p.pendingUnknownWorkers)
 		} else {

@@ -156,7 +156,7 @@ func testAutoScaler(t *testing.T, noWorkerName bool) {
 
 	allocateWorker := func(t *testing.T) string {
 		pool.mu.Lock()
-		assert.NotEmpty(t, pool.idleWorkers)
+		require.NotEmpty(t, pool.idleWorkers)
 		var worker string
 		for k := range pool.idleWorkers {
 			worker = k
@@ -201,7 +201,7 @@ func testAutoScaler(t *testing.T, noWorkerName bool) {
 
 	t.Run("RequestWorkerAndMaintainSize", func(t *testing.T) {
 		requireWorker(t)
-		// Should also trigger a scale-up for min-idle.
+		// Should not trigger a scale-up
 		assert.Equal(t, 2, backend.NumWorkers())
 	})
 
