@@ -122,6 +122,16 @@ func (p *LinuxNamespacePlugin) setupMounts(ctx context.Context, workDir string) 
 		die("Mount run", err)
 	}
 
+	if err := syscall.Mkdir(path.Join(workspaceDir, "run/user"), 0755); err != nil && !os.IsExist(err) {
+		die("Mkdir run/user", err)
+	}
+	if err := syscall.Mkdir(path.Join(workspaceDir, "run/user/1001"), 0755); err != nil && !os.IsExist(err) {
+		die("Mkdir run/user/1001", err)
+	}
+	if err := syscall.Chown(path.Join(workspaceDir, "run/user/1001"), 1001, 1001); err != nil {
+		die("Chown run/user/1001", err)
+	}
+
 	// Mount agent to /run/velda
 	agentDir := path.Join(workDir, "velda")
 	if err := os.Mkdir(path.Join(workspaceDir, "run/velda"), 0755); err != nil {
