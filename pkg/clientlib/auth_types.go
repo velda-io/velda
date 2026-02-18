@@ -16,60 +16,40 @@ package clientlib
 import (
 	"context"
 
-	"github.com/spf13/cobra"
-	"google.golang.org/grpc"
 	"velda.io/velda/pkg/proto"
 )
 
-type authProvider interface {
-	GetAccessToken(ctx context.Context) (string, error)
+type serverAuthHandler interface {
 	BindSession(ctx context.Context, session *proto.SessionRequest) context.Context
-	GetAuthInterceptor() grpc.UnaryClientInterceptor
-	GetStreamAuthInterceptor() grpc.StreamClientInterceptor
-	RenameProfile(oldName, newName string) error
-	DeleteProfile(profile string) error
-	SshDial(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error)
 	HandleServerInfo(ctx context.Context, info *proto.ServerInfo) error
 }
 
 var (
-	theAuthProvider authProvider
+	theServerAuthProvider serverAuthHandler
 )
 
-func GetAccessToken(ctx context.Context) (string, error) {
-	return theAuthProvider.GetAccessToken(ctx)
-}
-func BindSession(ctx context.Context, session *proto.SessionRequest) context.Context {
-	return theAuthProvider.BindSession(ctx, session)
-}
-
-func GetAuthInterceptor() grpc.UnaryClientInterceptor {
-	return theAuthProvider.GetAuthInterceptor()
-}
-
-func GetStreamAuthInterceptor() grpc.StreamClientInterceptor {
-	return theAuthProvider.GetStreamAuthInterceptor()
-}
-
-func RenameProfile(oldName, newName string) error {
-	return theAuthProvider.RenameProfile(oldName, newName)
-}
-
-func DeleteProfile(profile string) error {
-	return theAuthProvider.DeleteProfile(profile)
-}
-
-func SshConnect(cmd *cobra.Command, sshConn *proto.ExecutionStatus_SshConnection, user string) (*SshClient, error) {
-	return theAuthProvider.SshDial(cmd, sshConn, user)
-}
-
 func HandleServerInfo(ctx context.Context, info *proto.ServerInfo) error {
-	return theAuthProvider.HandleServerInfo(ctx, info)
+	return theServerAuthProvider.HandleServerInfo(ctx, info)
 }
 
-func SetAuthProvider(provider authProvider) {
-	if theAuthProvider != nil {
+func BindSession(ctx context.Context, session *proto.SessionRequest) context.Context {
+	return theServerAuthProvider.BindSession(ctx, session)
+}
+
+func SetAuthProvider(provider serverAuthHandler) {
+	if theServerAuthProvider != nil {
 		panic("AuthProvider is already set")
 	}
-	theAuthProvider = provider
+	theServerAuthProvider = provider
+}
+
+type OssAuthProvider struct{}
+
+func (o OssAuthProvider) BindSession(ctx context.Context, session *proto.SessionRequest) context.Context {
+	ctx = context.WithValue(ctx, "instanceId", session.InstanceId)
+	return ctx
+}
+
+func (o OssAuthProvider) HandleServerInfo(ctx context.Context, info *proto.ServerInfo) error {
+	return nil
 }
