@@ -13,7 +13,9 @@ debug-deps:
 	CGO_ENABLED=0 go build -ldflags='-dumpdep' --tags "${TAGS}" -p 3 -o bin/velda ./client >bin/velda-deps 2>&1
 
 RELEASE_FLAGS = -p $(shell nproc) --tags "${TAGS}" -ldflags "-X velda.io/velda.Version=${VERSION_V}"
-release-mini:
+CLI_FLAGS = -p $(shell nproc) --tags "clionly,grpcnotrace" -ldflags "-X velda.io/velda.Version=${VERSION_V}"
+
+release-mini: # For quick testing of release build, only linux/amd64
 	echo VERSION = ${VERSION_V}
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-amd64 ./client
 	ln -sf velda-${VERSION_V}-linux-amd64 bin/velda-latest-linux-amd64
@@ -21,8 +23,10 @@ release-mini:
 release:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-amd64 ./client
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-linux-arm64 ./client
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-darwin-arm64 ./client
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ${RELEASE_FLAGS} -o bin/velda-${VERSION_V}-darwin-amd64 ./client
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ${CLI_FLAGS} -o bin/velda-${VERSION_V}-cli-linux-amd64 ./client
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ${CLI_FLAGS} -o bin/velda-${VERSION_V}-cli-linux-arm64 ./client
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ${CLI_FLAGS} -o bin/velda-${VERSION_V}-cli-darwin-arm64 ./client
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ${CLI_FLAGS} -o bin/velda-${VERSION_V}-cli-darwin-amd64 ./client
 
 format:
 	go fmt ./...
