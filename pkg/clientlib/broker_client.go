@@ -114,6 +114,9 @@ func GetInstanceIdFromServer(instanceName string) (instanceId int64, err error) 
 	if err != nil {
 		return 0, fmt.Errorf("Error getting API connection: %v", err)
 	}
+	// Strip instance name of any domain suffix, e.g. "my-instance.velda.cloud" -> "my-instance"
+	parts := strings.Split(instanceName, ".")
+	instanceName = parts[0]
 	instanceServer := proto.NewInstanceServiceClient(conn)
 	instance, err := instanceServer.GetInstanceByName(
 		context.Background(), &proto.GetInstanceByNameRequest{

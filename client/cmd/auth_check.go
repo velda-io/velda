@@ -1,5 +1,3 @@
-//go:build !clionly
-
 // Copyright 2025 Velda Inc
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,31 +15,29 @@ package cmd
 
 import (
 	"fmt"
-	"log"
-	"os"
 
 	"github.com/spf13/cobra"
+	"velda.io/velda/pkg/clientlib"
+	"velda.io/velda/pkg/proto"
 )
 
-func callPersistentPreRun(cmd *cobra.Command, args []string) {
-	if parent := cmd.Parent(); parent != nil {
-		if parent.PersistentPreRun != nil {
-			parent.PersistentPreRun(parent, args)
+// authCheckCmd represents the authCheck command
+var authCheckCmd = &cobra.Command{
+	Use:   "check",
+	Short: "Checks the authentication status",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		conn, err := clientlib.GetApiConnection()
+		if err != nil {
+			return fmt.Errorf("Error getting API connection: %w", err)
 		}
-	}
-}
-
-// AgentCmd represents the agent command
-var AgentCmd = &cobra.Command{
-	Use:    "agent",
-	Short:  "Agent internal commands",
-	Hidden: true,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		log.SetPrefix(fmt.Sprintf("%d\t", os.Getpid()))
-		callPersistentPreRun(cmd, args)
+		client := proto.NewInstanceServiceClient(conn)
+		_, err = client.ListInstances(cmd.Context(), &proto.ListInstancesRequest{
+			PageSize: 1,
+		})
+		return err
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(AgentCmd)
+	authCmd.AddCommand(authCheckCmd)
 }
