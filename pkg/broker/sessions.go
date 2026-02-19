@@ -15,7 +15,6 @@ package broker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"maps"
@@ -23,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	pb "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -72,9 +73,13 @@ type Session struct {
 
 	agentChan     chan *Agent
 	agentResponse chan AgentSessionResponse
+
+	// Confirmation from scheduler that the session has been cancelled.
 	cancelConfirm chan struct{}
-	cancelSignal  chan struct{}
-	gang          *GangCoordinator
+
+	// The signal to be sent via velda kill command.
+	cancelSignal chan struct{}
+	gang         *GangCoordinator
 
 	scheduleCompletion chan struct{}
 	schedulingErr      error
@@ -207,6 +212,7 @@ func (s *Session) popCtxLocked() context.Context {
 
 func (s *Session) scheduleLoop(startingState schedulingState) {
 	scheduler := s.scheduler
+	serverCtx := s.scheduler.ctx
 	s.state = startingState
 	pool := scheduler.PoolManager
 	ctx := s.popCtx()
@@ -244,11 +250,16 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 				}
 				nextState = schedulingStateCancelling
 				scheduler.RemoveSession(s)
-				s.schedulingErr = errors.New("all context cancelled")
+				s.schedulingErr = status.Error(codes.Canceled, "all context cancelled")
 			case <-s.cancelSignal:
 				nextState = schedulingStateCancelling
 				scheduler.RemoveSession(s)
-				s.schedulingErr = errors.New("session cancelled by kill command")
+				s.schedulingErr = status.Error(codes.Canceled, "session cancelled by kill command")
+			case <-serverCtx.Done():
+				// Server is shutting down, cancel the session.
+				s.schedulingErr = status.Error(codes.Unavailable, "session cancelled due to server shutdown, please retry.")
+				s.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_CANCELLED)
+				return
 			case agent := <-s.agentChan:
 				// This should not block with buffer size 1.
 				s.agent = agent
@@ -278,7 +289,7 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 					s.agent.RequestKill(killCtx, s.Request.InstanceId, s.Request.SessionId, false)
 				}
 				nextState = schedulingStateCancelling
-				s.schedulingErr = errors.New("session cancelled by kill command")
+				s.schedulingErr = status.Error(codes.Canceled, "session cancelled by kill command")
 			case response := <-s.agentResponse:
 				if response.Error != nil {
 					// TODO: Retry scheduling?
@@ -297,6 +308,7 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 		case schedulingStateCancelling:
 			select {
 			case <-s.cancelConfirm:
+			case <-serverCtx.Done():
 			case agent := <-s.agentChan:
 				// It's possible that scheduler send to agent before processing
 				// cancellation request.
@@ -334,7 +346,7 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 			select {
 			case <-s.cancelSignal:
 				nextState = schedulingStateCancelling
-				s.schedulingErr = errors.New("session cancelled by kill command")
+				s.schedulingErr = status.Error(codes.Canceled, "session cancelled by kill command")
 			case <-ctxDone:
 				// Reevaluate ctx.
 				continue
