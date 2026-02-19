@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/pkg/sftp"
 	"github.com/spf13/cobra"
@@ -96,6 +97,7 @@ func streamTarReaderToSftp(cmd *cobra.Command, r io.Reader, sftpClient *sftp.Cli
 	var wg sync.WaitGroup
 	var uploadErr error
 	var uploadErrMu sync.Mutex
+	uploaded := atomic.Int64{}
 
 	// Helper function to wait for all pending uploads
 	waitForUploads := func() error {
@@ -126,6 +128,11 @@ func streamTarReaderToSftp(cmd *cobra.Command, r io.Reader, sftpClient *sftp.Cli
 					uploadErr = err
 				}
 				uploadErrMu.Unlock()
+			} else {
+				u := uploaded.Add(1)
+				if !verbose && !quiet && u%100 == 0 {
+					cmd.Printf("Uploaded: %d files\r", uploaded.Load())
+				}
 			}
 		}()
 	}
@@ -305,6 +312,7 @@ func getInitSandboxScript() string {
 set -e
 # Initialize user
 install_sudo() {
+    echo "Installing sudo..."
     $(which -s apt-get) && apt-get update && apt-get install -y sudo && return 0
     $(which -s yum) && yum install -y sudo && return 0
     $(which -s dnf) && dnf install -y sudo && return 0
@@ -317,6 +325,9 @@ passwd -d user
 mkdir -p /etc/sudoers.d
 echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/user
 usermod -aG sudo user || true
+
+echo "<empty> /tmp host defaults 0 0" >> /etc/fstab
+echo "<empty> /var/lib/docker host defaults 0 0" >> /etc/fstab
 
 ln -sf /run/velda/velda /usr/bin/velda
 ln -sf /run/velda/velda /usr/bin/vbatch
