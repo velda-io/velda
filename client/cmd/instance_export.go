@@ -38,6 +38,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -189,24 +190,44 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	}
 	user := fmt.Sprintf("%s:%s", uid, gid)
 
-	// --- Find the root device so we can skip other mounts -------------------
-	var rootSt syscall.Stat_t
-	if err := syscall.Stat("/", &rootSt); err != nil {
-		return fmt.Errorf("stat /: %w", err)
+	// Bind-mount the root to a temp location so we can reliably walk the filesystem without
+	// being overlayed by other mounts.
+	tmpMount, err := os.MkdirTemp("/run", "")
+	if err != nil {
+		return fmt.Errorf("creating temp dir to check mounts: %w", err)
 	}
-	rootDev := rootSt.Dev
+	if err := unix.Mount("/", tmpMount, "", unix.MS_BIND, ""); err != nil {
+		os.Remove(tmpMount)
+		return fmt.Errorf("bind-mounting root to check mounts: %w", err)
+	}
+	defer func() {
+		unix.Unmount(tmpMount, 0)
+		os.Remove(tmpMount)
+	}()
 
 	opener := func() (io.ReadCloser, error) {
 		pr, pw := io.Pipe()
 		go func() {
-			err := buildRootTar(pw, rootDev, exportCfg.Exclude, exportCfg.StripTimes)
+			err := buildRootTar(pw, tmpMount, exportCfg.Exclude, exportCfg.StripTimes)
 			pw.CloseWithError(err)
 		}()
 		return pr, nil
 	}
 
+	var img v1.Image = empty.Image
+
+	layer, err := tarball.LayerFromOpener(opener)
+	if err != nil {
+		return fmt.Errorf("creating layer from root tar: %w", err)
+	}
+
+	img, err = mutate.AppendLayers(img, layer)
+	if err != nil {
+		return fmt.Errorf("appending layer: %w", err)
+	}
+
 	// --- Image config -------------------------------------------------------
-	cfg, err := empty.Image.ConfigFile()
+	cfg, err := img.ConfigFile()
 	if err != nil {
 		return fmt.Errorf("getting config file: %w", err)
 	}
@@ -218,18 +239,9 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	cfg.Config.Cmd = cmdSlice
 	cfg.Config.User = user
 
-	img, err := mutate.ConfigFile(empty.Image, cfg)
+	img, err = mutate.ConfigFile(img, cfg)
 	if err != nil {
 		return fmt.Errorf("setting image config: %w", err)
-	}
-	layer, err := tarball.LayerFromOpener(opener)
-	if err != nil {
-		return fmt.Errorf("creating layer from root tar: %w", err)
-	}
-
-	img, err = mutate.AppendLayers(img, layer)
-	if err != nil {
-		return fmt.Errorf("appending layer: %w", err)
 	}
 
 	// --- Output / Push ------------------------------------------------------
@@ -263,6 +275,11 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		cmd.PrintErrf("Successfully pushed to %s\n", ref)
+		if d, err := img.Digest(); err != nil {
+			cmd.PrintErrf("Warning: computing image digest: %v\n", err)
+		} else {
+			cmd.PrintErrf("Image digest: %s\n", d.String())
+		}
 	}
 
 	if outputFile != "" {
@@ -363,7 +380,7 @@ type inodeKey struct{ dev, ino uint64 }
 // Paths matching any of the exclusion glob patterns (relative, no leading '/') are omitted.
 // When stripTimes is true all file/directory modification and access timestamps
 // are set to the Unix epoch (time.Time{}) to produce a reproducible layer.
-func buildRootTar(w io.Writer, rootDev uint64, excludePatterns []string, stripTimes bool) error {
+func buildRootTar(w io.Writer, tmpMount string, excludePatterns []string, stripTimes bool) error {
 	tw := tar.NewWriter(w)
 	defer tw.Close()
 
@@ -371,10 +388,10 @@ func buildRootTar(w io.Writer, rootDev uint64, excludePatterns []string, stripTi
 	// that inode so that subsequent occurrences can be recorded as hard links.
 	hardLinks := make(map[inodeKey]string)
 
-	return filepath.WalkDir("/", func(path string, d fs.DirEntry, walkErr error) error {
+	return filepath.WalkDir(tmpMount, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			// Permission denied or similar – skip silently.
-			return nil
+			return walkErr
 		}
 
 		// Apply exclusion patterns before any stat/io work.
@@ -388,56 +405,29 @@ func buildRootTar(w io.Writer, rootDev uint64, excludePatterns []string, stripTi
 
 		var st syscall.Stat_t
 		if err := syscall.Lstat(path, &st); err != nil {
-			return nil
-		}
-
-		// Files on a different device/mount are excluded from the layer.
-		// Directories that are mount points get an empty directory entry so
-		// that the mount point path exists in the image.
-		if st.Dev != rootDev {
-			if d.IsDir() {
-				if info, err2 := d.Info(); err2 == nil {
-					if hdr, err2 := tar.FileInfoHeader(info, ""); err2 == nil {
-						hdr.Name = strings.TrimPrefix(filepath.ToSlash(path), "/") + "/"
-						hdr.Uid = int(st.Uid)
-						hdr.Gid = int(st.Gid)
-						hdr.Uname = ""
-						hdr.Gname = ""
-						// Size is always 0 for directories.
-						hdr.Size = 0
-						if stripTimes {
-							hdr.ModTime = time.Time{}
-							hdr.AccessTime = time.Time{}
-							hdr.ChangeTime = time.Time{}
-						}
-						_ = tw.WriteHeader(hdr)
-					}
-				}
-				return filepath.SkipDir
-			}
-			return nil
+			return err
 		}
 
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			return err
 		}
 
 		// For symlinks we need the link target to pass to FileInfoHeader.
 		linkTarget := ""
 		if info.Mode()&os.ModeSymlink != 0 {
 			if linkTarget, err = os.Readlink(path); err != nil {
-				return nil
+				return err
 			}
 		}
 
 		hdr, err := tar.FileInfoHeader(info, linkTarget)
 		if err != nil {
-			return nil
+			return err
 		}
 
 		// Paths inside the tar are relative to the root (no leading "/").
-		hdr.Name = strings.TrimPrefix(filepath.ToSlash(path), "/")
+		hdr.Name = strings.TrimPrefix(filepath.ToSlash(path), tmpMount)
 		if hdr.Name == "" {
 			hdr.Name = "."
 		}
