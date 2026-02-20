@@ -164,6 +164,35 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 		return fmt.Errorf("failed to parse instance ID: %v", err)
 	}
 
+	brokerClient, err := clientlib.GetBrokerClient()
+	if err != nil {
+		return fmt.Errorf("failed to get broker client: %v", err)
+	}
+
+	pr("Allocating compute for initializing instance...\n")
+	var sshClient *clientlib.SshClient
+	sshConnectChan := make(chan error, 1)
+	go func() {
+		// Request a session for file copying
+		resp, err := brokerClient.RequestSession(cmd.Context(), &proto.SessionRequest{
+			ServiceName: "docker-init",
+			InstanceId:  instanceId,
+			Pool:        "shell",
+			User:        "root",
+		})
+		if err != nil {
+			sshConnectChan <- fmt.Errorf("failed to request session: %v", err)
+			return
+		}
+
+		// Connect via SSH
+		sshClient, err = clientlib.SshConnect(cmd, resp.GetSshConnection(), "root")
+		if err != nil {
+			sshConnectChan <- fmt.Errorf("failed to connect to SSH: %v", err)
+			return
+		}
+		sshConnectChan <- nil
+	}()
 	// Create the Docker container before requesting a velda session so the
 	// container exists when the session starts.
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -191,29 +220,11 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 		exec.Command("docker", "rm", containerID).Run()
 	}()
 
-	brokerClient, err := clientlib.GetBrokerClient()
+	err = <-sshConnectChan
 	if err != nil {
-		return fmt.Errorf("failed to get broker client: %v", err)
-	}
-
-	// Request a session for file copying
-	resp, err := brokerClient.RequestSession(cmd.Context(), &proto.SessionRequest{
-		ServiceName: "docker-init",
-		InstanceId:  instanceId,
-		Pool:        "shell",
-		User:        "root",
-	})
-	if err != nil {
-		return fmt.Errorf("failed to request session: %v", err)
-	}
-
-	// Connect via SSH
-	sshClient, err := clientlib.SshConnect(cmd, resp.GetSshConnection(), "root")
-	if err != nil {
-		return fmt.Errorf("failed to connect to SSH: %v", err)
+		return err
 	}
 	defer sshClient.Close()
-
 	// Create SFTP client
 	sftpClient, err := sftp.NewClient(sshClient.Client)
 	if err != nil {
@@ -221,6 +232,7 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 	}
 	defer sftpClient.Close()
 
+	pr("Uploading files...\n")
 	// Copy files to instance (stream from docker export)
 	if err := streamDockerImageToSftp(cmd, containerID, sftpClient, verbose, quiet); err != nil {
 		return fmt.Errorf("failed to stream docker image to instance: %v", err)
