@@ -350,6 +350,11 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 			case <-ctxDone:
 				// Reevaluate ctx.
 				continue
+			case <-serverCtx.Done():
+				// Server is shutting down, cancel the session.
+				s.schedulingErr = status.Error(codes.Unavailable, "session cancelled due to server shutdown, please retry.")
+				s.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_CANCELLED)
+				return
 			case <-staleConnectionRequest:
 				// Reevaluate ctx
 				continue
