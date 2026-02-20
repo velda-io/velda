@@ -48,6 +48,19 @@ func GetBrokerClient() (proto.BrokerServiceClient, error) {
 	return proto.NewBrokerServiceClient(conn), nil
 }
 
+const serviceConfig = `{
+    "methodConfig": [{
+        "name": [{"service": "velda.BrokerService", "method": "RequestSession"}],
+        "retryPolicy": {
+            "maxAttempts": 10,
+            "initialBackoff": "5s",
+            "maxBackoff": "60s",
+            "backoffMultiplier": 2,
+            "retryableStatusCodes": ["UNAVAILABLE"]
+        }
+    }]
+}`
+
 func GetApiConnection() (*grpc.ClientConn, error) {
 	once.Do(func() {
 		var brokerAddr string
@@ -101,6 +114,7 @@ func GetApiConnection() (*grpc.ClientConn, error) {
 			grpc.WithAuthority(brokerUrl.Host),
 			grpc.WithUnaryInterceptor(GetAuthInterceptor()),
 			grpc.WithStreamInterceptor(GetStreamAuthInterceptor()),
+			grpc.WithDefaultServiceConfig(serviceConfig),
 		)
 		if connErr != nil {
 			return
