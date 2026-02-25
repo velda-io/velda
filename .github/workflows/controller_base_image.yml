@@ -1,0 +1,62 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  packer-images:
+    # Skip if release was skipped
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - id: gcp_auth
+        name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: release-bin
+          path: ./bin
+
+      - name: Install packer
+        uses: hashicorp/setup-packer@v3
+        with:
+          version: 1.14.1
+
+      - name: Initialize Packer
+        run: packer init packer
+
+      - name: Build images
+        run: exec packer build -var="version=${{ github.run_id }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" -var="docker_password=${{ secrets.DOCKER_PASSWORD }}" -var="azure_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" -var-file=packer/prod.pkrvars.hcl -only='controller.*' packer
+
+      - name: Update permissions
+        run: make -C packer update_permission_controller
+        env:
+          VERSION: ${{ github.run_id }}

@@ -19,17 +19,15 @@ agent-gcp:
 agent-aws:
 	packer build -var="version=${VERSION}" -only=amazon-ebs.velda-agent .
 
-update_permission:
-# Only update permission if VERSION doesn't contain dev or test
-ifneq (,$(filter dev test,$(word 1,$(subst -, ,$(VERSION)))))
-else
+update_permission_controller:
 	gcloud compute images add-iam-policy-binding projects/velda-oss/global/images/velda-controller-$(subst .,-,$(VERSION)) \
 		--member='allAuthenticatedUsers' \
 		--role='roles/compute.imageUser'
+
+update_permission_agent:
 	gcloud compute images add-iam-policy-binding projects/velda-oss/global/images/velda-agent-$(subst .,-,$(VERSION)) \
 		--member='allAuthenticatedUsers' \
 		--role='roles/compute.imageUser'
-endif
 
 init:
 	packer init .

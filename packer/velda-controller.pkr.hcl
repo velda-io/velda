@@ -32,6 +32,10 @@ build {
     destination = "/tmp/velda-install/velda-apiserver.service"
   }
   provisioner "file" {
+    source      = "${path.root}/scripts/velda-fileserver.service"
+    destination = "/tmp/velda-install/velda-fileserver.service"
+  }
+  provisioner "file" {
     only        = ["googlecompute.velda-controller"]
     source      = "${path.root}/ops_agent_config.yaml"
     destination = "/tmp/velda-install/ops_agent_config.yaml"
@@ -48,11 +52,10 @@ build {
   provisioner "shell" {
     inline = [
       "sudo cp /tmp/velda-install/velda-apiserver.service /usr/lib/systemd/system/velda-apiserver.service",
+      "sudo cp /tmp/velda-install/velda-fileserver.service /usr/lib/systemd/system/velda-fileserver.service",
       "sudo systemctl daemon-reload",
       "sudo systemctl enable velda-apiserver",
+      "sudo systemctl enable velda-fileserver",
     ]
-  }
-  post-processor "manifest" {
-    output = "controller.json"
   }
 }
