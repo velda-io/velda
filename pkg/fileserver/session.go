@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 package fileserver
 
 import (
+	"log"
 	"net"
 	"time"
 
@@ -29,11 +30,33 @@ type Session struct {
 
 // NewSession creates a new session
 func NewSession(conn net.Conn) *Session {
-	return &Session{
+	s := &Session{
 		conn:    conn,
 		mountID: -1, // Not mounted yet
 		rootFd:  -1, // Not opened yet
 	}
+
+	// If this is a TCP connection, set TCP_NOTSENT_LOWAT so the kernel
+	// doesn't buffer more than one chunk+header of unsent data before
+	// causing writes to block until some of it is transmitted.
+	if tc, ok := conn.(*net.TCPConn); ok {
+		raw, err := tc.SyscallConn()
+		if err != nil {
+			log.Printf("failed to get SyscallConn for TCPConn: %v", err)
+			return s
+		}
+		ctrlErr := raw.Control(func(fd uintptr) {
+			lowat := ChunkSize + HeaderSize
+			if err := unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_NOTSENT_LOWAT, lowat); err != nil {
+				log.Printf("failed to set TCP_NOTSENT_LOWAT=%d: %v", lowat, err)
+			}
+		})
+		if ctrlErr != nil {
+			log.Printf("error running Control on socket: %v", ctrlErr)
+		}
+	}
+
+	return s
 }
 
 // Init initializes the session with mount ID and root file descriptor
