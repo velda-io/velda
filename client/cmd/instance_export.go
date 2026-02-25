@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -72,7 +73,34 @@ Examples:
   velda instance export --push gcr.io/my-project/my-image:latest --auth google
 
   # Push with manual credentials
-  velda instance export --push registry.example.com/org/repo:latest --auth manual`,
+  velda instance export --push registry.example.com/org/repo:latest --auth manual
+
+  # Use a custom export config to exclude files
+  velda instance export --config /etc/velda-export.yaml --push registry.example.com/org/repo:latest
+
+  # Exclude additional paths on the command line
+  velda instance export --exclude '/home/user/.cache/*' --exclude '*.log' --push registry.example.com/org/repo:latest
+
+  # Strip all file timestamps for a reproducible image
+  velda instance export --strip-times --push registry.example.com/org/repo:latest
+
+Export config (/.dockerexports by default) is a YAML file with the following schema:
+
+  # include: merge additional config files first (local paths or HTTPS URLs)
+  include:
+    - /etc/shared-export-config.yaml
+    - https://example.com/base-export.yaml
+
+  # exclude: glob patterns for paths to omit from the image
+  #   leading "/" → absolute (matched from root)
+  #   no leading "/" → relative (matched at any depth)
+  exclude:
+    - /tmp/*           # absolute: only top-level /tmp
+    - var/cache/*      # relative: any var/cache at any depth
+    - "*.log"          # relative: any .log file anywhere
+
+  # strip_times: set all file timestamps to epoch 0 for reproducible builds
+  strip_times: true`,
 	RunE: runExportContainer,
 }
 
@@ -85,6 +113,12 @@ func init() {
 	f.StringP("output", "o", "", "Save the image as an OCI-compatible tar file at this path")
 	f.String("auth", "docker",
 		"Registry auth method: docker (default keychain), google (GCR/AR), manual (stdin prompt)")
+	f.String("config", "",
+		"Path to the export config YAML file (default /.dockerexports if it exists)")
+	f.StringArray("exclude", nil,
+		"Additional glob pattern to exclude from the image (may be repeated; appended after config excludes)")
+	f.Bool("strip-times", false,
+		"Set all file timestamps in the image layer to epoch 0 (overrides the config file setting)")
 }
 
 func runExportContainer(cmd *cobra.Command, args []string) error {
@@ -100,6 +134,22 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	outputFile, _ := cmd.Flags().GetString("output")
 	if pushRef == "" && outputFile == "" {
 		return fmt.Errorf("specify at least one of --push or --output")
+	}
+
+	// --- Export config -------------------------------------------------------
+	configPath, _ := cmd.Flags().GetString("config")
+	exportCfg, err := loadExportConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("loading export config: %w", err)
+	}
+	// Merge any extra exclude patterns supplied on the command line.
+	extraExclude, _ := cmd.Flags().GetStringArray("exclude")
+	exportCfg.Exclude = append(exportCfg.Exclude, extraExclude...)
+	// --strip-times flag overrides config file when explicitly set (in either direction).
+	if f := cmd.Flags().Lookup("strip-times"); f != nil && f.Changed {
+		if stripTimesFlag, _ := cmd.Flags().GetBool("strip-times"); true {
+			exportCfg.StripTimes = stripTimesFlag
+		}
 	}
 
 	// --- Auth ----------------------------------------------------------------
@@ -160,7 +210,7 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	opener := func() (io.ReadCloser, error) {
 		pr, pw := io.Pipe()
 		go func() {
-			err := buildRootTar(pw, tmpMount)
+			err := buildRootTar(pw, tmpMount, exportCfg.Exclude, exportCfg.StripTimes)
 			pw.CloseWithError(err)
 		}()
 		return pr, nil
@@ -329,7 +379,10 @@ type inodeKey struct{ dev, ino uint64 }
 
 // buildRootTar walks "/" and writes a tar stream to w, skipping any directory
 // (and its subtree) that resides on a different block device than rootDev.
-func buildRootTar(w io.Writer, tmpMount string) error {
+// Paths matching any of the exclusion glob patterns (relative, no leading '/') are omitted.
+// When stripTimes is true all file/directory modification and access timestamps
+// are set to the Unix epoch (time.Time{}) to produce a reproducible layer.
+func buildRootTar(w io.Writer, tmpMount string, excludePatterns []string, stripTimes bool) error {
 	tw := tar.NewWriter(w)
 	defer tw.Close()
 
@@ -341,6 +394,15 @@ func buildRootTar(w io.Writer, tmpMount string) error {
 		if walkErr != nil {
 			// Permission denied or similar – skip silently.
 			return walkErr
+		}
+
+		// Apply exclusion patterns before any stat/io work.
+		relPath := strings.TrimPrefix(filepath.ToSlash(path), "/")
+		if relPath != "" && matchesAnyExclude(relPath, excludePatterns) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		var st syscall.Stat_t
@@ -380,6 +442,12 @@ func buildRootTar(w io.Writer, tmpMount string) error {
 		hdr.Gid = int(st.Gid)
 		hdr.Uname = ""
 		hdr.Gname = ""
+
+		if stripTimes {
+			hdr.ModTime = time.Time{}
+			hdr.AccessTime = time.Time{}
+			hdr.ChangeTime = time.Time{}
+		}
 
 		// Detect hard links among regular files.
 		if hdr.Typeflag == tar.TypeReg && st.Nlink > 1 {
