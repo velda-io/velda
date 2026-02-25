@@ -1,0 +1,45 @@
+// Copyright 2025 Velda Inc
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+package velda;
+
+option go_package = "velda.io/velda/pkg/proto";
+
+// ExportConfig is the schema for the /.dockerexports YAML config file used
+// by `velda instance export`. It controls which files are packed into the
+// container image and allows composing multiple configs together.
+message ExportConfig {
+  // include lists local file paths or HTTPS URLs to other ExportConfig YAML
+  // files that should be merged into this config. Included configs are
+  // resolved and merged first (in declaration order); the current config's
+  // settings are applied on top. Cycles are detected and ignored.
+  repeated string include = 1;
+
+  // exclude lists glob patterns for paths that should be omitted from the packed
+  // image layer.
+  //
+  // Pattern semantics:
+  //   - Leading "/" → absolute: matched against the full path from root.
+  //     e.g. "/tmp/*" excludes only the top-level /tmp directory.
+  //   - No leading "/" → relative: matched against any trailing segment
+  //     (and sub-path from that segment), so the pattern applies at any
+  //     depth in the tree.
+  //     e.g. "cache" excludes var/cache and home/user/cache,
+  //          but NOT home/user/.cache (dot makes it a different name).
+  //     e.g. "*.log" excludes any .log file anywhere in the filesystem.
+  //
+  // Patterns follow Go's path.Match syntax. A matched directory implicitly
+  // excludes its entire subtree.
+  repeated string exclude = 2;
+}

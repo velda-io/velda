@@ -71,7 +71,25 @@ Examples:
   velda instance export --push gcr.io/my-project/my-image:latest --auth google
 
   # Push with manual credentials
-  velda instance export --push registry.example.com/org/repo:latest --auth manual`,
+  velda instance export --push registry.example.com/org/repo:latest --auth manual
+
+  # Use a custom export config to exclude files
+  velda instance export --config /etc/velda-export.yaml --push registry.example.com/org/repo:latest
+
+Export config (/.dockerexports by default) is a YAML file with the following schema:
+
+  # include: merge additional config files first (local paths or HTTPS URLs)
+  include:
+    - /etc/shared-export-config.yaml
+    - https://example.com/base-export.yaml
+
+  # exclude: glob patterns for paths to omit from the image
+  #   leading "/" → absolute (matched from root)
+  #   no leading "/" → relative (matched at any depth)
+  exclude:
+    - /tmp/*           # absolute: only top-level /tmp
+    - var/cache/*      # relative: any var/cache at any depth
+    - "*.log"          # relative: any .log file anywhere`,
 	RunE: runExportContainer,
 }
 
@@ -84,6 +102,8 @@ func init() {
 	f.StringP("output", "o", "", "Save the image as an OCI-compatible tar file at this path")
 	f.String("auth", "docker",
 		"Registry auth method: docker (default keychain), google (GCR/AR), manual (stdin prompt)")
+	f.String("config", "",
+		"Path to the export config YAML file (default /.dockerexports if it exists)")
 }
 
 func runExportContainer(cmd *cobra.Command, args []string) error {
@@ -99,6 +119,13 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	outputFile, _ := cmd.Flags().GetString("output")
 	if pushRef == "" && outputFile == "" {
 		return fmt.Errorf("specify at least one of --push or --output")
+	}
+
+	// --- Export config -------------------------------------------------------
+	configPath, _ := cmd.Flags().GetString("config")
+	exportCfg, err := loadExportConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("loading export config: %w", err)
 	}
 
 	// --- Auth ----------------------------------------------------------------
@@ -151,7 +178,7 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	opener := func() (io.ReadCloser, error) {
 		pr, pw := io.Pipe()
 		go func() {
-			err := buildRootTar(pw, rootDev)
+			err := buildRootTar(pw, rootDev, exportCfg.Exclude)
 			pw.CloseWithError(err)
 		}()
 		return pr, nil
@@ -312,7 +339,8 @@ type inodeKey struct{ dev, ino uint64 }
 
 // buildRootTar walks "/" and writes a tar stream to w, skipping any directory
 // (and its subtree) that resides on a different block device than rootDev.
-func buildRootTar(w io.Writer, rootDev uint64) error {
+// Paths matching any of the exclusion glob patterns (relative, no leading '/') are omitted.
+func buildRootTar(w io.Writer, rootDev uint64, excludePatterns []string) error {
 	tw := tar.NewWriter(w)
 	defer tw.Close()
 
@@ -323,6 +351,15 @@ func buildRootTar(w io.Writer, rootDev uint64) error {
 	return filepath.WalkDir("/", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			// Permission denied or similar – skip silently.
+			return nil
+		}
+
+		// Apply exclusion patterns before any stat/io work.
+		relPath := strings.TrimPrefix(filepath.ToSlash(path), "/")
+		if relPath != "" && matchesAnyExclude(relPath, excludePatterns) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
