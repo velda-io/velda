@@ -145,9 +145,11 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	// Merge any extra exclude patterns supplied on the command line.
 	extraExclude, _ := cmd.Flags().GetStringArray("exclude")
 	exportCfg.Exclude = append(exportCfg.Exclude, extraExclude...)
-	// --strip-times flag overrides config file when explicitly set.
-	if stripTimesFlag, _ := cmd.Flags().GetBool("strip-times"); stripTimesFlag {
-		exportCfg.StripTimes = true
+	// --strip-times flag overrides config file when explicitly set (in either direction).
+	if f := cmd.Flags().Lookup("strip-times"); f != nil && f.Changed {
+		if stripTimesFlag, _ := cmd.Flags().GetBool("strip-times"); true {
+			exportCfg.StripTimes = stripTimesFlag
+		}
 	}
 
 	// --- Auth ----------------------------------------------------------------
