@@ -37,7 +37,8 @@ func NewSession(conn net.Conn) *Session {
 	}
 
 	// If this is a TCP connection, set TCP_NOTSENT_LOWAT so the kernel
-	// doesn't buffer more than one chunk+header before returning EAGAIN.
+	// doesn't buffer more than one chunk+header of unsent data before
+	// causing writes to block until some of it is transmitted.
 	if tc, ok := conn.(*net.TCPConn); ok {
 		raw, err := tc.SyscallConn()
 		if err != nil {
