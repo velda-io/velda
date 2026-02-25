@@ -104,7 +104,7 @@ func (r *Runner) Run(agentaName string, session *proto.SessionRequest, completio
 	needCleanup := true
 	defer func() {
 		if needCleanup {
-			r.cleanupCgroup(cgroupPath)
+			r.cleanupCgroup(session.SessionId)
 		}
 	}()
 
@@ -194,7 +194,7 @@ func (r *Runner) Run(agentaName string, session *proto.SessionRequest, completio
 	needCleanup = false
 	go func() {
 		defer r.nd.Put(nh)
-		defer r.cleanupCgroup(cgroupPath)
+		defer r.cleanupCgroup(session.SessionId)
 		defer r.dnsServer.Reset()
 		defer func() {
 			r.mu.Lock()
@@ -293,20 +293,8 @@ func (r *Runner) initCgroup() error {
 		return fmt.Errorf("WriteFile cgroup.procs: %w", err)
 	}
 
-	// Enable all sub-controllers for the root
-	subControllersBytes, err := os.ReadFile(path.Join("/sys/fs/cgroup", r.baseCgroup[1:], "cgroup.controllers"))
-	if err != nil {
-		return fmt.Errorf("ReadFile cgroup.controllers: %w", err)
-	}
-	subControllers := strings.Split(string(subControllersBytes), " ")
-	enableCommand := ""
-	for _, controller := range subControllers {
-		enableCommand += " +" + controller
-	}
-	if enableCommand == "" {
-		return nil
-	}
-	err = os.WriteFile(path.Join("/sys/fs/cgroup", r.baseCgroup[1:], "cgroup.subtree_control"), []byte(enableCommand[1:]), 0400)
+	// Require CPU & Memory controllers to be enabled for resource monitoring
+	err = os.WriteFile(path.Join("/sys/fs/cgroup", r.baseCgroup[1:], "cgroup.subtree_control"), []byte("+memory +cpu"), 0400)
 	if err != nil {
 		return fmt.Errorf("WriteFile cgroup.subtree_control: %w", err)
 	}
@@ -314,21 +302,29 @@ func (r *Runner) initCgroup() error {
 	if err != nil {
 		return fmt.Errorf("WriteFile memory.oom.group: %w", err)
 	}
-	log.Printf("Completed cgroup initialization. Enabled cgroup controllers: %s", enableCommand[1:])
 	return nil
 }
 
 func (r *Runner) setupCgroup(session string) (string, error) {
-	cgroupPath := path.Join("/sys/fs/cgroup", r.baseCgroup[1:], session)
+	cgroupPath := path.Join("/sys/fs/cgroup", r.baseCgroup[1:], session, "sandbox")
 	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
 		return cgroupPath, fmt.Errorf("Mkdir cgroup: %w", err)
+	}
+	workloadCg := path.Join("/sys/fs/cgroup", r.baseCgroup[1:], session, "workload")
+	if err := os.MkdirAll(workloadCg, 0755); err != nil {
+		return cgroupPath, fmt.Errorf("Mkdir workload cgroup: %w", err)
+	}
+	// Enable subtree-control
+	if err := os.WriteFile(path.Join("/sys/fs/cgroup", r.baseCgroup[1:], session, "cgroup.subtree_control"), []byte("+memory +cpu"), 0400); err != nil {
+		return cgroupPath, fmt.Errorf("WriteFile cgroup.subtree_control: %w", err)
 	}
 
 	return cgroupPath, nil
 }
 
-func (r *Runner) cleanupCgroup(cgroupPath string) error {
-	if err := os.Remove(cgroupPath); err != nil {
+func (r *Runner) cleanupCgroup(session string) error {
+	cgroupPath := path.Join("/sys/fs/cgroup", r.baseCgroup[1:], session)
+	if err := os.RemoveAll(cgroupPath); err != nil {
 		return fmt.Errorf("RemoveAll cgroup: %w", err)
 	}
 	return nil

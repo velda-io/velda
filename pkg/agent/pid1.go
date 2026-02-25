@@ -137,7 +137,7 @@ func (p *RunPid1Plugin) Run(ctx context.Context) error {
 	}
 }
 
-func currentCgroupPath() (string, error) {
+func CurrentCgroupPath() (string, error) {
 	cgroupBasePath := "/sys/fs/cgroup"
 	cgFile := "/proc/self/cgroup"
 	data, err := os.ReadFile(cgFile)
@@ -161,7 +161,7 @@ func currentCgroupPath() (string, error) {
 }
 
 func killWithCgroup() error {
-	cgPath, err := currentCgroupPath()
+	cgPath, err := CurrentCgroupPath()
 	if err != nil {
 		return fmt.Errorf("failed to get current cgroup path: %w", err)
 	}
@@ -174,10 +174,13 @@ func killWithCgroup() error {
 }
 
 func extractCgroupFD() (int, error) {
-	cgPath, err := currentCgroupPath()
+	cgPath, err := CurrentCgroupPath()
 	if err != nil {
 		return -1, fmt.Errorf("failed to get current cgroup path: %w", err)
 	}
+	cgPath = strings.TrimSuffix(cgPath, "/sandbox")
+
+	// Create workload cgroup
 	newCgroupPath := fmt.Sprintf("%s/workload", cgPath)
 	if err := os.MkdirAll(newCgroupPath, 0755); err != nil {
 		return -1, fmt.Errorf("failed to create new cgroup: %w", err)

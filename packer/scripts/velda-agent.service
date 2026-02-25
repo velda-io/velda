@@ -16,6 +16,7 @@ Environment="HOME=/root"
 StandardError=journal
 OOMPolicy=continue
 LimitNOFILE=524288:524288
+CPUWeight=10000
 
 [Install]
 WantedBy=network-online.target

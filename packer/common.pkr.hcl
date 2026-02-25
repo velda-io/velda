@@ -36,7 +36,7 @@ variable "aws_region" {
 
 variable "driver_version" {
   type    = string
-  default = "570.172.08"
+  default = "580.126.20"
 }
 
 variable "ami_regions" {
