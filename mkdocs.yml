@@ -117,6 +117,7 @@ nav:
           - Pool Provisioners: deployment/pool-provisioners.md
           - Kubernetes CRD Integration: deployment/pool-kubernetes-crd.md
           - Multi-cloud pool: deployment/multi-cloud-pool.md
+          - CAS File Caching: deployment/cas-file-caching.md
 
 plugins:
   - search:
