@@ -1,11 +1,10 @@
-name: Build and Release
+name: Build container base image
 
 on:
   workflow_dispatch:
 
 jobs:
   packer-images:
-    # Skip if release was skipped
     runs-on: ubuntu-latest
     permissions:
       id-token: write
