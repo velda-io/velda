@@ -17,17 +17,12 @@
 package cmd
 
 import (
-	"archive/tar"
 	"bufio"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -119,6 +114,8 @@ func init() {
 		"Additional glob pattern to exclude from the image (may be repeated; appended after config excludes)")
 	f.Bool("strip-times", false,
 		"Set all file timestamps in the image layer to epoch 0 (overrides the config file setting)")
+	f.Int64("max-layer-size", defaultLayerSizeThreshold,
+		"Maximum uncompressed bytes per layer before a new layer is started (0 = single layer, default 200 MiB)")
 }
 
 func runExportContainer(cmd *cobra.Command, args []string) error {
@@ -207,26 +204,36 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 		os.Remove(tmpMount)
 	}()
 
-	opener := func() (io.ReadCloser, error) {
-		pr, pw := io.Pipe()
-		go func() {
-			err := buildRootTar(pw, tmpMount, exportCfg.Exclude, exportCfg.StripTimes)
-			pw.CloseWithError(err)
-		}()
-		return pr, nil
+	// --- Layering ----------------------------------------------------------
+	maxLayerSize, _ := cmd.Flags().GetInt64("max-layer-size")
+	layerSpecs, err := computeLayers(tmpMount, exportCfg.Exclude, exportCfg.StripTimes, maxLayerSize)
+	if err != nil {
+		return fmt.Errorf("computing layers: %w", err)
 	}
 
 	var img v1.Image = empty.Image
 
-	layer, err := tarball.LayerFromOpener(opener)
-	if err != nil {
-		return fmt.Errorf("creating layer from root tar: %w", err)
+	cmd.PrintErrf("Building %d layer(s)...\n", len(layerSpecs))
+	for i, spec := range layerSpecs {
+		cmd.PrintErrf("  Layer %d/%d: %s (%s)\n", i+1, len(layerSpecs), spec.Description, fmtBytes(spec.TotalSize))
 	}
-
-	img, err = mutate.AppendLayers(img, layer)
-	if err != nil {
-		return fmt.Errorf("appending layer: %w", err)
+	for i, spec := range layerSpecs {
+		cmd.PrintErrf("	Exporting layer %d/%d ...\r", i+1, len(layerSpecs))
+		layer, err := tarball.LayerFromOpener(spec.Open)
+		if err != nil {
+			return fmt.Errorf("creating layer %d (%s) from tar: %w", i+1, spec.Description, err)
+		}
+		img, err = mutate.Append(img, mutate.Addendum{
+			Layer: layer,
+			History: v1.History{
+				CreatedBy: spec.Description,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("appending layer %d (%s): %w", i+1, spec.Description, err)
+		}
 	}
+	cmd.PrintErrln()
 
 	// --- Image config -------------------------------------------------------
 	cfg, err := img.ConfigFile()
@@ -376,110 +383,6 @@ func resolveContainerEnv(flags []string) []string {
 // inode uniquely identifies a file by device + inode number, used to detect
 // hard links.
 type inodeKey struct{ dev, ino uint64 }
-
-// buildRootTar walks "/" and writes a tar stream to w, skipping any directory
-// (and its subtree) that resides on a different block device than rootDev.
-// Paths matching any of the exclusion glob patterns (relative, no leading '/') are omitted.
-// When stripTimes is true all file/directory modification and access timestamps
-// are set to the Unix epoch (time.Time{}) to produce a reproducible layer.
-func buildRootTar(w io.Writer, tmpMount string, excludePatterns []string, stripTimes bool) error {
-	tw := tar.NewWriter(w)
-	defer tw.Close()
-
-	// hardLinks maps an (dev, ino) pair to the first tar path we wrote for
-	// that inode so that subsequent occurrences can be recorded as hard links.
-	hardLinks := make(map[inodeKey]string)
-
-	return filepath.WalkDir(tmpMount, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			// Permission denied or similar – skip silently.
-			return walkErr
-		}
-
-		// Apply exclusion patterns before any stat/io work.
-		relPath := strings.TrimPrefix(filepath.ToSlash(path), "/")
-		if relPath != "" && matchesAnyExclude(relPath, excludePatterns) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		var st syscall.Stat_t
-		if err := syscall.Lstat(path, &st); err != nil {
-			return err
-		}
-
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-
-		// For symlinks we need the link target to pass to FileInfoHeader.
-		linkTarget := ""
-		if info.Mode()&os.ModeSymlink != 0 {
-			if linkTarget, err = os.Readlink(path); err != nil {
-				return err
-			}
-		}
-
-		hdr, err := tar.FileInfoHeader(info, linkTarget)
-		if err != nil {
-			return err
-		}
-
-		// Paths inside the tar are relative to the root (no leading "/").
-		hdr.Name = strings.TrimPrefix(filepath.ToSlash(path), tmpMount)
-		if hdr.Name == "" {
-			hdr.Name = "."
-		}
-		if d.IsDir() && !strings.HasSuffix(hdr.Name, "/") {
-			hdr.Name += "/"
-		}
-
-		// Preserve the on-disk owner; clear name-strings (UID/GID are canonical).
-		hdr.Uid = int(st.Uid)
-		hdr.Gid = int(st.Gid)
-		hdr.Uname = ""
-		hdr.Gname = ""
-
-		if stripTimes {
-			hdr.ModTime = time.Time{}
-			hdr.AccessTime = time.Time{}
-			hdr.ChangeTime = time.Time{}
-		}
-
-		// Detect hard links among regular files.
-		if hdr.Typeflag == tar.TypeReg && st.Nlink > 1 {
-			key := inodeKey{st.Dev, st.Ino}
-			if firstPath, seen := hardLinks[key]; seen {
-				hdr.Typeflag = tar.TypeLink
-				hdr.Linkname = firstPath
-				hdr.Size = 0
-				return tw.WriteHeader(hdr)
-			}
-			hardLinks[key] = hdr.Name
-		}
-
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-
-		// Copy file content for regular files only.
-		if hdr.Typeflag == tar.TypeReg && hdr.Size > 0 {
-			f, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			if _, err := io.Copy(tw, f); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-}
 
 // fmtBytes formats a byte count as a human-readable string (e.g. "1.2 GiB").
 func fmtBytes(n int64) string {
