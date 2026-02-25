@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -76,6 +77,12 @@ Examples:
   # Use a custom export config to exclude files
   velda instance export --config /etc/velda-export.yaml --push registry.example.com/org/repo:latest
 
+  # Exclude additional paths on the command line
+  velda instance export --exclude '/home/user/.cache/*' --exclude '*.log' --push registry.example.com/org/repo:latest
+
+  # Strip all file timestamps for a reproducible image
+  velda instance export --strip-times --push registry.example.com/org/repo:latest
+
 Export config (/.dockerexports by default) is a YAML file with the following schema:
 
   # include: merge additional config files first (local paths or HTTPS URLs)
@@ -89,7 +96,10 @@ Export config (/.dockerexports by default) is a YAML file with the following sch
   exclude:
     - /tmp/*           # absolute: only top-level /tmp
     - var/cache/*      # relative: any var/cache at any depth
-    - "*.log"          # relative: any .log file anywhere`,
+    - "*.log"          # relative: any .log file anywhere
+
+  # strip_times: set all file timestamps to epoch 0 for reproducible builds
+  strip_times: true`,
 	RunE: runExportContainer,
 }
 
@@ -104,6 +114,10 @@ func init() {
 		"Registry auth method: docker (default keychain), google (GCR/AR), manual (stdin prompt)")
 	f.String("config", "",
 		"Path to the export config YAML file (default /.dockerexports if it exists)")
+	f.StringArray("exclude", nil,
+		"Additional glob pattern to exclude from the image (may be repeated; appended after config excludes)")
+	f.Bool("strip-times", false,
+		"Set all file timestamps in the image layer to epoch 0 (overrides the config file setting)")
 }
 
 func runExportContainer(cmd *cobra.Command, args []string) error {
@@ -126,6 +140,13 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	exportCfg, err := loadExportConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("loading export config: %w", err)
+	}
+	// Merge any extra exclude patterns supplied on the command line.
+	extraExclude, _ := cmd.Flags().GetStringArray("exclude")
+	exportCfg.Exclude = append(exportCfg.Exclude, extraExclude...)
+	// --strip-times flag overrides config file when explicitly set.
+	if stripTimesFlag, _ := cmd.Flags().GetBool("strip-times"); stripTimesFlag {
+		exportCfg.StripTimes = true
 	}
 
 	// --- Auth ----------------------------------------------------------------
@@ -178,7 +199,7 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	opener := func() (io.ReadCloser, error) {
 		pr, pw := io.Pipe()
 		go func() {
-			err := buildRootTar(pw, rootDev, exportCfg.Exclude)
+			err := buildRootTar(pw, rootDev, exportCfg.Exclude, exportCfg.StripTimes)
 			pw.CloseWithError(err)
 		}()
 		return pr, nil
@@ -340,7 +361,9 @@ type inodeKey struct{ dev, ino uint64 }
 // buildRootTar walks "/" and writes a tar stream to w, skipping any directory
 // (and its subtree) that resides on a different block device than rootDev.
 // Paths matching any of the exclusion glob patterns (relative, no leading '/') are omitted.
-func buildRootTar(w io.Writer, rootDev uint64, excludePatterns []string) error {
+// When stripTimes is true all file/directory modification and access timestamps
+// are set to the Unix epoch (time.Time{}) to produce a reproducible layer.
+func buildRootTar(w io.Writer, rootDev uint64, excludePatterns []string, stripTimes bool) error {
 	tw := tar.NewWriter(w)
 	defer tw.Close()
 
@@ -382,6 +405,11 @@ func buildRootTar(w io.Writer, rootDev uint64, excludePatterns []string) error {
 						hdr.Gname = ""
 						// Size is always 0 for directories.
 						hdr.Size = 0
+						if stripTimes {
+							hdr.ModTime = time.Time{}
+							hdr.AccessTime = time.Time{}
+							hdr.ChangeTime = time.Time{}
+						}
 						_ = tw.WriteHeader(hdr)
 					}
 				}
@@ -422,6 +450,12 @@ func buildRootTar(w io.Writer, rootDev uint64, excludePatterns []string) error {
 		hdr.Gid = int(st.Gid)
 		hdr.Uname = ""
 		hdr.Gname = ""
+
+		if stripTimes {
+			hdr.ModTime = time.Time{}
+			hdr.AccessTime = time.Time{}
+			hdr.ChangeTime = time.Time{}
+		}
 
 		// Detect hard links among regular files.
 		if hdr.Typeflag == tar.TypeReg && st.Nlink > 1 {

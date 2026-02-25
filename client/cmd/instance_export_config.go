@@ -123,6 +123,10 @@ func parseExportConfigYAML(data []byte) (*pb.ExportConfig, error) {
 // fields introduced in the schema.
 func mergeExportConfig(dst, src *pb.ExportConfig) {
 	dst.Exclude = append(dst.Exclude, src.Exclude...)
+	// strip_times is OR'd: if any included config enables it, it stays enabled.
+	if src.StripTimes {
+		dst.StripTimes = true
+	}
 	// include is only used during loading; no need to propagate it.
 }
 

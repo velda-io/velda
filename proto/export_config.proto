@@ -42,4 +42,9 @@ message ExportConfig {
   // Patterns follow Go's path.Match syntax. A matched directory implicitly
   // excludes its entire subtree.
   repeated string exclude = 2;
+
+  // strip_times, when true, sets all file timestamps in the image layer to
+  // the Unix epoch (1970-01-01 00:00:00 UTC). This produces a deterministic,
+  // reproducible image layer regardless of when files were last modified.
+  bool strip_times = 3;
 }
