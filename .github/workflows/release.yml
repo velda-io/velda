@@ -180,10 +180,10 @@ jobs:
         run: packer init packer
 
       - name: Build images
-        run: exec packer build -var="version=${{ needs.build-package.outputs.version }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" -var="docker_password=${{ secrets.DOCKER_PASSWORD }}" -var="azure_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" -var-file=packer/prod.pkrvars.hcl packer
+        run: exec packer build -var="version=${{ needs.build-package.outputs.version }}" -var="gce_project_id=${{ secrets.GCP_PROJECT_ID }}" -var="docker_password=${{ secrets.DOCKER_PASSWORD }}" -var="azure_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" -var-file=packer/prod.pkrvars.hcl -only='agent.*' packer
 
       - name: Update permissions
-        run: make -C packer update_permission
+        run: make -C packer update_permission_agent
         env:
           VERSION: ${{ needs.build-package.outputs.version }}
 

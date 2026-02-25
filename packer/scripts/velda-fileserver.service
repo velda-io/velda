@@ -1,0 +1,13 @@
+[Unit]
+Description=Velda file server
+
+[Service]
+ExecStart=/usr/bin/velda fileserver -r /zpool -a :7655
+Restart=always
+RestartSec=5
+Environment="PATH=/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+Environment="HOME=/root"
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
