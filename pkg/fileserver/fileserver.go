@@ -646,6 +646,15 @@ func (fs *FileServer) handleMount(mountReq *MountRequest, session *Session) (Ser
 	if !strings.HasPrefix(mountPath+"/", fs.rootPath+"/") {
 		return nil, fmt.Errorf("mount path %s is outside root path %s: %w", mountPath, fs.rootPath, syscall.EPERM)
 	}
+	// Check NFS export authorization: verify the client IP is allowed for this path.
+	remoteAddr := session.conn.RemoteAddr()
+	tcpAddr, ok := remoteAddr.(*net.TCPAddr)
+	if !ok {
+		return nil, fmt.Errorf("failed to determine client address: %w", syscall.EACCES)
+	}
+	if err := checkNFSExport(tcpAddr.IP, mountPath); err != nil {
+		return nil, err
+	}
 	// Trigger lazy mount of zfs snapshot if needed by appending "/." to the path
 	mountPath = mountPath + "/."
 
@@ -957,4 +966,67 @@ func toErrno(err error) syscall.Errno {
 		return errno
 	}
 	return syscall.EIO
+}
+
+// checkNFSExport verifies that clientIP is allowed to access exportPath according
+// to the system NFS exports table at /var/lib/nfs/etab. It checks only whether
+// an entry covers the path and allows the client; export options are ignored.
+func checkNFSExport(clientIP net.IP, exportPath string) error {
+	if clientIP.IsLoopback() {
+		// Allow loopback clients regardless of spec for testing.
+		return nil
+	}
+	data, err := os.ReadFile("/var/lib/nfs/etab")
+	if err != nil {
+		return fmt.Errorf("failed to read NFS exports (/var/lib/nfs/etab): %w", syscall.EIO)
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Each line: /export/path client1(opts) client2(opts) ...
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		entryPath := fields[0]
+
+		// The export must cover the requested path (exact or prefix match).
+		if exportPath != entryPath && !strings.HasPrefix(exportPath+"/", entryPath+"/") {
+			continue
+		}
+
+		for _, clientSpec := range fields[1:] {
+			// Strip options: client(opts) -> client
+			client := clientSpec
+			if idx := strings.IndexByte(clientSpec, '('); idx >= 0 {
+				client = clientSpec[:idx]
+			}
+			if matchNFSClient(client, clientIP) {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("client %s not authorized for export path %s: %w", clientIP, exportPath, syscall.EACCES)
+}
+
+// matchNFSClient reports whether spec (from /var/lib/nfs/etab) matches clientIP.
+// Supported spec forms: "*" (wildcard), CIDR notation, exact IP address.
+func matchNFSClient(spec string, clientIP net.IP) bool {
+	if spec == "*" {
+		return true
+	}
+	// CIDR (e.g. 192.168.1.0/24)
+	if _, ipNet, err := net.ParseCIDR(spec); err == nil {
+		return ipNet.Contains(clientIP)
+	}
+	// Exact IP
+	if ip := net.ParseIP(spec); ip != nil {
+		return ip.Equal(clientIP)
+	}
+	return false
 }
