@@ -2498,6 +2498,54 @@ func (*AutoscalerBackend_Kubernetes) isAutoscalerBackend_Backend() {}
 
 func (*AutoscalerBackend_Command) isAutoscalerBackend_Backend() {}
 
+type LogStorage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Directory where task stdout/stderr logs are saved by the server.
+	// Logs are stored as {log_dir}/{task_id}.stdout and {task_id}.stderr.
+	// When set, the BatchPlugin streams logs here via PushLogs instead of
+	// reading them from the instance filesystem.
+	LogDir        string `protobuf:"bytes,1,opt,name=log_dir,json=logDir,proto3" json:"log_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogStorage) Reset() {
+	*x = LogStorage{}
+	mi := &file_config_config_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogStorage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogStorage) ProtoMessage() {}
+
+func (x *LogStorage) ProtoReflect() protoreflect.Message {
+	mi := &file_config_config_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogStorage.ProtoReflect.Descriptor instead.
+func (*LogStorage) Descriptor() ([]byte, []int) {
+	return file_config_config_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *LogStorage) GetLogDir() string {
+	if x != nil {
+		return x.LogDir
+	}
+	return ""
+}
+
 type Config struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	Server     *Server                `protobuf:"bytes,1,opt,name=server,proto3" json:"server,omitempty"`
@@ -2510,13 +2558,15 @@ type Config struct {
 	AllowNewPool bool `protobuf:"varint,6,opt,name=allow_new_pool,json=allowNewPool,proto3" json:"allow_new_pool,omitempty"`
 	// The default broker info to use if not set in the agent config.
 	DefaultBrokerInfo *agent.BrokerInfo `protobuf:"bytes,11,opt,name=default_broker_info,json=defaultBrokerInfo,proto3" json:"default_broker_info,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Configuration for task log storage.
+	LogStorage    *LogStorage `protobuf:"bytes,12,opt,name=log_storage,json=logStorage,proto3" json:"log_storage,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Config) Reset() {
 	*x = Config{}
-	mi := &file_config_config_proto_msgTypes[23]
+	mi := &file_config_config_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2528,7 +2578,7 @@ func (x *Config) String() string {
 func (*Config) ProtoMessage() {}
 
 func (x *Config) ProtoReflect() protoreflect.Message {
-	mi := &file_config_config_proto_msgTypes[23]
+	mi := &file_config_config_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2541,7 +2591,7 @@ func (x *Config) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Config.ProtoReflect.Descriptor instead.
 func (*Config) Descriptor() ([]byte, []int) {
-	return file_config_config_proto_rawDescGZIP(), []int{23}
+	return file_config_config_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *Config) GetServer() *Server {
@@ -2586,6 +2636,13 @@ func (x *Config) GetDefaultBrokerInfo() *agent.BrokerInfo {
 	return nil
 }
 
+func (x *Config) GetLogStorage() *LogStorage {
+	if x != nil {
+		return x.LogStorage
+	}
+	return nil
+}
+
 // ZFS storage configuration.
 type Storage_Zfs struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -2599,7 +2656,7 @@ type Storage_Zfs struct {
 
 func (x *Storage_Zfs) Reset() {
 	*x = Storage_Zfs{}
-	mi := &file_config_config_proto_msgTypes[24]
+	mi := &file_config_config_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2611,7 +2668,7 @@ func (x *Storage_Zfs) String() string {
 func (*Storage_Zfs) ProtoMessage() {}
 
 func (x *Storage_Zfs) ProtoReflect() protoreflect.Message {
-	mi := &file_config_config_proto_msgTypes[24]
+	mi := &file_config_config_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2654,7 +2711,7 @@ type Storage_Btrfs struct {
 
 func (x *Storage_Btrfs) Reset() {
 	*x = Storage_Btrfs{}
-	mi := &file_config_config_proto_msgTypes[25]
+	mi := &file_config_config_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2666,7 +2723,7 @@ func (x *Storage_Btrfs) String() string {
 func (*Storage_Btrfs) ProtoMessage() {}
 
 func (x *Storage_Btrfs) ProtoReflect() protoreflect.Message {
-	mi := &file_config_config_proto_msgTypes[25]
+	mi := &file_config_config_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2705,7 +2762,7 @@ type Storage_MiniVelda struct {
 
 func (x *Storage_MiniVelda) Reset() {
 	*x = Storage_MiniVelda{}
-	mi := &file_config_config_proto_msgTypes[26]
+	mi := &file_config_config_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2717,7 +2774,7 @@ func (x *Storage_MiniVelda) String() string {
 func (*Storage_MiniVelda) ProtoMessage() {}
 
 func (x *Storage_MiniVelda) ProtoReflect() protoreflect.Message {
-	mi := &file_config_config_proto_msgTypes[26]
+	mi := &file_config_config_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2780,7 +2837,7 @@ type AgentPool_AutoScaler struct {
 
 func (x *AgentPool_AutoScaler) Reset() {
 	*x = AgentPool_AutoScaler{}
-	mi := &file_config_config_proto_msgTypes[27]
+	mi := &file_config_config_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2792,7 +2849,7 @@ func (x *AgentPool_AutoScaler) String() string {
 func (*AgentPool_AutoScaler) ProtoMessage() {}
 
 func (x *AgentPool_AutoScaler) ProtoReflect() protoreflect.Message {
-	mi := &file_config_config_proto_msgTypes[27]
+	mi := &file_config_config_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2903,7 +2960,7 @@ type KubernetesProvisioner_GoogleKubernetesEngine struct {
 
 func (x *KubernetesProvisioner_GoogleKubernetesEngine) Reset() {
 	*x = KubernetesProvisioner_GoogleKubernetesEngine{}
-	mi := &file_config_config_proto_msgTypes[30]
+	mi := &file_config_config_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2915,7 +2972,7 @@ func (x *KubernetesProvisioner_GoogleKubernetesEngine) String() string {
 func (*KubernetesProvisioner_GoogleKubernetesEngine) ProtoMessage() {}
 
 func (x *KubernetesProvisioner_GoogleKubernetesEngine) ProtoReflect() protoreflect.Message {
-	mi := &file_config_config_proto_msgTypes[30]
+	mi := &file_config_config_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2974,7 +3031,7 @@ type NebiusAutoProvisioner_PoolDetail struct {
 
 func (x *NebiusAutoProvisioner_PoolDetail) Reset() {
 	*x = NebiusAutoProvisioner_PoolDetail{}
-	mi := &file_config_config_proto_msgTypes[32]
+	mi := &file_config_config_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2986,7 +3043,7 @@ func (x *NebiusAutoProvisioner_PoolDetail) String() string {
 func (*NebiusAutoProvisioner_PoolDetail) ProtoMessage() {}
 
 func (x *NebiusAutoProvisioner_PoolDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_config_config_proto_msgTypes[32]
+	mi := &file_config_config_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3065,7 +3122,7 @@ type MithrilAutoProvisioner_PoolDetail struct {
 
 func (x *MithrilAutoProvisioner_PoolDetail) Reset() {
 	*x = MithrilAutoProvisioner_PoolDetail{}
-	mi := &file_config_config_proto_msgTypes[36]
+	mi := &file_config_config_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3077,7 +3134,7 @@ func (x *MithrilAutoProvisioner_PoolDetail) String() string {
 func (*MithrilAutoProvisioner_PoolDetail) ProtoMessage() {}
 
 func (x *MithrilAutoProvisioner_PoolDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_config_config_proto_msgTypes[36]
+	mi := &file_config_config_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3162,7 +3219,7 @@ type DigitalOceanAutoProvisioner_PoolDetail struct {
 
 func (x *DigitalOceanAutoProvisioner_PoolDetail) Reset() {
 	*x = DigitalOceanAutoProvisioner_PoolDetail{}
-	mi := &file_config_config_proto_msgTypes[38]
+	mi := &file_config_config_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3174,7 +3231,7 @@ func (x *DigitalOceanAutoProvisioner_PoolDetail) String() string {
 func (*DigitalOceanAutoProvisioner_PoolDetail) ProtoMessage() {}
 
 func (x *DigitalOceanAutoProvisioner_PoolDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_config_config_proto_msgTypes[38]
+	mi := &file_config_config_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3897,34 +3954,40 @@ var file_config_config_proto_rawDesc = []byte{
 	0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x41, 0x75, 0x74, 0x6f, 0x73, 0x63, 0x61, 0x6c, 0x65, 0x72,
 	0x42, 0x61, 0x63, 0x6b, 0x65, 0x6e, 0x64, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x48, 0x00,
 	0x52, 0x07, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x42, 0x09, 0x0a, 0x07, 0x62, 0x61, 0x63,
-	0x6b, 0x65, 0x6e, 0x64, 0x22, 0xff, 0x02, 0x0a, 0x06, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12,
-	0x2c, 0x0a, 0x06, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32,
-	0x14, 0x2e, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x53,
-	0x65, 0x72, 0x76, 0x65, 0x72, 0x52, 0x06, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x12, 0x2f, 0x0a,
-	0x07, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x18, 0x04, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x15,
-	0x2e, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x53, 0x74,
-	0x6f, 0x72, 0x61, 0x67, 0x65, 0x52, 0x07, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x12, 0x38,
-	0x0a, 0x0b, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x5f, 0x70, 0x6f, 0x6f, 0x6c, 0x73, 0x18, 0x05, 0x20,
-	0x03, 0x28, 0x0b, 0x32, 0x17, 0x2e, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x63, 0x6f, 0x6e, 0x66,
-	0x69, 0x67, 0x2e, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x50, 0x6f, 0x6f, 0x6c, 0x52, 0x0a, 0x61, 0x67,
-	0x65, 0x6e, 0x74, 0x50, 0x6f, 0x6f, 0x6c, 0x73, 0x12, 0x3d, 0x0a, 0x0c, 0x70, 0x72, 0x6f, 0x76,
-	0x69, 0x73, 0x69, 0x6f, 0x6e, 0x65, 0x72, 0x73, 0x18, 0x09, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x19,
-	0x2e, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x50, 0x72,
-	0x6f, 0x76, 0x69, 0x73, 0x69, 0x6f, 0x6e, 0x65, 0x72, 0x52, 0x0c, 0x70, 0x72, 0x6f, 0x76, 0x69,
-	0x73, 0x69, 0x6f, 0x6e, 0x65, 0x72, 0x73, 0x12, 0x24, 0x0a, 0x0e, 0x61, 0x6c, 0x6c, 0x6f, 0x77,
-	0x5f, 0x6e, 0x65, 0x77, 0x5f, 0x70, 0x6f, 0x6f, 0x6c, 0x18, 0x06, 0x20, 0x01, 0x28, 0x08, 0x52,
-	0x0c, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x4e, 0x65, 0x77, 0x50, 0x6f, 0x6f, 0x6c, 0x12, 0x47, 0x0a,
-	0x13, 0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x5f, 0x62, 0x72, 0x6f, 0x6b, 0x65, 0x72, 0x5f,
-	0x69, 0x6e, 0x66, 0x6f, 0x18, 0x0b, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x17, 0x2e, 0x76, 0x65, 0x6c,
-	0x64, 0x61, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e, 0x42, 0x72, 0x6f, 0x6b, 0x65, 0x72, 0x49,
-	0x6e, 0x66, 0x6f, 0x52, 0x11, 0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x42, 0x72, 0x6f, 0x6b,
-	0x65, 0x72, 0x49, 0x6e, 0x66, 0x6f, 0x4a, 0x04, 0x08, 0x02, 0x10, 0x03, 0x4a, 0x04, 0x08, 0x03,
-	0x10, 0x04, 0x4a, 0x04, 0x08, 0x07, 0x10, 0x08, 0x4a, 0x04, 0x08, 0x08, 0x10, 0x09, 0x4a, 0x04,
-	0x08, 0x0a, 0x10, 0x0b, 0x4a, 0x04, 0x08, 0x32, 0x10, 0x3c, 0x4a, 0x04, 0x08, 0x3c, 0x10, 0x3d,
-	0x4a, 0x04, 0x08, 0x3d, 0x10, 0x3e, 0x42, 0x21, 0x5a, 0x1f, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e,
-	0x69, 0x6f, 0x2f, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x33,
+	0x6b, 0x65, 0x6e, 0x64, 0x22, 0x25, 0x0a, 0x0a, 0x4c, 0x6f, 0x67, 0x53, 0x74, 0x6f, 0x72, 0x61,
+	0x67, 0x65, 0x12, 0x17, 0x0a, 0x07, 0x6c, 0x6f, 0x67, 0x5f, 0x64, 0x69, 0x72, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x06, 0x6c, 0x6f, 0x67, 0x44, 0x69, 0x72, 0x22, 0xba, 0x03, 0x0a, 0x06,
+	0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12, 0x2c, 0x0a, 0x06, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x14, 0x2e, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x63,
+	0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x52, 0x06, 0x73, 0x65,
+	0x72, 0x76, 0x65, 0x72, 0x12, 0x2f, 0x0a, 0x07, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x18,
+	0x04, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x15, 0x2e, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x63, 0x6f,
+	0x6e, 0x66, 0x69, 0x67, 0x2e, 0x53, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x52, 0x07, 0x73, 0x74,
+	0x6f, 0x72, 0x61, 0x67, 0x65, 0x12, 0x38, 0x0a, 0x0b, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x5f, 0x70,
+	0x6f, 0x6f, 0x6c, 0x73, 0x18, 0x05, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x17, 0x2e, 0x76, 0x65, 0x6c,
+	0x64, 0x61, 0x2e, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x41, 0x67, 0x65, 0x6e, 0x74, 0x50,
+	0x6f, 0x6f, 0x6c, 0x52, 0x0a, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x50, 0x6f, 0x6f, 0x6c, 0x73, 0x12,
+	0x3d, 0x0a, 0x0c, 0x70, 0x72, 0x6f, 0x76, 0x69, 0x73, 0x69, 0x6f, 0x6e, 0x65, 0x72, 0x73, 0x18,
+	0x09, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x19, 0x2e, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x63, 0x6f,
+	0x6e, 0x66, 0x69, 0x67, 0x2e, 0x50, 0x72, 0x6f, 0x76, 0x69, 0x73, 0x69, 0x6f, 0x6e, 0x65, 0x72,
+	0x52, 0x0c, 0x70, 0x72, 0x6f, 0x76, 0x69, 0x73, 0x69, 0x6f, 0x6e, 0x65, 0x72, 0x73, 0x12, 0x24,
+	0x0a, 0x0e, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x5f, 0x6e, 0x65, 0x77, 0x5f, 0x70, 0x6f, 0x6f, 0x6c,
+	0x18, 0x06, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0c, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x4e, 0x65, 0x77,
+	0x50, 0x6f, 0x6f, 0x6c, 0x12, 0x47, 0x0a, 0x13, 0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x5f,
+	0x62, 0x72, 0x6f, 0x6b, 0x65, 0x72, 0x5f, 0x69, 0x6e, 0x66, 0x6f, 0x18, 0x0b, 0x20, 0x01, 0x28,
+	0x0b, 0x32, 0x17, 0x2e, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e,
+	0x42, 0x72, 0x6f, 0x6b, 0x65, 0x72, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x11, 0x64, 0x65, 0x66, 0x61,
+	0x75, 0x6c, 0x74, 0x42, 0x72, 0x6f, 0x6b, 0x65, 0x72, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x39, 0x0a,
+	0x0b, 0x6c, 0x6f, 0x67, 0x5f, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x18, 0x0c, 0x20, 0x01,
+	0x28, 0x0b, 0x32, 0x18, 0x2e, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2e, 0x63, 0x6f, 0x6e, 0x66, 0x69,
+	0x67, 0x2e, 0x4c, 0x6f, 0x67, 0x53, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x52, 0x0a, 0x6c, 0x6f,
+	0x67, 0x53, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x4a, 0x04, 0x08, 0x02, 0x10, 0x03, 0x4a, 0x04,
+	0x08, 0x03, 0x10, 0x04, 0x4a, 0x04, 0x08, 0x07, 0x10, 0x08, 0x4a, 0x04, 0x08, 0x08, 0x10, 0x09,
+	0x4a, 0x04, 0x08, 0x0a, 0x10, 0x0b, 0x4a, 0x04, 0x08, 0x32, 0x10, 0x3c, 0x4a, 0x04, 0x08, 0x3c,
+	0x10, 0x3d, 0x4a, 0x04, 0x08, 0x3d, 0x10, 0x3e, 0x42, 0x21, 0x5a, 0x1f, 0x76, 0x65, 0x6c, 0x64,
+	0x61, 0x2e, 0x69, 0x6f, 0x2f, 0x76, 0x65, 0x6c, 0x64, 0x61, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x62, 0x06, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x33,
 }
 
 var (
@@ -3940,7 +4003,7 @@ func file_config_config_proto_rawDescGZIP() []byte {
 }
 
 var file_config_config_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_config_config_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
+var file_config_config_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_config_config_proto_goTypes = []any{
 	(AgentPool_AutoScaler_Mode)(0),                       // 0: velda.config.AgentPool.AutoScaler.Mode
 	(*Server)(nil),                                       // 1: velda.config.Server
@@ -3966,36 +4029,37 @@ var file_config_config_proto_goTypes = []any{
 	(*GCSProvisioner)(nil),                               // 21: velda.config.GCSProvisioner
 	(*AzureProvisioner)(nil),                             // 22: velda.config.AzureProvisioner
 	(*AutoscalerBackend)(nil),                            // 23: velda.config.AutoscalerBackend
-	(*Config)(nil),                                       // 24: velda.config.Config
-	(*Storage_Zfs)(nil),                                  // 25: velda.config.Storage.Zfs
-	(*Storage_Btrfs)(nil),                                // 26: velda.config.Storage.Btrfs
-	(*Storage_MiniVelda)(nil),                            // 27: velda.config.Storage.MiniVelda
-	(*AgentPool_AutoScaler)(nil),                         // 28: velda.config.AgentPool.AutoScaler
-	nil,                                                  // 29: velda.config.AutoscalerBackendAWSLaunchTemplate.TagsEntry
-	nil,                                                  // 30: velda.config.AutoscalerBackendNebiusLaunchTemplate.LabelsEntry
-	(*KubernetesProvisioner_GoogleKubernetesEngine)(nil), // 31: velda.config.KubernetesProvisioner.GoogleKubernetesEngine
-	nil,                                      // 32: velda.config.NebiusAutoProvisioner.LabelsEntry
-	(*NebiusAutoProvisioner_PoolDetail)(nil), // 33: velda.config.NebiusAutoProvisioner.PoolDetail
-	nil,                                      // 34: velda.config.AutoscalerBackendMithrilSpotBid.LabelsEntry
-	nil,                                      // 35: velda.config.AutoscalerBackendDigitalOceanDroplet.LabelsEntry
-	nil,                                      // 36: velda.config.MithrilAutoProvisioner.LabelsEntry
-	(*MithrilAutoProvisioner_PoolDetail)(nil), // 37: velda.config.MithrilAutoProvisioner.PoolDetail
-	nil, // 38: velda.config.DigitalOceanAutoProvisioner.LabelsEntry
-	(*DigitalOceanAutoProvisioner_PoolDetail)(nil), // 39: velda.config.DigitalOceanAutoProvisioner.PoolDetail
-	(*agent.AgentConfig)(nil),                      // 40: velda.agent.AgentConfig
-	(*durationpb.Duration)(nil),                    // 41: google.protobuf.Duration
-	(*agent.BrokerInfo)(nil),                       // 42: velda.agent.BrokerInfo
+	(*LogStorage)(nil),                                   // 24: velda.config.LogStorage
+	(*Config)(nil),                                       // 25: velda.config.Config
+	(*Storage_Zfs)(nil),                                  // 26: velda.config.Storage.Zfs
+	(*Storage_Btrfs)(nil),                                // 27: velda.config.Storage.Btrfs
+	(*Storage_MiniVelda)(nil),                            // 28: velda.config.Storage.MiniVelda
+	(*AgentPool_AutoScaler)(nil),                         // 29: velda.config.AgentPool.AutoScaler
+	nil,                                                  // 30: velda.config.AutoscalerBackendAWSLaunchTemplate.TagsEntry
+	nil,                                                  // 31: velda.config.AutoscalerBackendNebiusLaunchTemplate.LabelsEntry
+	(*KubernetesProvisioner_GoogleKubernetesEngine)(nil), // 32: velda.config.KubernetesProvisioner.GoogleKubernetesEngine
+	nil,                                      // 33: velda.config.NebiusAutoProvisioner.LabelsEntry
+	(*NebiusAutoProvisioner_PoolDetail)(nil), // 34: velda.config.NebiusAutoProvisioner.PoolDetail
+	nil,                                      // 35: velda.config.AutoscalerBackendMithrilSpotBid.LabelsEntry
+	nil,                                      // 36: velda.config.AutoscalerBackendDigitalOceanDroplet.LabelsEntry
+	nil,                                      // 37: velda.config.MithrilAutoProvisioner.LabelsEntry
+	(*MithrilAutoProvisioner_PoolDetail)(nil), // 38: velda.config.MithrilAutoProvisioner.PoolDetail
+	nil, // 39: velda.config.DigitalOceanAutoProvisioner.LabelsEntry
+	(*DigitalOceanAutoProvisioner_PoolDetail)(nil), // 40: velda.config.DigitalOceanAutoProvisioner.PoolDetail
+	(*agent.AgentConfig)(nil),                      // 41: velda.agent.AgentConfig
+	(*durationpb.Duration)(nil),                    // 42: google.protobuf.Duration
+	(*agent.BrokerInfo)(nil),                       // 43: velda.agent.BrokerInfo
 }
 var file_config_config_proto_depIdxs = []int32{
-	25, // 0: velda.config.Storage.zfs:type_name -> velda.config.Storage.Zfs
-	27, // 1: velda.config.Storage.mini:type_name -> velda.config.Storage.MiniVelda
-	26, // 2: velda.config.Storage.btrfs:type_name -> velda.config.Storage.Btrfs
-	28, // 3: velda.config.AgentPool.auto_scaler:type_name -> velda.config.AgentPool.AutoScaler
-	40, // 4: velda.config.AutoscalerBackendAWSLaunchTemplate.agent_config:type_name -> velda.agent.AgentConfig
-	29, // 5: velda.config.AutoscalerBackendAWSLaunchTemplate.tags:type_name -> velda.config.AutoscalerBackendAWSLaunchTemplate.TagsEntry
-	41, // 6: velda.config.AutoscalerBackendAWSLaunchTemplate.max_instance_lifetime:type_name -> google.protobuf.Duration
-	40, // 7: velda.config.AutoscalerBackendNebiusLaunchTemplate.agent_config:type_name -> velda.agent.AgentConfig
-	30, // 8: velda.config.AutoscalerBackendNebiusLaunchTemplate.labels:type_name -> velda.config.AutoscalerBackendNebiusLaunchTemplate.LabelsEntry
+	26, // 0: velda.config.Storage.zfs:type_name -> velda.config.Storage.Zfs
+	28, // 1: velda.config.Storage.mini:type_name -> velda.config.Storage.MiniVelda
+	27, // 2: velda.config.Storage.btrfs:type_name -> velda.config.Storage.Btrfs
+	29, // 3: velda.config.AgentPool.auto_scaler:type_name -> velda.config.AgentPool.AutoScaler
+	41, // 4: velda.config.AutoscalerBackendAWSLaunchTemplate.agent_config:type_name -> velda.agent.AgentConfig
+	30, // 5: velda.config.AutoscalerBackendAWSLaunchTemplate.tags:type_name -> velda.config.AutoscalerBackendAWSLaunchTemplate.TagsEntry
+	42, // 6: velda.config.AutoscalerBackendAWSLaunchTemplate.max_instance_lifetime:type_name -> google.protobuf.Duration
+	41, // 7: velda.config.AutoscalerBackendNebiusLaunchTemplate.agent_config:type_name -> velda.agent.AgentConfig
+	31, // 8: velda.config.AutoscalerBackendNebiusLaunchTemplate.labels:type_name -> velda.config.AutoscalerBackendNebiusLaunchTemplate.LabelsEntry
 	4,  // 9: velda.config.AutoscalerBackendNebiusLaunchTemplate.tailscale_config:type_name -> velda.config.TailscaleConfig
 	14, // 10: velda.config.Provisioner.aws:type_name -> velda.config.AWSProvisioner
 	13, // 11: velda.config.Provisioner.kubernetes:type_name -> velda.config.KubernetesProvisioner
@@ -4005,30 +4069,30 @@ var file_config_config_proto_depIdxs = []int32{
 	19, // 15: velda.config.Provisioner.mithril_auto:type_name -> velda.config.MithrilAutoProvisioner
 	20, // 16: velda.config.Provisioner.digitalocean_auto:type_name -> velda.config.DigitalOceanAutoProvisioner
 	22, // 17: velda.config.Provisioner.azure:type_name -> velda.config.AzureProvisioner
-	31, // 18: velda.config.KubernetesProvisioner.gke:type_name -> velda.config.KubernetesProvisioner.GoogleKubernetesEngine
-	41, // 19: velda.config.AWSProvisioner.update_interval:type_name -> google.protobuf.Duration
+	32, // 18: velda.config.KubernetesProvisioner.gke:type_name -> velda.config.KubernetesProvisioner.GoogleKubernetesEngine
+	42, // 19: velda.config.AWSProvisioner.update_interval:type_name -> google.protobuf.Duration
 	7,  // 20: velda.config.AWSAutoProvisioner.template:type_name -> velda.config.AutoscalerBackendAWSLaunchTemplate
-	28, // 21: velda.config.AWSAutoProvisioner.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
-	32, // 22: velda.config.NebiusAutoProvisioner.labels:type_name -> velda.config.NebiusAutoProvisioner.LabelsEntry
-	28, // 23: velda.config.NebiusAutoProvisioner.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
-	33, // 24: velda.config.NebiusAutoProvisioner.pool_details:type_name -> velda.config.NebiusAutoProvisioner.PoolDetail
+	29, // 21: velda.config.AWSAutoProvisioner.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
+	33, // 22: velda.config.NebiusAutoProvisioner.labels:type_name -> velda.config.NebiusAutoProvisioner.LabelsEntry
+	29, // 23: velda.config.NebiusAutoProvisioner.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
+	34, // 24: velda.config.NebiusAutoProvisioner.pool_details:type_name -> velda.config.NebiusAutoProvisioner.PoolDetail
 	4,  // 25: velda.config.NebiusAutoProvisioner.tailscale_config:type_name -> velda.config.TailscaleConfig
-	40, // 26: velda.config.AutoscalerBackendMithrilSpotBid.agent_config:type_name -> velda.agent.AgentConfig
-	34, // 27: velda.config.AutoscalerBackendMithrilSpotBid.labels:type_name -> velda.config.AutoscalerBackendMithrilSpotBid.LabelsEntry
+	41, // 26: velda.config.AutoscalerBackendMithrilSpotBid.agent_config:type_name -> velda.agent.AgentConfig
+	35, // 27: velda.config.AutoscalerBackendMithrilSpotBid.labels:type_name -> velda.config.AutoscalerBackendMithrilSpotBid.LabelsEntry
 	4,  // 28: velda.config.AutoscalerBackendMithrilSpotBid.tailscale_config:type_name -> velda.config.TailscaleConfig
-	40, // 29: velda.config.AutoscalerBackendDigitalOceanDroplet.agent_config:type_name -> velda.agent.AgentConfig
-	35, // 30: velda.config.AutoscalerBackendDigitalOceanDroplet.labels:type_name -> velda.config.AutoscalerBackendDigitalOceanDroplet.LabelsEntry
+	41, // 29: velda.config.AutoscalerBackendDigitalOceanDroplet.agent_config:type_name -> velda.agent.AgentConfig
+	36, // 30: velda.config.AutoscalerBackendDigitalOceanDroplet.labels:type_name -> velda.config.AutoscalerBackendDigitalOceanDroplet.LabelsEntry
 	4,  // 31: velda.config.AutoscalerBackendDigitalOceanDroplet.tailscale_config:type_name -> velda.config.TailscaleConfig
-	36, // 32: velda.config.MithrilAutoProvisioner.labels:type_name -> velda.config.MithrilAutoProvisioner.LabelsEntry
-	28, // 33: velda.config.MithrilAutoProvisioner.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
-	37, // 34: velda.config.MithrilAutoProvisioner.pool_details:type_name -> velda.config.MithrilAutoProvisioner.PoolDetail
+	37, // 32: velda.config.MithrilAutoProvisioner.labels:type_name -> velda.config.MithrilAutoProvisioner.LabelsEntry
+	29, // 33: velda.config.MithrilAutoProvisioner.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
+	38, // 34: velda.config.MithrilAutoProvisioner.pool_details:type_name -> velda.config.MithrilAutoProvisioner.PoolDetail
 	4,  // 35: velda.config.MithrilAutoProvisioner.tailscale_config:type_name -> velda.config.TailscaleConfig
-	38, // 36: velda.config.DigitalOceanAutoProvisioner.labels:type_name -> velda.config.DigitalOceanAutoProvisioner.LabelsEntry
-	28, // 37: velda.config.DigitalOceanAutoProvisioner.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
-	39, // 38: velda.config.DigitalOceanAutoProvisioner.pool_details:type_name -> velda.config.DigitalOceanAutoProvisioner.PoolDetail
+	39, // 36: velda.config.DigitalOceanAutoProvisioner.labels:type_name -> velda.config.DigitalOceanAutoProvisioner.LabelsEntry
+	29, // 37: velda.config.DigitalOceanAutoProvisioner.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
+	40, // 38: velda.config.DigitalOceanAutoProvisioner.pool_details:type_name -> velda.config.DigitalOceanAutoProvisioner.PoolDetail
 	4,  // 39: velda.config.DigitalOceanAutoProvisioner.tailscale_config:type_name -> velda.config.TailscaleConfig
-	41, // 40: velda.config.GCSProvisioner.update_interval:type_name -> google.protobuf.Duration
-	41, // 41: velda.config.AzureProvisioner.update_interval:type_name -> google.protobuf.Duration
+	42, // 40: velda.config.GCSProvisioner.update_interval:type_name -> google.protobuf.Duration
+	42, // 41: velda.config.AzureProvisioner.update_interval:type_name -> google.protobuf.Duration
 	6,  // 42: velda.config.AutoscalerBackend.gce_instance_group:type_name -> velda.config.AutoscalerBackendGCEInstanceGroup
 	7,  // 43: velda.config.AutoscalerBackend.aws_launch_template:type_name -> velda.config.AutoscalerBackendAWSLaunchTemplate
 	8,  // 44: velda.config.AutoscalerBackend.nebius_launch_template:type_name -> velda.config.AutoscalerBackendNebiusLaunchTemplate
@@ -4041,22 +4105,23 @@ var file_config_config_proto_depIdxs = []int32{
 	2,  // 51: velda.config.Config.storage:type_name -> velda.config.Storage
 	5,  // 52: velda.config.Config.agent_pools:type_name -> velda.config.AgentPool
 	12, // 53: velda.config.Config.provisioners:type_name -> velda.config.Provisioner
-	42, // 54: velda.config.Config.default_broker_info:type_name -> velda.agent.BrokerInfo
-	23, // 55: velda.config.AgentPool.AutoScaler.backend:type_name -> velda.config.AutoscalerBackend
-	41, // 56: velda.config.AgentPool.AutoScaler.idle_decay:type_name -> google.protobuf.Duration
-	41, // 57: velda.config.AgentPool.AutoScaler.initial_delay:type_name -> google.protobuf.Duration
-	41, // 58: velda.config.AgentPool.AutoScaler.sync_loop_interval:type_name -> google.protobuf.Duration
-	41, // 59: velda.config.AgentPool.AutoScaler.kill_unknown_after:type_name -> google.protobuf.Duration
-	0,  // 60: velda.config.AgentPool.AutoScaler.mode:type_name -> velda.config.AgentPool.AutoScaler.Mode
-	3,  // 61: velda.config.AgentPool.AutoScaler.metadata:type_name -> velda.config.PoolMetadata
-	28, // 62: velda.config.NebiusAutoProvisioner.PoolDetail.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
-	28, // 63: velda.config.MithrilAutoProvisioner.PoolDetail.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
-	28, // 64: velda.config.DigitalOceanAutoProvisioner.PoolDetail.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
-	65, // [65:65] is the sub-list for method output_type
-	65, // [65:65] is the sub-list for method input_type
-	65, // [65:65] is the sub-list for extension type_name
-	65, // [65:65] is the sub-list for extension extendee
-	0,  // [0:65] is the sub-list for field type_name
+	43, // 54: velda.config.Config.default_broker_info:type_name -> velda.agent.BrokerInfo
+	24, // 55: velda.config.Config.log_storage:type_name -> velda.config.LogStorage
+	23, // 56: velda.config.AgentPool.AutoScaler.backend:type_name -> velda.config.AutoscalerBackend
+	42, // 57: velda.config.AgentPool.AutoScaler.idle_decay:type_name -> google.protobuf.Duration
+	42, // 58: velda.config.AgentPool.AutoScaler.initial_delay:type_name -> google.protobuf.Duration
+	42, // 59: velda.config.AgentPool.AutoScaler.sync_loop_interval:type_name -> google.protobuf.Duration
+	42, // 60: velda.config.AgentPool.AutoScaler.kill_unknown_after:type_name -> google.protobuf.Duration
+	0,  // 61: velda.config.AgentPool.AutoScaler.mode:type_name -> velda.config.AgentPool.AutoScaler.Mode
+	3,  // 62: velda.config.AgentPool.AutoScaler.metadata:type_name -> velda.config.PoolMetadata
+	29, // 63: velda.config.NebiusAutoProvisioner.PoolDetail.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
+	29, // 64: velda.config.MithrilAutoProvisioner.PoolDetail.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
+	29, // 65: velda.config.DigitalOceanAutoProvisioner.PoolDetail.autoscaler_config:type_name -> velda.config.AgentPool.AutoScaler
+	66, // [66:66] is the sub-list for method output_type
+	66, // [66:66] is the sub-list for method input_type
+	66, // [66:66] is the sub-list for extension type_name
+	66, // [66:66] is the sub-list for extension extendee
+	0,  // [0:66] is the sub-list for field type_name
 }
 
 func init() { file_config_config_proto_init() }
@@ -4098,7 +4163,7 @@ func file_config_config_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_config_config_proto_rawDesc,
 			NumEnums:      1,
-			NumMessages:   39,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

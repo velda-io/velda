@@ -646,6 +646,14 @@ message AutoscalerBackend {
   }
 }
 
+message LogStorage {
+  // Directory where task stdout/stderr logs are saved by the server.
+  // Logs are stored as {log_dir}/{task_id}.stdout and {task_id}.stderr.
+  // When set, the BatchPlugin streams logs here via PushLogs instead of
+  // reading them from the instance filesystem.
+  string log_dir = 1;
+}
+
 message Config {
   Server server = 1;
 
@@ -662,6 +670,9 @@ message Config {
 
   // The default broker info to use if not set in the agent config.
   velda.agent.BrokerInfo default_broker_info = 11;
+
+  // Configuration for task log storage.
+  LogStorage log_storage = 12;
 
   reserved 2, 3, 7, 8, 10;
   reserved 50 to 59;

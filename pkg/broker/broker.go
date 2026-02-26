@@ -176,7 +176,6 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 		}
 	}
 	if req.Workload != nil {
-		req.WritableDirs = append(req.WritableDirs, "/.velda_tasks")
 		// Save writable_dirs and snapshot_name to workload for root task
 		req.Workload.WritableDirs = req.WritableDirs
 		req.Workload.SnapshotName = req.SnapshotName

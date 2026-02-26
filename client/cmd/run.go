@@ -710,6 +710,9 @@ func streamTaskLogs(ctx context.Context, taskClient proto.TaskServiceClient, tas
 
 // Convert writable dirs to absolute paths and verify they are on the same mount as root.
 func sanitizeWritableDirs(dirs []string) ([]string, error) {
+	if !clientlib.IsInSession() {
+		return dirs, nil
+	}
 	if len(dirs) == 0 {
 		return dirs, nil
 	}
@@ -730,7 +733,7 @@ func sanitizeWritableDirs(dirs []string) ([]string, error) {
 		}
 		abs, err := filepath.EvalSymlinks(d)
 		if err != nil {
-			return nil, fmt.Errorf("Error evaluating symlinks for %s: %v", d, err)
+			return nil, fmt.Errorf("Error getting absolute path for %s: %v", d, err)
 		}
 		abs, err = filepath.Abs(abs)
 		if err != nil {

@@ -156,15 +156,17 @@ func testUbuntu(t *testing.T, r Runner) {
 		require.NoError(t, vrunCommand("sh", "-c", `
 mkdir -p vrun-test
 echo "original-data" > vrun-test/file.txt
+sudo mkdir -p /persisted
+sudo chown $(id -u):$(id -g) /persisted
 `))
 
-		// Run vrun with writable-dir (only /tmp is writable)
+		// Run vrun with writable-dir (only /persisted is writable)
 		// This should auto-create a snapshot and use overlay filesystem
-		output, err := vrunCommandGetOutput("vrun", "--writable-dir", "/tmp", "sh", "-c", `
+		output, err := vrunCommandGetOutput("vrun", "--writable-dir", "/persisted", "sh", "-c", `
 # Modify non-writable home directory (should not persist)
 echo "modified-data" > vrun-test/file.txt
 # Write to writable directory (should persist)
-echo "vrun-writable" > /tmp/vrun-test.txt
+echo "vrun-writable" > /persisted/vrun-test.txt
 # Verify write succeeded in session
 cat vrun-test/file.txt
 `)
@@ -176,8 +178,8 @@ cat vrun-test/file.txt
 		require.NoError(t, err)
 		assert.Equal(t, "original-data\n", output, "Non-writable directory should not persist changes")
 
-		// Verify writes to /tmp persisted
-		output, err = vrunCommandGetOutput("cat", "/tmp/vrun-test.txt")
+		// Verify writes to /persisted persisted
+		output, err = vrunCommandGetOutput("cat", "/persisted/vrun-test.txt")
 		require.NoError(t, err)
 		assert.Equal(t, "vrun-writable\n", output, "Writable directory should persist changes")
 	})
@@ -213,7 +215,7 @@ echo "modified-after-snapshot" > vrun-snapshot-test/file.txt
 `))
 
 		// Run vrun with the existing snapshot (should see original snapshot data)
-		output, err := vrunCommandGetOutput("vrun", "--snapshot", snapshotName, "--writable-dir", "/tmp", "sh", "-c", `
+		output, err := vrunCommandGetOutput("vrun", "--snapshot", snapshotName, "--writable-dir", "/dev/null", "sh", "-c", `
 cat vrun-snapshot-test/file.txt
 `)
 		require.NoError(t, err, "vrun command should succeed")

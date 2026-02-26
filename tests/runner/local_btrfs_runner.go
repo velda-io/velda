@@ -32,15 +32,15 @@ import (
 )
 
 type LocalBtrfsRunner struct {
-	btrfsRoot   string
-	mountPoint  string
-	loopDevice  string
-	sparseFile  string
-	suiteName   string
-	configDir   string
-	apiServer   *exec.Cmd
-	fileServer  *exec.Cmd
-	veldaBin    string
+	btrfsRoot  string
+	mountPoint string
+	loopDevice string
+	sparseFile string
+	suiteName  string
+	configDir  string
+	apiServer  *exec.Cmd
+	fileServer *exec.Cmd
+	veldaBin   string
 }
 
 func NewLocalBtrfsRunner() *LocalBtrfsRunner {
@@ -73,7 +73,7 @@ func (r *LocalBtrfsRunner) Setup(t *testing.T) {
 	// Cleanup: detach loop device and remove sparse file
 	t.Cleanup(func() {
 		t.Logf("Cleaning up BTRFS test environment")
-		
+
 		// Unmount the filesystem
 		if r.mountPoint != "" {
 			_ = exec.Command("sudo", "umount", r.mountPoint).Run()
@@ -154,6 +154,10 @@ storage:
   btrfs:
     root_path: "%s"
     max_disk_size_gb: 10
+
+log_storage:
+  # Use local directory log storage to avoid issues with reading logs from BTRFS volumes.
+  log_dir: "%s/logs"
 
 agent_pools:
 - name: "shell"
@@ -241,7 +245,7 @@ agent_pools:
     min_idle_agents: 0
     max_idle_agents: 0
     idle_decay: 40s
-`, r.btrfsRoot, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin)
+`, r.btrfsRoot, configDir, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin)
 
 	if err := os.WriteFile(configFile, []byte(config), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)

@@ -96,6 +96,14 @@ message CancelJobRequest {
   string job_id = 1;
 }
 
+// PushLogsRequest carries a chunk of stdout or stderr output for a batch task.
+// The agent streams these to the server so logs are saved centrally.
+message PushLogsRequest {
+  string task_id = 1;
+  LogTaskResponse.Stream stream = 2;
+  bytes data = 3;
+}
+
 service TaskService {
   rpc GetTask(GetTaskRequest) returns (Task) {
     option (google.api.http) = {
@@ -127,4 +135,11 @@ service TaskService {
   };
 
   rpc Logs(LogTaskRequest) returns (stream LogTaskResponse) {};
+}
+
+// TaskLogService is used by agents to push stdout/stderr logs to the server.
+service TaskLogService {
+  // PushLogs streams stdout/stderr chunks for a batch task to the server,
+  // which saves them to the configured log_dir.
+  rpc PushLogs(stream PushLogsRequest) returns (google.protobuf.Empty);
 }
