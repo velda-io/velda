@@ -15,7 +15,6 @@ package storage
 
 import (
 	"context"
-	"fmt"
 )
 
 type ByteStream struct {
@@ -45,25 +44,4 @@ type Storage interface {
 	ListImages(ctx context.Context) ([]string, error)
 
 	DeleteImage(ctx context.Context, imageName string) error
-
-	ReadFile(ctx context.Context, instanceId int64, path string, options *ReadFileOptions) (ByteStream, error)
-}
-
-type LocalStorageLogDb struct {
-	storage Storage
-}
-
-func NewLocalStorageLogDb(storage Storage) *LocalStorageLogDb {
-	return &LocalStorageLogDb{
-		storage: storage,
-	}
-}
-
-func (l *LocalStorageLogDb) GetTaskLogs(ctx context.Context, instanceId int64, taskId string, options *ReadFileOptions) (stdout ByteStream, stderr ByteStream, err error) {
-	stdout, err = l.storage.ReadFile(ctx, instanceId, fmt.Sprintf("/.velda_tasks/%s.stdout", taskId), options)
-	if err != nil {
-		return
-	}
-	stderr, err = l.storage.ReadFile(ctx, instanceId, fmt.Sprintf("/.velda_tasks/%s.stderr", taskId), options)
-	return
 }

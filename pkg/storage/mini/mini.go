@@ -21,8 +21,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
-
-	"velda.io/velda/pkg/storage"
 )
 
 type MiniStorage struct {
@@ -345,10 +343,6 @@ func (z *MiniStorage) ListImages(ctx context.Context) ([]string, error) {
 	}
 
 	return images, nil
-}
-
-func (z *MiniStorage) ReadFile(ctx context.Context, instanceId int64, path string, options *storage.ReadFileOptions) (storage.ByteStream, error) {
-	return storage.FileToByteStream(ctx, filepath.Join(z.GetRoot(instanceId), path), options)
 }
 
 func (z *MiniStorage) GetRoot(instanceId int64) string {

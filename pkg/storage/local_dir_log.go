@@ -25,7 +25,7 @@ import (
 )
 
 // LocalDirLogDb reads task logs from a local directory instead of from a remote
-// instance. Logs are expected to be at {logDir}/{taskId}.stdout and .stderr.
+// instance. Logs are expected to be at {logDir}/{taskId}/stdout and stderr.
 // This is used when the server has log_dir configured and the agent streams logs
 // via the PushLogs RPC.
 type LocalDirLogDb struct {
@@ -37,8 +37,8 @@ func NewLocalDirLogDb(logDir string) *LocalDirLogDb {
 }
 
 func (l *LocalDirLogDb) GetTaskLogs(ctx context.Context, instanceId int64, taskId string, options *ReadFileOptions) (stdout ByteStream, stderr ByteStream, err error) {
-	stdout = readLocalFile(ctx, filepath.Join(l.logDir, taskId+".stdout"), options.Follow)
-	stderr = readLocalFile(ctx, filepath.Join(l.logDir, taskId+".stderr"), options.Follow)
+	stdout = readLocalFile(ctx, filepath.Join(l.logDir, taskId, "stdout"), options.Follow)
+	stderr = readLocalFile(ctx, filepath.Join(l.logDir, taskId, "stderr"), options.Follow)
 	return
 }
 
