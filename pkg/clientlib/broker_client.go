@@ -115,6 +115,7 @@ func GetApiConnection() (*grpc.ClientConn, error) {
 			grpc.WithUnaryInterceptor(GetAuthInterceptor()),
 			grpc.WithStreamInterceptor(GetStreamAuthInterceptor()),
 			grpc.WithDefaultServiceConfig(serviceConfig),
+			grpc.WithUserAgent(getClientUserAgent()),
 		)
 		if connErr != nil {
 			return
