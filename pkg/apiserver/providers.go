@@ -222,10 +222,7 @@ func ProvideLocalDiskStorage(s storage.Storage) broker.LocalDiskProvider {
 }
 
 func ProvideTaskLogDb(config *configpb.Config, s storage.Storage) tasks.TaskLogDb {
-	if config.GetLogStorage().GetLogDir() != "" {
-		return storage.NewLocalDirLogDb(config.GetLogStorage().GetLogDir())
-	}
-	return storage.NewLocalStorageLogDb(s)
+	return storage.NewLocalDirLogDb(config.GetLogStorage().GetLogDir())
 }
 
 func ProvideStorageManager(s storage.Storage) broker.StorageManager {

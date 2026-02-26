@@ -22,8 +22,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"velda.io/velda/pkg/storage"
 )
 
 type Zfs struct {
@@ -296,10 +294,6 @@ func (z *Zfs) ListImages(ctx context.Context) ([]string, error) {
 		images = append(images, entry.Name())
 	}
 	return images, nil
-}
-
-func (z *Zfs) ReadFile(ctx context.Context, instanceId int64, path string, options *storage.ReadFileOptions) (storage.ByteStream, error) {
-	return storage.FileToByteStream(ctx, fmt.Sprintf("/%s/%d/%s", z.pool, instanceId, path), options)
 }
 
 func (z *Zfs) runCommandGetOutput(ctx context.Context, command ...string) (string, error) {

@@ -63,16 +63,16 @@ func (s *TaskLogServiceServer) PushLogs(stream proto.TaskLogService_PushLogsServ
 		if f, ok := files[streamType]; ok {
 			return f, nil
 		}
-		var ext string
+		var name string
 		switch streamType {
 		case proto.LogTaskResponse_STREAM_STDOUT:
-			ext = ".stdout"
+			name = "stdout"
 		case proto.LogTaskResponse_STREAM_STDERR:
-			ext = ".stderr"
+			name = "stderr"
 		default:
 			return nil, fmt.Errorf("unknown stream type %v", streamType)
 		}
-		path := filepath.Join(s.logDir, taskId+ext)
+		path := filepath.Join(s.logDir, taskId, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return nil, fmt.Errorf("create log dir: %w", err)
 		}

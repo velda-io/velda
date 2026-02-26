@@ -22,8 +22,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"velda.io/velda/pkg/storage"
 )
 
 type Btrfs struct {
@@ -349,10 +347,6 @@ func (b *Btrfs) ListImages(ctx context.Context) ([]string, error) {
 		}
 	}
 	return images, nil
-}
-
-func (b *Btrfs) ReadFile(ctx context.Context, instanceId int64, path string, options *storage.ReadFileOptions) (storage.ByteStream, error) {
-	return storage.FileToByteStream(ctx, fmt.Sprintf("%s/%d/current/%s", b.rootPath, instanceId, path), options)
 }
 
 func (b *Btrfs) GetRoot(instanceId int64) string {
