@@ -165,6 +165,7 @@ func killWithCgroup() error {
 	if err != nil {
 		return fmt.Errorf("failed to get current cgroup path: %w", err)
 	}
+	cgPath = strings.TrimSuffix(cgPath, "/sandbox")
 	cgKillPath := fmt.Sprintf("%s/workload/cgroup.kill", cgPath)
 	err = os.WriteFile(cgKillPath, []byte("1"), 0644)
 	if err != nil {

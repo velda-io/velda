@@ -393,15 +393,17 @@ vbatch -P zero_max ./cancel_before_sched.sh
 # Create a test file in a non-writable location
 mkdir -p testdata
 echo "original" > testdata/file.txt
+mkdir -p testdata-writable
+echo "original" > testdata-writable/file.txt
 `))
 
-		// Run a job with snapshot and writable dir (only /tmp is writable)
-		jobId, err := runBatchJob("--writable-dir", "/tmp",
+		// Run a job with snapshot and writable dir (only /home/user/testdata-writable is writable)
+		jobId, err := runBatchJob("--writable-dir", "/home/user/testdata-writable",
 			"sh", "-c", `
 # Try to modify the non-writable directory
 echo "should-not-exist-data" > testdata/file.txt
 # Write to writable directory
-echo "writable-data" > /tmp/writable.txt
+echo "writable-data" > testdata-writable/writable.txt
 `)
 		require.NoError(t, err, "Failed to start job")
 		jobId = strings.TrimSpace(jobId)
@@ -417,8 +419,8 @@ echo "writable-data" > /tmp/writable.txt
 		require.NoError(t, err)
 		assert.Equal(t, "original\n", output, "Non-writable directory should not persist changes")
 
-		// Verify writes to /tmp are visible (since it's writable)
-		output, err = runCommandGetOutput("cat", "/tmp/writable.txt")
+		// Verify writes to writable directory are visible
+		output, err = runCommandGetOutput("cat", "testdata-writable/writable.txt")
 		require.NoError(t, err)
 		assert.Equal(t, "writable-data\n", output, "Writable directory should persist changes")
 	})

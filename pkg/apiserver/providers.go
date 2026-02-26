@@ -221,7 +221,10 @@ func ProvideLocalDiskStorage(s storage.Storage) broker.LocalDiskProvider {
 	return s.(broker.LocalDiskProvider)
 }
 
-func ProvideTaskLogDb(s storage.Storage) tasks.TaskLogDb {
+func ProvideTaskLogDb(config *configpb.Config, s storage.Storage) tasks.TaskLogDb {
+	if config.GetLogStorage().GetLogDir() != "" {
+		return storage.NewLocalDirLogDb(config.GetLogStorage().GetLogDir())
+	}
 	return storage.NewLocalStorageLogDb(s)
 }
 
@@ -237,6 +240,12 @@ func ProvideBrokerServer(grpcServer *grpc.Server, mux *runtime.ServeMux, schedul
 	s := broker.NewBrokerServer(schedulers, sessions, permissions, taskTracker, auth, taskdb, storage)
 	proto.RegisterBrokerServiceServer(grpcServer, s)
 	proto.RegisterBrokerServiceHandlerServer(context.Background(), mux, s)
+	return s
+}
+
+func ProvideTaskLogService(grpcServer *grpc.Server, config *configpb.Config) proto.TaskLogServiceServer {
+	s := tasks.NewTaskLogServiceServer(config.GetLogStorage().GetLogDir())
+	proto.RegisterTaskLogServiceServer(grpcServer, s)
 	return s
 }
 

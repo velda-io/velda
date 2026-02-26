@@ -66,10 +66,11 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	brokerAuth := NewBrokerAuth(nfsExportAuth)
 	storageManager := ProvideStorageManager(storage)
 	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, brokerAuth, apiserverDatabase, storageManager)
-	taskLogDb := ProvideTaskLogDb(storage)
+	taskLogDb := ProvideTaskLogDb(config, storage)
 	taskServiceServer := ProvideTaskService(context, server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
 	poolManagerServiceServer := ProvidePoolService(server, runtimeServeMux, schedulerSet)
 	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storage, permissions)
+	taskLogServiceServer := ProvideTaskLogService(server, config)
 	registry := _wireRegistryValue
 	metricRegistryRunner := ProvideMetrics(registry, serverMetrics)
 	grpcRunner, err := ProvideGrpcRunner(serviceCtx, config, server)
@@ -82,7 +83,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	}
 	readyFd := ProvideReadyFd(flag)
 	readySignalRunner := ProvideReadySignal(readyFd)
-	v := ProvideRunners(brokerServiceServer, taskServiceServer, poolManagerServiceServer, instanceServiceServer, metricRegistryRunner, provisionRunner, grpcRunner, httpRunner, readySignalRunner)
+	v := ProvideRunners(brokerServiceServer, taskServiceServer, poolManagerServiceServer, instanceServiceServer, taskLogServiceServer, metricRegistryRunner, provisionRunner, grpcRunner, httpRunner, readySignalRunner)
 	completionError := ProvideCompletionSignal(v, serviceCtx)
 	return completionError, nil
 }
@@ -101,6 +102,7 @@ func ProvideRunners(
 	_ proto.TaskServiceServer,
 	_ proto.PoolManagerServiceServer,
 	_ proto.InstanceServiceServer,
+	_ proto.TaskLogServiceServer,
 	metrics MetricRegistryRunner,
 	provisioners ProvisionRunner,
 	grpcRunner GrpcRunner,

@@ -108,6 +108,10 @@ storage:
     pool: "%s"
     max_disk_size_gb: 10
 
+log_storage:
+  # Use local directory log storage to avoid issues with reading logs from ZFS volumes.
+  log_dir: "%s/logs"
+
 agent_pools:
 - name: "shell"
   auto_scaler:
@@ -194,7 +198,7 @@ agent_pools:
     min_idle_agents: 0
     max_idle_agents: 0
     idle_decay: 40s
-`, suiteName, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin)
+`, suiteName, configDir, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin, configDir, veldaBin)
 
 	if err := os.WriteFile(configFile, []byte(config), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)

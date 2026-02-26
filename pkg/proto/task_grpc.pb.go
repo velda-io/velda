@@ -331,3 +331,106 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "task.proto",
 }
+
+const (
+	TaskLogService_PushLogs_FullMethodName = "/velda.TaskLogService/PushLogs"
+)
+
+// TaskLogServiceClient is the client API for TaskLogService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// TaskLogService is used by agents to push stdout/stderr logs to the server.
+type TaskLogServiceClient interface {
+	// PushLogs streams stdout/stderr chunks for a batch task to the server,
+	// which saves them to the configured log_dir.
+	PushLogs(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[PushLogsRequest, emptypb.Empty], error)
+}
+
+type taskLogServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewTaskLogServiceClient(cc grpc.ClientConnInterface) TaskLogServiceClient {
+	return &taskLogServiceClient{cc}
+}
+
+func (c *taskLogServiceClient) PushLogs(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[PushLogsRequest, emptypb.Empty], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &TaskLogService_ServiceDesc.Streams[0], TaskLogService_PushLogs_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PushLogsRequest, emptypb.Empty]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskLogService_PushLogsClient = grpc.ClientStreamingClient[PushLogsRequest, emptypb.Empty]
+
+// TaskLogServiceServer is the server API for TaskLogService service.
+// All implementations must embed UnimplementedTaskLogServiceServer
+// for forward compatibility.
+//
+// TaskLogService is used by agents to push stdout/stderr logs to the server.
+type TaskLogServiceServer interface {
+	// PushLogs streams stdout/stderr chunks for a batch task to the server,
+	// which saves them to the configured log_dir.
+	PushLogs(grpc.ClientStreamingServer[PushLogsRequest, emptypb.Empty]) error
+	mustEmbedUnimplementedTaskLogServiceServer()
+}
+
+// UnimplementedTaskLogServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedTaskLogServiceServer struct{}
+
+func (UnimplementedTaskLogServiceServer) PushLogs(grpc.ClientStreamingServer[PushLogsRequest, emptypb.Empty]) error {
+	return status.Errorf(codes.Unimplemented, "method PushLogs not implemented")
+}
+func (UnimplementedTaskLogServiceServer) mustEmbedUnimplementedTaskLogServiceServer() {}
+func (UnimplementedTaskLogServiceServer) testEmbeddedByValue()                        {}
+
+// UnsafeTaskLogServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TaskLogServiceServer will
+// result in compilation errors.
+type UnsafeTaskLogServiceServer interface {
+	mustEmbedUnimplementedTaskLogServiceServer()
+}
+
+func RegisterTaskLogServiceServer(s grpc.ServiceRegistrar, srv TaskLogServiceServer) {
+	// If the following call pancis, it indicates UnimplementedTaskLogServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&TaskLogService_ServiceDesc, srv)
+}
+
+func _TaskLogService_PushLogs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(TaskLogServiceServer).PushLogs(&grpc.GenericServerStream[PushLogsRequest, emptypb.Empty]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type TaskLogService_PushLogsServer = grpc.ClientStreamingServer[PushLogsRequest, emptypb.Empty]
+
+// TaskLogService_ServiceDesc is the grpc.ServiceDesc for TaskLogService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var TaskLogService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "velda.TaskLogService",
+	HandlerType: (*TaskLogServiceServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "PushLogs",
+			Handler:       _TaskLogService_PushLogs_Handler,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "task.proto",
+}
