@@ -69,8 +69,8 @@ func ProvideRunPid1Plugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig,
 	return NewRunPid1Plugin(string(workDir), sandboxConfig, agentDaemonPlugin, requestPlugin)
 }
 
-func ProvideCommandModifier(nvidiaPlugin *DevicesPlugin) CommandModifier {
-	if nvidiaPlugin.HasNvidiaGpu() {
+func ProvideCommandModifier() CommandModifier {
+	if HasNvidiaGpu() {
 		return gpuModifier("/var/nvidia/lib", "/var/nvidia/bin")
 	}
 	return nil
@@ -109,4 +109,9 @@ func ProvideCompletionWaiterPlugin(completionSignalPlugin *CompletionSignalPlugi
 	completionWaiter := completionSignalPlugin.GetWaiterPlugin()
 	completionWaiter.MaxTime = time.Duration(maxSessionTime)
 	return completionWaiter
+}
+
+// ProvideNonPrivSandboxFsPlugin provides the filesystem plugin for non-privileged containers.
+func ProvideNonPrivSandboxFsPlugin(sandboxConfig *agentpb.SandboxConfig, requestPlugin *SessionRequestPlugin) *NonPrivSandboxFsPlugin {
+	return NewNonPrivSandboxFsPlugin(sandboxConfig, requestPlugin)
 }

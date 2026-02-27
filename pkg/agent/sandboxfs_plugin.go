@@ -122,3 +122,40 @@ func (r *SandboxFsPlugin) initAgentDir(session *proto.SessionRequest, sessionDir
 	}
 	return nil
 }
+
+// NonPrivSandboxFsPlugin is used in non-privileged containers where the container
+// runtime has already set up the filesystem.  It writes the velda config directly
+// to /run/velda (accessible in the container) and skips all mount operations.
+type NonPrivSandboxFsPlugin struct {
+	PluginBase
+	SandboxConfig *agentpb.SandboxConfig
+	requestPlugin interface{}
+}
+
+func NewNonPrivSandboxFsPlugin(sandboxConfig *agentpb.SandboxConfig, requestPlugin interface{}) *NonPrivSandboxFsPlugin {
+	return &NonPrivSandboxFsPlugin{
+		SandboxConfig: sandboxConfig,
+		requestPlugin: requestPlugin,
+	}
+}
+
+func (p *NonPrivSandboxFsPlugin) Run(ctx context.Context) (err error) {
+	session := ctx.Value(p.requestPlugin).(*proto.SessionRequest)
+
+	// Write velda config directly to /run/velda so the pid1 process can read it
+	// without a bind mount.
+	if mkErr := os.MkdirAll("/run/velda", 0755); mkErr != nil {
+		return fmt.Errorf("MkdirAll /run/velda: %w", mkErr)
+	}
+	configData := clientlib.GenerateAgentConfig(session.InstanceId, session.SessionId, session.TaskId)
+	configFile, err := os.Create("/run/velda/velda.yaml")
+	if err != nil {
+		return fmt.Errorf("Create /run/velda/velda.yaml: %w", err)
+	}
+	defer configFile.Close()
+	if err := utils.PrintProtoYaml(configData, configFile); err != nil {
+		return fmt.Errorf("Write /run/velda/velda.yaml: %w", err)
+	}
+
+	return p.RunNext(ctx)
+}

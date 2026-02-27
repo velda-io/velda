@@ -38,8 +38,7 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	waiterPlugin := agent2.ProvideWaiterPlugin()
 	completionSignalPlugin := agent2.ProvideCompletionSignalPlugin()
 	agentName := agent2.ProvideAgentName(cmd)
-	devicesPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
-	commandModifier := agent2.ProvideCommandModifier(devicesPlugin)
+	commandModifier := agent2.ProvideCommandModifier()
 	sshdPlugin := agent2.ProvideSshdPlugin(agentName, authPluginType, waiterPlugin, sessionRequestPlugin, completionSignalPlugin, commandModifier)
 	reportStatusPlugin := agent2.ProvideReportStatusPlugin(sshdPlugin)
 	batchPlugin := agent2.ProvideBatchPlugin(waiterPlugin, sessionRequestPlugin, completionSignalPlugin, commandModifier)
@@ -47,6 +46,26 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	completionWaitPlugin := agent2.ProvideCompletionWaiterPlugin(completionSignalPlugin, maxSessionTime)
 	pid1Runner := providePid1Runner(sessionRequestPlugin, autoFsDaemonPlugin, authPluginType, pivotRootPlugin, waiterPlugin, completionSignalPlugin, sshdPlugin, reportStatusPlugin, batchPlugin, completionWaitPlugin)
 	return pid1Runner
+}
+
+// NewNonPrivRunner creates a runner for non-privileged containers.
+// It skips filesystem mounting and namespace setup, assuming the container runtime
+// has already configured the filesystem.
+func NewNonPrivRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent.SandboxConfig) NonPrivRunner {
+	sessionRequestPlugin := agent2.ProvideRequestPlugin()
+	nonPrivSandboxFsPlugin := agent2.ProvideNonPrivSandboxFsPlugin(sandboxConfig, sessionRequestPlugin)
+	authPluginType := agent2.ProvideAuthPlugin(cmd, sessionRequestPlugin)
+	waiterPlugin := agent2.ProvideWaiterPlugin()
+	completionSignalPlugin := agent2.ProvideCompletionSignalPlugin()
+	agentName := agent2.ProvideAgentName(cmd)
+	commandModifier := agent2.ProvideCommandModifier()
+	sshdPlugin := agent2.ProvideSshdPlugin(agentName, authPluginType, waiterPlugin, sessionRequestPlugin, completionSignalPlugin, commandModifier)
+	reportStatusPlugin := agent2.ProvideReportStatusPlugin(sshdPlugin)
+	batchPlugin := agent2.ProvideBatchPlugin(waiterPlugin, sessionRequestPlugin, completionSignalPlugin, commandModifier)
+	maxSessionTime := agent2.ProvideMaxSessionTime(cmd)
+	completionWaitPlugin := agent2.ProvideCompletionWaiterPlugin(completionSignalPlugin, maxSessionTime)
+	nonPrivRunner := provideNonPrivRunner(sessionRequestPlugin, nonPrivSandboxFsPlugin, authPluginType, waiterPlugin, completionSignalPlugin, sshdPlugin, reportStatusPlugin, batchPlugin, completionWaitPlugin)
+	return nonPrivRunner
 }
 
 // wire.go:
@@ -72,6 +91,22 @@ func providePid1Runner(requestPlugin *agent2.SessionRequestPlugin, autofsDaemon 
 		autofsDaemon,
 		pivotRootPlugin,
 		autofsDaemon.GetMountPlugin(),
+		authPlugin,
+		waiterPlugin,
+		completionSignalPlugin,
+		sshdPlugin,
+		batchPlugin,
+		statusPlugin,
+		completionWaiter,
+	)
+}
+
+type NonPrivRunner agent2.AbstractPlugin
+
+func provideNonPrivRunner(requestPlugin *agent2.SessionRequestPlugin, sandboxFsPlugin *agent2.NonPrivSandboxFsPlugin, authPlugin agent2.AuthPluginType, waiterPlugin *agent2.WaiterPlugin, completionSignalPlugin *agent2.CompletionSignalPlugin, sshdPlugin *agent2.SshdPlugin, statusPlugin *agent2.ReportStatusPlugin, batchPlugin *agent2.BatchPlugin, completionWaiter *agent2.CompletionWaitPlugin) NonPrivRunner {
+	return agent2.NewPluginRunner(
+		requestPlugin,
+		sandboxFsPlugin,
 		authPlugin,
 		waiterPlugin,
 		completionSignalPlugin,

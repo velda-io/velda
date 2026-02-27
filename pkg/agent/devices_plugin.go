@@ -163,8 +163,7 @@ func (p *DevicesPlugin) Run(ctx context.Context) error {
 	return p.RunNext(ctx)
 }
 
-func (p *DevicesPlugin) HasNvidiaGpu() bool {
+func HasNvidiaGpu() bool {
 	_, ctlErr := os.Stat("/dev/nvidiactl")
-	_, devErr := os.Stat("/var/nvidia")
-	return ctlErr == nil && devErr == nil
+	return ctlErr == nil
 }
