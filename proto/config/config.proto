@@ -233,6 +233,29 @@ message AutoscalerBackendNebiusLaunchTemplate {
 
   // Tailscale configuration for the instance
   TailscaleConfig tailscale_config = 15;
+
+  // Boot disk type (enum). Default: SSD.
+  NebiusBootDiskType boot_disk_type = 16;
+
+  // Shared filesystems to attach and mount on the instance.
+  repeated NebiusFilesystem filesystems = 17;
+}
+
+// Nebius boot disk type enum.
+enum NebiusBootDiskType {
+  NEBIUS_BOOT_DISK_TYPE_UNSPECIFIED = 0;
+  SSD = 1;
+  SSD_NRD = 2;
+  SSD_IO = 3;
+}
+
+// A Nebius shared filesystem to attach to an instance.
+message NebiusFilesystem {
+  // The ID of the existing shared filesystem resource.
+  string filesystem_id = 1;
+
+  // The path where the filesystem should be mounted inside the instance.
+  string mount_path = 2;
 }
 
 message AutoscalerBackendAzureVMSS {
@@ -384,6 +407,13 @@ message NebiusAutoProvisioner {
 
   // Tailscale configuration for all instances
   TailscaleConfig tailscale_config = 11;
+
+  // Boot disk type. One of: SSD, SSD_NRD, SSD_IO
+  // Default: SSD (NETWORK_SSD)
+  NebiusBootDiskType boot_disk_type = 12;
+
+  // Shared filesystems to attach and mount on all instances.
+  repeated NebiusFilesystem filesystems = 13;
 }
 
 message AutoscalerBackendMithrilSpotBid {
