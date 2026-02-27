@@ -70,6 +70,18 @@ func NewNebiusPoolBackend(cfg *proto.AutoscalerBackendNebiusLaunchTemplate, sdk 
 	return backends.MakeAsync(backend)
 }
 
+// diskTypeFromProto converts the proto NebiusBootDiskType to the Nebius SDK DiskSpec_DiskType enum.
+func diskTypeFromProto(bt proto.NebiusBootDiskType) compute.DiskSpec_DiskType {
+	switch bt {
+	case proto.NebiusBootDiskType_SSD_NRD:
+		return compute.DiskSpec_NETWORK_SSD_NON_REPLICATED
+	case proto.NebiusBootDiskType_SSD_IO:
+		return compute.DiskSpec_NETWORK_SSD_IO_M3
+	default:
+		return compute.DiskSpec_NETWORK_SSD
+	}
+}
+
 // GenerateWorkerName implements SyncBackend interface
 func (n *nebiusPoolBackend) GenerateWorkerName() string {
 	return fmt.Sprintf("%s-%s", n.cfg.InstanceNamePrefix, utils.RandString(5))
@@ -137,18 +149,28 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		runcmds = append(runcmds, tailscaleUpCmd)
 	}
 
+	// Add shared filesystem mount commands
+	bootcmds := []string{
+		"mkdir -p /run/velda",
+		fmt.Sprintf("cat << EOF > /run/velda/velda.yaml\n%s\nEOF", agentConfig),
+		"nvidia-smi",
+	}
+	for _, fs := range n.cfg.GetFilesystems() {
+		if fs.GetFilesystemId() == "" || fs.GetMountPath() == "" {
+			continue
+		}
+		bootcmds = append(bootcmds, fmt.Sprintf("mkdir -p %s", fs.GetMountPath()))
+		runcmds = append(runcmds, fmt.Sprintf("mount -t virtiofs %s %s", fs.GetFilesystemId(), fs.GetMountPath()))
+	}
+
 	runcmds = append(runcmds,
 		"curl -fsSL https://releases.velda.io/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh",
 		fmt.Sprintf("[ \"$(/bin/velda version || true)\" != \"%s\" ] && curl -fsSL https://releases.velda.io/velda-%s-linux-amd64 -o /tmp/velda && chmod +x /tmp/velda && mv /tmp/velda /bin/velda || true", version, version),
 		"[ ! -e /usr/lib/systemd/system/velda-agent.service ] && curl -fsSL https://releases.velda.io/velda-agent.service -o /usr/lib/systemd/system/velda-agent.service && systemctl daemon-reload && systemctl enable velda-agent.service && systemctl start velda-agent.service",
 	)
 	cloudInitConfig := map[string]interface{}{
-		"bootcmd": []string{
-			"mkdir -p /run/velda",
-			fmt.Sprintf("cat << EOF > /run/velda/velda.yaml\n%s\nEOF", agentConfig),
-			"nvidia-smi",
-		},
-		"runcmd": runcmds,
+		"bootcmd": bootcmds,
+		"runcmd":  runcmds,
 	}
 	if n.cfg.GetAdminSshKey() != "" {
 		cloudInitConfig["users"] = []map[string]interface{}{
@@ -197,7 +219,7 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 			Spec: &compute.DiskSpec{
 				Size:           &compute.DiskSpec_SizeGibibytes{SizeGibibytes: diskSizeGb},
 				BlockSizeBytes: 4096,
-				Type:           compute.DiskSpec_NETWORK_SSD,
+				Type:           diskTypeFromProto(n.cfg.GetBootDiskType()),
 				Source: &compute.DiskSpec_SourceImageFamily{
 					SourceImageFamily: &compute.SourceImageFamily{
 						ImageFamily: "ubuntu24.04-cuda12",
@@ -223,6 +245,22 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		networkSpec.PublicIpAddress = &compute.PublicIPAddress{}
 	}
 
+	// Build attached filesystem specs
+	var attachedFilesystems []*compute.AttachedFilesystemSpec
+	for _, fs := range n.cfg.GetFilesystems() {
+		if fs.GetFilesystemId() == "" {
+			continue
+		}
+		attachedFilesystems = append(attachedFilesystems, &compute.AttachedFilesystemSpec{
+			AttachMode: compute.AttachedFilesystemSpec_READ_WRITE,
+			Type: &compute.AttachedFilesystemSpec_ExistingFilesystem{
+				ExistingFilesystem: &compute.ExistingFilesystem{
+					Id: fs.GetFilesystemId(),
+				},
+			},
+		})
+	}
+
 	instanceSpec := &compute.InstanceSpec{
 		Resources: &compute.ResourcesSpec{
 			Platform: n.cfg.GetPlatform(),
@@ -239,6 +277,7 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 				},
 			},
 		},
+		Filesystems:       attachedFilesystems,
 		CloudInitUserData: userData,
 		Hostname:          name,
 	}

@@ -61,11 +61,13 @@ func (p *NebiusAutoPoolProvisioner) run(ctx context.Context) error {
 			ResourcePreset:       detail.ResourcePreset,
 			SubnetId:             p.cfg.SubnetId,
 			BootDiskSizeGb:       p.cfg.BootDiskSizeGb,
+			BootDiskType:         p.cfg.BootDiskType,
 			Preemptible:          detail.Preemptible,
 			UsePublicIp:          p.cfg.UsePublicIp,
 			AdminSshKey:          p.cfg.AdminSshKey,
 			AgentVersionOverride: p.cfg.AgentVersionOverride,
 			MaxDiskPoolSize:      p.cfg.MaxDiskPoolSize,
+			Filesystems:          p.cfg.Filesystems,
 			AgentConfig:          &agentpb.AgentConfig{},
 		}
 
