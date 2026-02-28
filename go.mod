@@ -39,11 +39,12 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.9
 	github.com/stretchr/testify v1.11.1
+	github.com/vbauerster/mpb/v8 v8.12.0
 	github.com/vishvananda/netlink v1.3.0
 	github.com/vishvananda/netns v0.0.4
 	golang.org/x/crypto v0.44.0
 	golang.org/x/oauth2 v0.33.0
-	golang.org/x/sys v0.38.0
+	golang.org/x/sys v0.41.0
 	golang.org/x/term v0.37.0
 	google.golang.org/api v0.214.0
 	google.golang.org/grpc v1.74.2
@@ -54,6 +55,7 @@ require (
 	k8s.io/client-go v0.31.3
 	kernel.org/pub/linux/libs/security/libcap/cap v1.2.77
 	modernc.org/sqlite v1.34.2
+	sigs.k8s.io/yaml v1.4.0
 	velda.io/velda/pkg/agent_runner v0.0.0
 	velda.io/velda/pkg/proto v0.0.0
 )
@@ -72,6 +74,8 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.27.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.48.1 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.48.1 // indirect
+	github.com/VividCortex/ewma v1.2.0 // indirect
+	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.4 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.3 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.3 // indirect
@@ -83,6 +87,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20250501225837-2ac532fd4443 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.18.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -122,6 +127,7 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/mattn/go-runewidth v0.0.20 // indirect
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/socket v0.5.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
@@ -181,7 +187,6 @@ require (
 	modernc.org/token v1.1.0 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
-	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
 replace velda.io/velda/pkg/proto => ./pkg/proto
