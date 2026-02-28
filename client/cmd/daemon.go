@@ -54,6 +54,15 @@ var daemonCmd = &cobra.Command{
 		if daemonConfig.MaxSessions <= 0 {
 			daemonConfig.MaxSessions = 1
 		}
+		var ag *agentd.Agent
+		if agentPool == "" {
+			agentPool = clientlib.GetAgentConfig().GetPool()
+		}
+		if agentPool == "" {
+			return errors.New("agent pool is not specified")
+		}
+
+		nonPriv, _ := cmd.Flags().GetBool("non-privileged")
 		workDir := daemonConfig.GetWorkDirPath()
 		if workDir == "" {
 			workDir = "/tmp/agent"
@@ -65,14 +74,14 @@ var daemonCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		runner := agentd.NewRunner(workDir, networkDaemon)
-		if agentPool == "" {
-			agentPool = clientlib.GetAgentConfig().GetPool()
+		if nonPriv {
+			cmd.PrintErrln("Running in non-privileged mode")
+			runner := agentd.NewNonPrivRunner(workDir, networkDaemon)
+			ag = agentd.NewAgent(brokerClient, runner, agentPool, daemonConfig)
+		} else {
+			runner := agentd.NewRunner(workDir, networkDaemon)
+			ag = agentd.NewAgent(brokerClient, runner, agentPool, daemonConfig)
 		}
-		if agentPool == "" {
-			return errors.New("agent pool is not specified")
-		}
-		ag := agentd.NewAgent(brokerClient, runner, agentPool, daemonConfig)
 
 		// Wait until SIGTERM
 		go func() {
@@ -97,4 +106,5 @@ var daemonCmd = &cobra.Command{
 func init() {
 	AgentCmd.AddCommand(daemonCmd)
 	daemonCmd.Flags().StringVarP(&agentPool, "pool", "p", "", "Agent pool")
+	daemonCmd.Flags().Bool("non-privileged", false, "Run the agent daemon in non-privileged mode.")
 }

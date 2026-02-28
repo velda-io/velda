@@ -72,7 +72,6 @@ func providePid1Runner(requestPlugin *agent.SessionRequestPlugin, autofsDaemon *
 // NewPid1Runner creates a new Pid1Runner using dependency injection.
 func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agentpb.SandboxConfig) Pid1Runner {
 	wire.Build(
-		agent.ProvideNvidiaPlugin,
 		agent.ProvideCommandModifier,
 		agent.ProvideMaxSessionTime,
 		agent.ProvideWorkdir,
@@ -90,4 +89,42 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 		providePid1Runner,
 	)
 	return Pid1Runner(nil) // This will never be reached, but is required for the wire build.
+}
+
+type NonPrivRunner agent.AbstractPlugin
+
+func provideNonPrivRunner(requestPlugin *agent.SessionRequestPlugin, sandboxFsPlugin *agent.NonPrivSandboxFsPlugin, authPlugin agent.AuthPluginType, waiterPlugin *agent.WaiterPlugin, completionSignalPlugin *agent.CompletionSignalPlugin, sshdPlugin *agent.SshdPlugin, statusPlugin *agent.ReportStatusPlugin, batchPlugin *agent.BatchPlugin, completionWaiter *agent.CompletionWaitPlugin) NonPrivRunner {
+	return agent.NewPluginRunner(
+		requestPlugin,
+		sandboxFsPlugin,
+		authPlugin,
+		waiterPlugin,
+		completionSignalPlugin,
+		sshdPlugin,
+		batchPlugin,
+		statusPlugin,
+		completionWaiter,
+	)
+}
+
+// NewNonPrivRunner creates a runner for non-privileged containers.
+// It skips filesystem mounting and namespace setup, assuming the container runtime
+// has already configured the filesystem.
+func NewNonPrivRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agentpb.SandboxConfig) NonPrivRunner {
+	wire.Build(
+		agent.ProvideCommandModifier,
+		agent.ProvideMaxSessionTime,
+		agent.ProvideAgentName,
+		agent.ProvideRequestPlugin,
+		agent.ProvideNonPrivSandboxFsPlugin,
+		agent.ProvideAuthPlugin,
+		agent.ProvideWaiterPlugin,
+		agent.ProvideCompletionSignalPlugin,
+		agent.ProvideSshdPlugin,
+		agent.ProvideReportStatusPlugin,
+		agent.ProvideBatchPlugin,
+		agent.ProvideCompletionWaiterPlugin,
+		provideNonPrivRunner,
+	)
+	return NonPrivRunner(nil) // This will never be reached, but is required for the wire build.
 }

@@ -84,6 +84,7 @@ func init() {
 	sandboxCmd.Flags().String("agent-name", "", "The name of the agent")
 	sandboxCmd.Flags().String("temp-dir", "", "The temporary directory for empty mounts")
 	sandboxCmd.Flags().Int("netfd", -1, "The file descriptor for the network namespace")
+	sandboxCmd.Flags().Bool("non-priv", false, "Run in non-privileged mode: bypass all steps that require elevated capabilities (mounts, namespaces, cgroups) and assume the container has already set up the filesystem.")
 }
 
 func patchConfig(config *agentpb.SandboxConfig) {
@@ -97,6 +98,10 @@ func patchConfig(config *agentpb.SandboxConfig) {
 }
 
 func getRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agentpb.SandboxConfig) agent.AbstractPlugin {
+	nonPriv, _ := cmd.Flags().GetBool("non-priv")
+	if nonPriv {
+		return agent_runner.NewNonPrivRunner(ctx, cmd, sandboxConfig)
+	}
 	pid1, _ := cmd.Flags().GetBool("pid1")
 	if pid1 {
 		return pid1Runner(ctx, cmd, sandboxConfig)

@@ -47,6 +47,10 @@ type Runner struct {
 	processes   map[SessionKey]*exec.Cmd // sessionId -> cmd
 	MaxTime     time.Duration
 	nd          *NetworkDaemon
+	// nonPriv disables all operations that require elevated capabilities
+	// (cgroup management, mount-namespace creation).  Use this when the
+	// agent runs inside a non-privileged container.
+	nonPriv bool
 }
 
 type SandboxConnection struct {
@@ -86,43 +90,68 @@ func NewRunner(workDirBase string, nd *NetworkDaemon) *Runner {
 	return r
 }
 
+// NewNonPrivRunner creates a Runner that skips all privileged operations
+// (cgroup management, mount-namespace creation).  Use this when the agent
+// runs inside a non-privileged container where the container runtime has
+// already set up the filesystem and resource isolation.
+func NewNonPrivRunner(workDirBase string, nd *NetworkDaemon) *Runner {
+	executable, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	r := &Runner{
+		executable:  executable,
+		workDirBase: workDirBase,
+		processes:   make(map[SessionKey]*exec.Cmd),
+		nd:          nd,
+		nonPriv:     true,
+	}
+	return r
+}
+
 func (r *Runner) Run(agentaName string, session *proto.SessionRequest, completion chan *SessionCompletion) (*proto.SessionInitResponse, error) {
-	// Run the work item
-	workDir := path.Join(r.workDirBase, fmt.Sprintf("%d-%s", session.InstanceId, session.SessionId))
-	if err := os.Mkdir(workDir, 0755); err != nil && !os.IsExist(err) {
-		return nil, fmt.Errorf("Mkdir workDir: %w", err)
-	}
-
-	if err := os.Mkdir(path.Join(workDir, "velda"), 0755); err != nil && !os.IsExist(err) {
-		return nil, fmt.Errorf("Mkdir velda: %w", err)
-	}
-
-	cgroupPath, err := r.setupCgroup(session.SessionId)
-	if err != nil {
-		return nil, fmt.Errorf("SetupCgroup: %w", err)
-	}
+	var cgroupFd int = -1
 	needCleanup := true
-	defer func() {
-		if needCleanup {
-			r.cleanupCgroup(session.SessionId)
+	var workDir string
+	var nh NetworkBinding
+	if !r.nonPriv {
+		// Run the work item
+		workDir = path.Join(r.workDirBase, fmt.Sprintf("%d-%s", session.InstanceId, session.SessionId))
+		if err := os.Mkdir(workDir, 0755); err != nil && !os.IsExist(err) {
+			return nil, fmt.Errorf("Mkdir workDir: %w", err)
 		}
-	}()
 
-	cgroupFd, err := syscall.Open(cgroupPath, syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, fmt.Errorf("Open cgroup: %w", err)
+		if err := os.Mkdir(path.Join(workDir, "velda"), 0755); err != nil && !os.IsExist(err) {
+			return nil, fmt.Errorf("Mkdir velda: %w", err)
+		}
+
+		cgroupPath, err := r.setupCgroup(session.SessionId)
+		if err != nil {
+			return nil, fmt.Errorf("SetupCgroup: %w", err)
+		}
+		defer func() {
+			if needCleanup {
+				r.cleanupCgroup(session.SessionId)
+			}
+		}()
+		cgroupFd, err = syscall.Open(cgroupPath, syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+		if err != nil {
+			return nil, fmt.Errorf("Open cgroup: %w", err)
+		}
+		defer syscall.Close(cgroupFd)
+
+		dnsCtx := clientlib.BindSession(context.Background(), session)
+		r.dnsServer.SetContext(dnsCtx)
+
+		nh = r.nd.Get()
+		defer func() {
+			if needCleanup {
+				r.nd.Put(nh)
+			}
+		}()
+	} else {
+		nh = NetworkBinding{}
 	}
-	defer syscall.Close(cgroupFd)
-
-	dnsCtx := clientlib.BindSession(context.Background(), session)
-	r.dnsServer.SetContext(dnsCtx)
-
-	nh := r.nd.Get()
-	defer func() {
-		if needCleanup {
-			r.nd.Put(nh)
-		}
-	}()
 
 	netfdChild := 3
 	if session.Workload != nil {
@@ -137,8 +166,12 @@ func (r *Runner) Run(agentaName string, session *proto.SessionRequest, completio
 		"--workdir",
 		workDir,
 	}
-	if nh.NetNamespace > 0 {
-		args = append(args, "--netfd", strconv.Itoa(netfdChild))
+	if r.nonPriv {
+		args = append(args, "--non-priv")
+	} else {
+		if nh.NetNamespace > 0 {
+			args = append(args, "--netfd", strconv.Itoa(netfdChild))
+		}
 	}
 	cmd := exec.Command(r.executable, args...)
 
@@ -166,11 +199,13 @@ func (r *Runner) Run(agentaName string, session *proto.SessionRequest, completio
 		return nil, fmt.Errorf("StdoutPipe: %w", err)
 	}
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags:  syscall.CLONE_NEWNS,
-		Setsid:      true,
-		UseCgroupFD: true,
-		CgroupFD:    cgroupFd,
+	if !r.nonPriv {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Cloneflags:  syscall.CLONE_NEWNS,
+			Setsid:      true,
+			UseCgroupFD: true,
+			CgroupFD:    cgroupFd,
+		}
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("Start: %w", err)
@@ -193,9 +228,11 @@ func (r *Runner) Run(agentaName string, session *proto.SessionRequest, completio
 	r.processes[key] = cmd
 	needCleanup = false
 	go func() {
-		defer r.nd.Put(nh)
-		defer r.cleanupCgroup(session.SessionId)
-		defer r.dnsServer.Reset()
+		if !r.nonPriv {
+			defer r.nd.Put(nh)
+			defer r.cleanupCgroup(session.SessionId)
+			defer r.dnsServer.Reset()
+		}
 		defer func() {
 			r.mu.Lock()
 			defer r.mu.Unlock()
