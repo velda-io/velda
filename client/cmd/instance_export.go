@@ -19,10 +19,17 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
+
+	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -30,8 +37,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/google"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
+	"github.com/google/go-containerregistry/pkg/v1/partial"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
@@ -63,12 +70,6 @@ Examples:
   # Carry specific environment variables into the image
   velda instance export -e HOME -e PATH -e MY_VAR=custom \
       --push registry.example.com/org/repo:latest
-
-  # Push with Google GCR authentication
-  velda instance export --push gcr.io/my-project/my-image:latest --auth google
-
-  # Push with manual credentials
-  velda instance export --push registry.example.com/org/repo:latest --auth manual
 
   # Use a custom export config to exclude files
   velda instance export --config /etc/velda-export.yaml --push registry.example.com/org/repo:latest
@@ -103,9 +104,8 @@ func init() {
 	instanceCmd.AddCommand(exportContainerCmd)
 	f := exportContainerCmd.Flags()
 	f.StringArrayP("env", "e", nil,
-		"Environment variable to bake into the image (NAME or NAME=VALUE); may be repeated")
+		"Environment variable to bake into the image (*, NAME or NAME=VALUE); may be repeated")
 	f.StringP("push", "p", "", "Push the image to this registry reference (e.g. registry.io/repo:tag)")
-	f.StringP("output", "o", "", "Save the image as an OCI-compatible tar file at this path")
 	f.String("auth", "docker",
 		"Registry auth method: docker (default keychain), google (GCR/AR), manual (stdin prompt)")
 	f.String("config", "",
@@ -128,9 +128,8 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	}
 	// --- Validation ----------------------------------------------------------
 	pushRef, _ := cmd.Flags().GetString("push")
-	outputFile, _ := cmd.Flags().GetString("output")
-	if pushRef == "" && outputFile == "" {
-		return fmt.Errorf("specify at least one of --push or --output")
+	if pushRef == "" {
+		return fmt.Errorf("push reference is required (e.g. --push registry.io/repo:tag)")
 	}
 
 	// --- Export config -------------------------------------------------------
@@ -205,35 +204,137 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	}()
 
 	// --- Layering ----------------------------------------------------------
+	cmd.PrintErrln("Computing image layers...")
 	maxLayerSize, _ := cmd.Flags().GetInt64("max-layer-size")
 	layerSpecs, err := computeLayers(tmpMount, exportCfg.Exclude, exportCfg.StripTimes, maxLayerSize)
 	if err != nil {
 		return fmt.Errorf("computing layers: %w", err)
 	}
 
-	var img v1.Image = empty.Image
+	cmd.PrintErrf("Packing %d layer(s):\n", len(layerSpecs))
 
-	cmd.PrintErrf("Building %d layer(s)...\n", len(layerSpecs))
-	for i, spec := range layerSpecs {
-		cmd.PrintErrf("  Layer %d/%d: %s (%s)\n", i+1, len(layerSpecs), spec.Description, fmtBytes(spec.TotalSize))
+	// Parse the push reference early so we can pass the repository to the
+	// upload goroutines. The reference is also reused for the manifest push.
+	var parsedRef name.Reference
+	parsedRef, err = name.ParseReference(pushRef)
+	if err != nil {
+		return fmt.Errorf("invalid image reference %q: %w", pushRef, err)
 	}
+
+	resolvedLayers := make([]v1.Layer, len(layerSpecs))
+
+	// ── Parallel upload path ──────────────────────────────────────────────────
+	// Each layer is uploaded concurrently (up to uploadConcurrency at once).
+	// stream.NewLayer compresses and hashes in a single read pass; remote.WriteLayer
+	// performs an internal HEAD /blobs/{digest} check and skips upload if the
+	// blob is already present.
+	const uploadConcurrency = 4
+	sem := make(chan struct{}, uploadConcurrency)
+
+	uploadProg := mpb.New(mpb.WithOutput(os.Stderr))
+	uploadErrors := make([]error, len(layerSpecs))
+	var wg sync.WaitGroup
+
+	oldOutput := log.Writer()
+	log.SetOutput(uploadProg)
 	for i, spec := range layerSpecs {
-		cmd.PrintErrf("	Exporting layer %d/%d ...\r", i+1, len(layerSpecs))
-		layer, err := tarball.LayerFromOpener(spec.Open)
-		if err != nil {
-			return fmt.Errorf("creating layer %d (%s) from tar: %w", i+1, spec.Description, err)
+		i, spec := i, spec
+		label := fmt.Sprintf("  [%d] %-30s", i+1, spec.Description)
+
+		merkle := spec.MerkleHash
+		repo := parsedRef.Context()
+		cached := atomic.Bool{}
+
+		bar := uploadProg.AddSpinner(0,
+			mpb.PrependDecorators(
+				decor.Name(label, decor.WCSyncSpaceR),
+			),
+			mpb.AppendDecorators(
+				decor.CurrentKibiByte(" % .2f"),
+				decor.Name(" "),
+				decor.OnCompleteMeta(decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 30, decor.WCSyncSpace),
+					func(_ string) string {
+						if cached.Load() {
+							return "Cached"
+						}
+						return "Done"
+					},
+				),
+			),
+		)
+		progress := make(chan v1.Update, 100)
+
+		updateDone := make(chan struct{})
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			defer close(updateDone)
+
+			last := time.Now()
+			for update := range progress {
+				newT := time.Now()
+				bar.EwmaSetCurrent(int64(update.Complete), newT.Sub(last))
+				last = newT
+			}
+		}()
+		go func() {
+			defer wg.Done()
+
+			// ── 1. Cached path ──────────────────────────────────────────────────────
+			if merkle != "" {
+				if digestID, ok := readLayerXattrCache(spec.RootDir, merkle); ok {
+					dig := repo.Digest(digestID.String())
+					if layer, err := remote.Layer(dig, pushOption); err == nil {
+						if exists, err := partial.Exists(layer); err == nil && exists {
+							resolvedLayers[i] = layer
+							close(progress) // no progress for cached layers
+							cached.Store(true)
+							bar.SetTotal(spec.TotalSize, true)
+							return
+						}
+					}
+					// Any error means the cached digest is stale or unusable;
+					// discard it and fall through to a fresh stream upload.
+				}
+			}
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			layer, err := uploadLayerSpec(spec, parsedRef.Context(), pushOption, progress)
+			<-updateDone // ensure all progress updates are processed before marking the bar complete
+			if err != nil {
+				bar.Abort(false)
+			} else {
+				bar.SetTotal(-1, true)
+			}
+			resolvedLayers[i] = layer
+			uploadErrors[i] = err
+		}()
+	}
+
+	wg.Wait()
+	uploadProg.Wait()
+	log.SetOutput(oldOutput)
+
+	for i, uploadErr := range uploadErrors {
+		if uploadErr != nil {
+			return fmt.Errorf("uploading layer %d (%s): %w", i+1, layerSpecs[i].Description, uploadErr)
 		}
+	}
+
+	// --- Build image from resolved layers -----------------------------------
+	var img v1.Image = empty.Image
+	for i, layer := range resolvedLayers {
 		img, err = mutate.Append(img, mutate.Addendum{
 			Layer: layer,
 			History: v1.History{
-				CreatedBy: spec.Description,
+				CreatedBy: layerSpecs[i].Description,
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("appending layer %d (%s): %w", i+1, spec.Description, err)
+			return fmt.Errorf("appending layer %d (%s): %w", i+1, layerSpecs[i].Description, err)
 		}
 	}
-	cmd.PrintErrln()
 
 	// --- Image config -------------------------------------------------------
 	cfg, err := img.ConfigFile()
@@ -247,62 +348,28 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 	cfg.Config.Entrypoint = entrypoint
 	cfg.Config.Cmd = cmdSlice
 	cfg.Config.User = user
+	// current dir
+	cfg.Config.WorkingDir = os.Getenv("PWD")
 
 	img, err = mutate.ConfigFile(img, cfg)
 	if err != nil {
 		return fmt.Errorf("setting image config: %w", err)
 	}
 
-	// --- Output / Push ------------------------------------------------------
+	// --- Push ------------------------------------------------------
 
-	if pushRef != "" {
-		ref, err := name.ParseReference(pushRef)
-		if err != nil {
-			return fmt.Errorf("Invalid image reference %q: %w", pushRef, err)
-		}
-		cmd.PrintErrf("Pushing to %s ...\n", ref)
-		updateCh := make(chan v1.Update, 1)
-		pushErr := make(chan error, 1)
-		go func() {
-			if err := remote.Write(ref, img, pushOption, remote.WithProgress(updateCh)); err != nil {
-				pushErr <- fmt.Errorf("pushing image: %w", err)
-			} else {
-				pushErr <- nil
-			}
-		}()
-		for u := range updateCh {
-			if u.Total > 0 {
-				pct := 100 * u.Complete / u.Total
-				cmd.PrintErrf("\r  Upload: %s / %s (%d%%)",
-					fmtBytes(u.Complete), fmtBytes(u.Total), pct)
-			} else if u.Complete > 0 {
-				cmd.PrintErrf("\r  Upload: %s", fmtBytes(u.Complete))
-			}
-		}
-		cmd.PrintErrln()
-		if err := <-pushErr; err != nil {
-			return err
-		}
-		cmd.PrintErrf("Successfully pushed to %s\n", ref)
-		if d, err := img.Digest(); err != nil {
-			cmd.PrintErrf("Warning: computing image digest: %v\n", err)
-		} else {
-			cmd.PrintErrf("Image digest: %s\n", d.String())
-		}
+	// Layer blobs were already uploaded above; push only the manifest + config.
+	cmd.PrintErrf("Pushing manifest to %s...\n", parsedRef)
+	if err := remote.Write(parsedRef, img, pushOption); err != nil {
+		return fmt.Errorf("pushing image manifest: %w", err)
 	}
-
-	if outputFile != "" {
-		tag, err := name.NewTag("packed:latest")
-		if err != nil {
-			return fmt.Errorf("building default tag: %w", err)
-		}
-		cmd.PrintErrf("Saving image to %s ...\n", outputFile)
-		if err := tarball.WriteToFile(outputFile, tag, img); err != nil {
-			return fmt.Errorf("saving image tar: %w", err)
-		}
-		cmd.PrintErrf("Saved image to %s\n", outputFile)
+	cmd.PrintErrf("Successfully pushed to %s\n", parsedRef)
+	if d, err := img.Digest(); err != nil {
+		cmd.PrintErrf("Error computing image digest: %v\n", err)
+		return err
+	} else {
+		cmd.Println(parsedRef.Context().Digest(d.String()).String())
 	}
-
 	return nil
 }
 
@@ -370,7 +437,11 @@ func resolveRegistryAuth(method string) (remote.Option, error) {
 func resolveContainerEnv(flags []string) []string {
 	out := make([]string, 0, len(flags))
 	for _, f := range flags {
-		if strings.ContainsRune(f, '=') {
+		if f == "*" {
+			// Special case: include all env vars if the user specified "*".
+			// Continue adding more overrides.
+			out = append(out, os.Environ()...)
+		} else if strings.ContainsRune(f, '=') {
 			// Explicit value – use as-is.
 			out = append(out, f)
 		} else if val, ok := os.LookupEnv(f); ok {
@@ -378,22 +449,4 @@ func resolveContainerEnv(flags []string) []string {
 		}
 	}
 	return out
-}
-
-// inode uniquely identifies a file by device + inode number, used to detect
-// hard links.
-type inodeKey struct{ dev, ino uint64 }
-
-// fmtBytes formats a byte count as a human-readable string (e.g. "1.2 GiB").
-func fmtBytes(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := int64(unit), 0
-	for v := n / unit; v >= unit; v /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }

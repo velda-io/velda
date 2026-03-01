@@ -18,8 +18,12 @@ package cmd
 
 import (
 	"archive/tar"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +62,12 @@ type tarLayerSpec struct {
 	// only for informational display; it estimates the sum of all regular-file
 	// sizes that will be streamed into this layer.
 	TotalSize int64
+
+	// MerkleHash is the Merkle-tree hash of all file/dir attributes included
+	// in this layer (computed during the analysis pass).  It is used as a
+	// cache key to avoid re-streaming unchanged layers.  Empty string means
+	// the hash has not been computed (cache will be skipped).
+	MerkleHash string
 
 	// tmpMount is the bind-mounted root prefix used to derive tar-relative
 	// entry names (same value shared by all layers in one export run).
@@ -202,7 +212,8 @@ func (l *tarLayerSpec) stream(w io.Writer) error {
 }
 
 // computeLayers performs a bottom-up analysis of the filesystem rooted at
-// tmpMount and splits it into one or more image layers.
+// tmpMount and splits it into one or more image layers.  The Merkle hash for
+// each layer is computed during the same directory scan (no second pass).
 //
 // Algorithm
 //
@@ -218,21 +229,17 @@ func (l *tarLayerSpec) stream(w io.Writer) error {
 //  5. The collected layers are in bottom-up (leaf-first) order; reverse them
 //     so the base layer is first and leaf layers are last.
 //
-// When sizeThreshold ≤ 0 the entire tree is returned as a single layer
-// (equivalent to the old single-opener behaviour).
+// When sizeThreshold ≤ 0 the entire tree is returned as a single layer.
 func computeLayers(tmpMount string, excludePatterns []string, stripTimes bool, sizeThreshold int64) ([]*tarLayerSpec, error) {
-	if sizeThreshold <= 0 {
-		return []*tarLayerSpec{{
-			RootDir:         tmpMount,
-			Description:     "/",
-			tmpMount:        tmpMount,
-			excludePatterns: excludePatterns,
-			stripTimes:      stripTimes,
-		}}, nil
+	// When sizeThreshold <= 0 produce a single layer by setting an effectively
+	// infinite threshold so analyzeDir never splits the tree.
+	effectiveThreshold := sizeThreshold
+	if effectiveThreshold <= 0 {
+		effectiveThreshold = math.MaxInt64
 	}
 
 	var layers []*tarLayerSpec
-	unalloc, skipDirs, err := analyzeDir(tmpMount, tmpMount, excludePatterns, stripTimes, sizeThreshold, &layers)
+	unalloc, skipDirs, rootMerkle, err := analyzeDir(tmpMount, tmpMount, excludePatterns, stripTimes, effectiveThreshold, &layers)
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +263,7 @@ func computeLayers(tmpMount string, excludePatterns []string, stripTimes bool, s
 			tmpMount:        tmpMount,
 			excludePatterns: excludePatterns,
 			stripTimes:      stripTimes,
+			MerkleHash:      rootMerkle,
 		})
 	}
 
@@ -267,9 +275,9 @@ func computeLayers(tmpMount string, excludePatterns []string, stripTimes bool, s
 	return layers, nil
 }
 
-// analyzeDir recursively walks dir in post-order (children before parent) and
-// appends a tarLayerSpec to *out whenever the accumulated unallocated size of
-// the subtree meets threshold.
+// analyzeDir recursively walks dir in post-order (children before parent),
+// simultaneously computing the Merkle hash of each subtree and appending a
+// tarLayerSpec to *out whenever the accumulated unallocated size meets threshold.
 //
 // Returns:
 //   - unallocated: bytes in this subtree not yet assigned to any layer.
@@ -278,22 +286,25 @@ func computeLayers(tmpMount string, excludePatterns []string, stripTimes bool, s
 //     its own SubLayerDirs.  When dir itself created a layer this is [dir];
 //     otherwise it is the union of sub-layer dirs collected from children,
 //     passed up so the parent can skip them during streaming.
+//   - merkleHash: Merkle-tree hash of the attributes of every entry included in
+//     this directory's layer (sub-layer directories are excluded from the hash).
 func analyzeDir(
 	dir, tmpMount string,
 	excludePatterns []string,
 	stripTimes bool,
 	threshold int64,
 	out *[]*tarLayerSpec,
-) (unallocated int64, skipDirsForParent []string, err error) {
+) (unallocated int64, skipDirsForParent []string, merkleHash string, err error) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 
 	var size int64       // bytes in this subtree not yet covered by a child layer
 	var skipSet []string // sub-layer dirs accumulated from children
 
+	h := sha256.New()
 	for _, e := range entries {
 		child := filepath.Join(dir, e.Name())
 
@@ -305,30 +316,58 @@ func analyzeDir(
 		}
 
 		if e.IsDir() {
-			subUnalloc, subSkip, subErr := analyzeDir(child, tmpMount, excludePatterns, stripTimes, threshold, out)
+			subUnalloc, subSkip, subMerkle, subErr := analyzeDir(child, tmpMount, excludePatterns, stripTimes, threshold, out)
 			if subErr != nil {
-				return 0, nil, subErr
+				return 0, nil, "", subErr
 			}
 			// Accumulate child skip dirs so we can forward them to the layer
 			// (or further up) as needed.
 			skipSet = append(skipSet, subSkip...)
 			// Add the child's unallocated remainder to our own accumulator.
 			size += subUnalloc
+
+			// Include child's Merkle contribution only when it did NOT become a layer itself.
+			if subMerkle != "" {
+				fmt.Fprintf(h, "%s\x00%s\n", e.Name(), subMerkle)
+			}
 		} else {
 			info, ieErr := e.Info()
 			if ieErr != nil {
-				// Unreadable entry — skip silently (consistent with buildRootTar).
-				continue
+				return 0, nil, "", ieErr
 			}
 			size += info.Size()
+			if hErr := merkleHashLeaf(h, child, info); hErr != nil {
+				return 0, nil, "", fmt.Errorf("merkleHashLeaf for %s: %w", child, hErr)
+			}
 		}
 	}
+
+	// Compute this directory's Merkle hash from its own attributes and the
+	// hashes of children that are included in this layer.
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, nil, "", fmt.Errorf("stat_t conversion failed for %s", dir)
+	}
+	var mtime int64
+	// Should ignore the mtime of directory if stripTime is set.
+	if !stripTimes {
+		mtime = st.Mtim.Sec*1_000_000_000 + int64(st.Mtim.Nsec)
+	}
+	relDir := strings.TrimPrefix(filepath.ToSlash(dir), filepath.ToSlash(tmpMount))
+	relDir = strings.TrimPrefix(relDir, "/")
+	fmt.Fprintf(h, "dir\x00%s\x00%d\x00%d\x00%d\x00%d\n",
+		relDir, info.Mode(), st.Uid, st.Gid, mtime)
+	merkleHash = hex.EncodeToString(h.Sum(nil))
 
 	if size >= threshold {
 		// This directory's unallocated content meets the threshold → emit a layer.
 		// Build a human-readable description: the path relative to the FS root ("/").
 		desc := "/" + strings.TrimPrefix(filepath.ToSlash(dir), filepath.ToSlash(tmpMount)+"/")
-		layer := &tarLayerSpec{
+		*out = append(*out, &tarLayerSpec{
 			RootDir:         dir,
 			Description:     desc,
 			TotalSize:       size,
@@ -336,12 +375,16 @@ func analyzeDir(
 			tmpMount:        tmpMount,
 			excludePatterns: excludePatterns,
 			stripTimes:      stripTimes,
-		}
-		*out = append(*out, layer)
+			MerkleHash:      merkleHash,
+		})
 		// Signal to parent: this dir is fully covered; parent must skip it.
-		return 0, []string{dir}, nil
+		return 0, []string{dir}, "", nil
 	}
 
 	// Threshold not reached: bubble unallocated size and skip-set up to parent.
-	return size, skipSet, nil
+	return size, skipSet, merkleHash, nil
 }
+
+// inode uniquely identifies a file by device + inode number, used to detect
+// hard links.
+type inodeKey struct{ dev, ino uint64 }
