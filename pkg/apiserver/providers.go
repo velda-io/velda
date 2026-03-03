@@ -217,8 +217,8 @@ func ProvideSessionHelper(completionWatcher broker.SessionCompletionWatcher, wat
 	}
 }
 
-func ProvideLocalDiskStorage(s storage.Storage) broker.LocalDiskProvider {
-	return s.(broker.LocalDiskProvider)
+func ProvideLocalDiskStorage(s storage.Storage) storage.LocalDiskProvider {
+	return s.(storage.LocalDiskProvider)
 }
 
 func ProvideTaskLogDb(config *configpb.Config, s storage.Storage) tasks.TaskLogDb {
@@ -253,10 +253,11 @@ func ProvideTaskService(ctx context.Context, grpcServer *grpc.Server, mux *runti
 	return s
 }
 
-var ProvideNfsBrokerAuth = wire.NewSet(
+var ProvideNfsAuth = wire.NewSet(
 	NewBrokerAuth,
-	broker.NewNfsExportAuth,
+	storage.NewLocalNfsAuth,
 	wire.Bind(new(broker.AuthHelper), new(*BrokerAuth)),
+	wire.Bind(new(storage.StorageAuth), new(*storage.LocalNfsAuth)),
 )
 
 func ProvidePoolService(grpcServer *grpc.Server, mux *runtime.ServeMux, schedulers *broker.SchedulerSet) proto.PoolManagerServiceServer {

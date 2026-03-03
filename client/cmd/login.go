@@ -130,7 +130,7 @@ var loginCmd = &cobra.Command{
 func init() {
 	authCmd.AddCommand(loginCmd)
 
-	loginCmd.Flags().String("broker", "novahub.dev:50051",
+	loginCmd.Flags().String("broker", "https://velda.cloud",
 		("Broker address. If profile already exists," +
 			" this will be ignored and use the existing broker address in config."))
 	loginCmd.Flags().Bool("new-profile", false,

@@ -71,7 +71,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		ProvideBrokerServer,
 		ProvideTaskLogService,
 		ProvideTaskService,
-		ProvideNfsBrokerAuth,
+		ProvideNfsAuth,
 		ProvidePoolService,
 		ServiceProviders,
 	)
