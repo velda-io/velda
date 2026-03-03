@@ -15,129 +15,32 @@ package broker
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"net"
-	"os"
-	"os/exec"
 
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/storage"
 )
 
-type LocalDiskProvider interface {
-	GetRoot(instanceId int64) string
-	GetSnapshotRoot(instanceId int64, snapshotName string) string
-}
-
+// NfsExportAuth adapts storage.NfsAuth to the broker AuthHelper interface.
+// It extracts broker-specific information (agent host, NFS server IP) from the
+// Agent and Session and delegates the actual NFS grant/revoke operations to the
+// underlying storage.NfsAuth implementation.
 type NfsExportAuth struct {
-	disk LocalDiskProvider
+	auth storage.NfsAuth
 }
 
-func NewNfsExportAuth(disk LocalDiskProvider) (*NfsExportAuth, error) {
-	if _, err := os.Stat("/etc/exports.d"); os.IsNotExist(err) {
-		cmd := runAsRootCommand("mkdir", "-p", "/etc/exports.d")
-		err := cmd.Run()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create exports directory: %w", err)
-		}
-	}
-	return &NfsExportAuth{
-		disk: disk,
-	}, nil
+func NewNfsExportAuth(auth storage.NfsAuth) *NfsExportAuth {
+	return &NfsExportAuth{auth: auth}
 }
 
 func (n *NfsExportAuth) GrantAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
-	instanceID := session.Request.InstanceId
-	exportPath := n.disk.GetRoot(instanceID)
-	paths := []string{exportPath}
-	agentHost := agent.Host
-
-	var snapshotPath string
-	if session.Request.SnapshotName != "" {
-		snapshotPath = n.disk.GetSnapshotRoot(instanceID, session.Request.SnapshotName)
-		paths = append(paths, snapshotPath)
-	}
-	// Use exportfs command to export NFS
-	err := exportNFS(paths, agentHost.String(), session)
-	if err != nil {
-		return fmt.Errorf("failed to export NFS: %w", err)
-	}
-	session.Request.AgentSessionInfo = &proto.AgentSessionInfo{
-		FileMount: &proto.AgentSessionInfo_NfsMount_{
-			NfsMount: &proto.AgentSessionInfo_NfsMount{
-				NfsServer:       agent.PeerInfo.LocalAddr.(*net.TCPAddr).IP.String(),
-				NfsPath:         exportPath,
-				NfsSnapshotPath: snapshotPath,
-			},
-		},
-	}
-	return nil
-}
-
-// exportNFS is a helper function to handle NFS export logic using exportfs command
-func exportNFS(path []string, host string, session *Session) error {
-	exportData := ""
-	for _, p := range path {
-		exportData += fmt.Sprintf("%s %s(rw,async,no_root_squash,no_subtree_check)\n", p, host)
-	}
-	cmd := runAsRootCommand("sh", "-c", fmt.Sprintf("echo '%s' > %s", exportData, exportFile(session)))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Failed to write NFS export file for %s: %s", host, out)
-		return fmt.Errorf("failed to write NFS export file: %w", err)
-	}
-	cmd = runAsRootCommand("exportfs", "-ar")
-	out, err = cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Failed to export NFS %s for host %s: %s", path, host, out)
-		return fmt.Errorf("failed to export NFS: %w", err)
-	}
-	return nil
+	agentHost := agent.Host.String()
+	nfsServer := agent.PeerInfo.LocalAddr.(*net.TCPAddr).IP.String()
+	return n.auth.GrantNfsAccess(ctx, session.Request, agentHost, nfsServer)
 }
 
 func (n *NfsExportAuth) RevokeAccessToAgent(ctx context.Context, agent *Agent, session *Session) error {
-	// TODO: Add reference counting for same peer IP.
-	instanceID := session.Request.InstanceId
-	exportPath := n.disk.GetRoot(instanceID)
-	agentHost := agent.Host
-
-	// Use exportfs command to unexport NFS
-	err := unexportNFS(exportPath, agentHost.String(), session)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func exportFile(s *Session) string {
-	return fmt.Sprintf("/etc/exports.d/velda-%d-%s.exports", s.Request.InstanceId, s.Request.SessionId)
-}
-
-// unexportNFS is a helper function to handle NFS unexport logic using exportfs command
-func unexportNFS(path, host string, session *Session) error {
-	cmd := runAsRootCommand("rm", exportFile(session))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Failed to remove NFS export file for %s: %s", host, out)
-		// Ignore error for now.
-	}
-	cmd = runAsRootCommand("exportfs", "-a")
-	out, err = cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Failed to export NFS %s for host %s: %s", path, host, out)
-		return fmt.Errorf("failed to export NFS: %w", err)
-	}
-	return nil
-}
-
-// runAsRootCommand returns an *exec.Cmd that runs the given command directly
-// if already running as root, otherwise it prepends "sudo".
-func runAsRootCommand(name string, args ...string) *exec.Cmd {
-	if os.Geteuid() == 0 {
-		return exec.Command(name, args...)
-	}
-	newArgs := append([]string{name}, args...)
-	return exec.Command("sudo", newArgs...)
+	return n.auth.RevokeNfsAccess(ctx, session.Request.InstanceId, session.Request.SessionId)
 }
 
 func (n *NfsExportAuth) GrantAccessToClient(ctx context.Context, session *Session, status *proto.ExecutionStatus) error {
@@ -147,3 +50,4 @@ func (n *NfsExportAuth) GrantAccessToClient(ctx context.Context, session *Sessio
 func (n *NfsExportAuth) UpdateServerInfo(ctx context.Context, info *proto.ServerInfo) error {
 	return nil
 }
+
