@@ -29,6 +29,8 @@ type ReadFileOptions struct {
 }
 
 type Storage interface {
+	CheckAlive(ctx context.Context, instanceId int64) error
+
 	CreateInstance(ctx context.Context, instanceId int64) error
 
 	CreateInstanceFromSnapshot(ctx context.Context, instanceId int64, snapshotInstanceId int64, snapshotName string) error

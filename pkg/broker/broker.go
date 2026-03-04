@@ -49,6 +49,7 @@ type AuthHelper interface {
 }
 
 type StorageManager interface {
+	CheckAlive(ctx context.Context, instanceId int64) error
 	CreateSnapshot(ctx context.Context, instanceId int64, snapshotName string) error
 	DeleteSnapshot(ctx context.Context, instanceId int64, snapshotName string) error
 }
@@ -145,6 +146,10 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 	instanceIdStr := fmt.Sprintf("instances/%d", req.InstanceId)
 	if err := s.permissions.Check(ctx, ActionRequestSession, instanceIdStr); err != nil {
 		return nil, err
+	}
+
+	if err := s.storage.CheckAlive(context.Background(), req.InstanceId); err != nil {
+		log.Printf("storage checkalive failed for instance %d: %v", req.InstanceId, err)
 	}
 
 	user := rbac.UserFromContext(ctx)

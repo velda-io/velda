@@ -72,6 +72,10 @@ func (z *MiniStorage) getImagePath(imageName string) string {
 	return filepath.Join(z.sandboxPath, "images", imageName)
 }
 
+func (z *MiniStorage) CheckAlive(ctx context.Context, instanceId int64) error {
+	return nil
+}
+
 // copyDir recursively copies a directory tree
 func copyDir(src string, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {

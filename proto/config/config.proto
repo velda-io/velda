@@ -684,6 +684,17 @@ message LogStorage {
   string log_dir = 1;
 }
 
+message FileContentServer {
+  // Address for the OSS file-content server to listen on.
+  string address = 1;
+
+  // Root path to serve.
+  string root = 2;
+
+  // Number of worker goroutines.
+  int32 workers = 3;
+}
+
 message Config {
   Server server = 1;
 
@@ -703,6 +714,9 @@ message Config {
 
   // Configuration for task log storage.
   LogStorage log_storage = 12;
+
+  // Configuration for OSS file-content server.
+  FileContentServer file_content_server = 13;
 
   reserved 2, 3, 7, 8, 10;
   reserved 50 to 59;

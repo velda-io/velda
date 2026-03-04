@@ -71,6 +71,10 @@ func (b *Btrfs) Pool() string {
 	return b.rootPath
 }
 
+func (b *Btrfs) CheckAlive(ctx context.Context, instanceId int64) error {
+	return nil
+}
+
 func (b *Btrfs) CreateInstance(ctx context.Context, instanceId int64) error {
 	instanceDir := fmt.Sprintf("%s/%d", b.rootPath, instanceId)
 	instancePath := fmt.Sprintf("%s/current", instanceDir)
