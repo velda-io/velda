@@ -16,24 +16,28 @@ package apiserver
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/proto"
 	"velda.io/velda/pkg/rbac"
+	"velda.io/velda/pkg/storage"
 )
 
 type BrokerAuth struct {
-	nfsAuth *broker.NfsExportAuth
+	storageAuth storage.StorageAuth
 }
 
-func NewBrokerAuth(nfsAuth *broker.NfsExportAuth) *BrokerAuth {
+func NewBrokerAuth(storageAuth storage.StorageAuth) *BrokerAuth {
 	return &BrokerAuth{
-		nfsAuth: nfsAuth,
+		storageAuth: storageAuth,
 	}
 }
 
 func (n *BrokerAuth) GrantAccessToAgent(ctx context.Context, agent *broker.Agent, session *broker.Session) (rbac.User, error) {
-	if err := n.nfsAuth.GrantAccessToAgent(ctx, agent, session); err != nil {
+	agentHost := agent.Host.String()
+	nfsServer := agent.PeerInfo.LocalAddr.(*net.TCPAddr).IP.String()
+	if err := n.storageAuth.GrantAccess(ctx, session.Request, agentHost, nfsServer); err != nil {
 		return nil, fmt.Errorf("failed to grant NFS access: %w", err)
 	}
 	return &sessionUser{
@@ -50,7 +54,7 @@ func (n *BrokerAuth) ReGrantAccessToAgent(ctx context.Context, agent *broker.Age
 }
 
 func (n *BrokerAuth) RevokeAccessToAgent(ctx context.Context, agent *broker.Agent, session *broker.Session) error {
-	return n.nfsAuth.RevokeAccessToAgent(ctx, agent, session)
+	return n.storageAuth.RevokeAccess(ctx, session.Request.InstanceId, session.Request.SessionId)
 }
 
 func (n *BrokerAuth) GrantAccessToClient(ctx context.Context, session *broker.Session, status *proto.ExecutionStatus) error {

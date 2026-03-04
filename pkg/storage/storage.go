@@ -15,6 +15,8 @@ package storage
 
 import (
 	"context"
+
+	"velda.io/velda/pkg/proto"
 )
 
 type ByteStream struct {
@@ -44,4 +46,24 @@ type Storage interface {
 	ListImages(ctx context.Context) ([]string, error)
 
 	DeleteImage(ctx context.Context, imageName string) error
+}
+
+// LocalDiskProvider is implemented by local filesystem based storage backends.
+type LocalDiskProvider interface {
+	GetRoot(instanceId int64) string
+	GetSnapshotRoot(instanceId int64, snapshotName string) string
+}
+
+// StorageAuth provides NFS-based access control for session requests.
+// Implementations grant or revoke NFS access for an agent and patch the
+// session request with the NFS mount information.
+type StorageAuth interface {
+	// GrantAccess exports instance and snapshot paths via NFS for agentHost,
+	// and patches req.AgentSessionInfo with the resulting NFS mount details.
+	// nfsServer is the IP address of the NFS server (the broker host).
+	GrantAccess(ctx context.Context, req *proto.SessionRequest, agentHost, nfsServer string) error
+
+	// RevokeAccess removes the NFS export that was created for the given
+	// instance and session.
+	RevokeAccess(ctx context.Context, instanceId int64, sessionId string) error
 }

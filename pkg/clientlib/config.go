@@ -50,7 +50,7 @@ func InitConfigFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().String("jump-identity-file", "", "Path to the private key for SSH jump server authentication")
 
 	// Legacy flags.
-	cmd.PersistentFlags().StringVar(&brokerAddrFlag, "broker", "novahub.dev:50051", "broker address")
+	cmd.PersistentFlags().StringVar(&brokerAddrFlag, "broker", "https://velda.cloud", "broker address")
 	cmd.PersistentFlags().MarkHidden("broker")
 }
 
