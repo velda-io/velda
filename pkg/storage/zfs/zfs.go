@@ -66,6 +66,10 @@ func (z *Zfs) Pool() string {
 	return z.pool
 }
 
+func (z *Zfs) CheckAlive(ctx context.Context, instanceId int64) error {
+	return nil
+}
+
 func (z *Zfs) CreateInstance(ctx context.Context, instanceId int64) error {
 	err := z.runCommand(
 		ctx,

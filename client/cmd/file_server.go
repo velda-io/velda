@@ -24,7 +24,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"velda.io/velda/pkg/apiserver"
 	"velda.io/velda/pkg/fileserver"
+	"velda.io/velda/pkg/utils"
 )
 
 var (
@@ -38,6 +40,10 @@ var FileServerCmd = &cobra.Command{
 	Short:  "Start file server",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := loadFileServerConfig(cmd); err != nil {
+			return err
+		}
+
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
@@ -61,10 +67,36 @@ var FileServerCmd = &cobra.Command{
 	},
 }
 
+func loadFileServerConfig(cmd *cobra.Command) error {
+	configPath, _ := cmd.Flags().GetString("config")
+	if configPath == "" {
+		return nil
+	}
+	cfg, err := utils.LoadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config file: %w", err)
+	}
+	serverCfg := cfg.GetFileContentServer()
+	if serverCfg == nil {
+		return nil
+	}
+	if !cmd.Flags().Changed("addr") && serverCfg.GetAddress() != "" {
+		fsAddr = serverCfg.GetAddress()
+	}
+	if !cmd.Flags().Changed("root") && serverCfg.GetRoot() != "" {
+		fsRoot = serverCfg.GetRoot()
+	}
+	if !cmd.Flags().Changed("workers") && serverCfg.GetWorkers() > 0 {
+		fsWorkers = int(serverCfg.GetWorkers())
+	}
+	return nil
+}
+
 func init() {
 	FileServerCmd.Flags().StringVarP(&fsAddr, "addr", "a", "localhost:7655", "Address to listen on")
 	FileServerCmd.Flags().StringVarP(&fsRoot, "root", "r", ".", "Root path to serve")
 	FileServerCmd.Flags().IntVarP(&fsWorkers, "workers", "w", 4, "Number of worker goroutines")
+	apiserver.AddFlags(FileServerCmd.Flags())
 
 	rootCmd.AddCommand(FileServerCmd)
 }
