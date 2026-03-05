@@ -49,6 +49,8 @@ var createInstanceCmd = &cobra.Command{
 		dockerImage, _ := cmd.Flags().GetString("docker-image")
 		tarFile, _ := cmd.Flags().GetString("tar-file")
 
+		region, _ := cmd.Flags().GetString("region")
+
 		// Validate that only one source is specified
 		sourceCount := 0
 		if image != "" {
@@ -81,6 +83,7 @@ var createInstanceCmd = &cobra.Command{
 			Instance: &proto.Instance{
 				InstanceName: name,
 			},
+			Region: region,
 		}
 		if image != "" {
 			request.Source = &proto.CreateInstanceRequest_ImageName{
@@ -126,12 +129,14 @@ func init() {
 	flags.BoolP("verbose", "v", false, "Enable verbose output during instance creation")
 	flags.BoolP("quiet", "q", false, "Suppress status output (still prints docker stderr on error)")
 	flags.Bool("no-init", false, "Skip running the initialization script when creating from a Docker image")
+	flags.String("region", "", "Region to create the instance in (defaults to current region)")
 }
 
 // createInstanceFromDocker creates an instance and initializes it from a Docker image
 func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceClient, name, dockerImage string) error {
 	quiet, _ := cmd.Flags().GetBool("quiet")
 	verbose, _ := cmd.Flags().GetBool("verbose")
+	region, _ := cmd.Flags().GetString("region")
 	pr := func(format string, a ...interface{}) {
 		if !quiet {
 			cmd.Printf(format, a...)
@@ -144,6 +149,7 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 		Instance: &proto.Instance{
 			InstanceName: name,
 		},
+		Region: region,
 	}
 
 	instance, err := client.CreateInstance(cmd.Context(), request)
@@ -267,10 +273,12 @@ func createInstanceFromTar(cmd *cobra.Command, client proto.InstanceServiceClien
 	pr("Creating instance %s from tar file %s\n", name, tarFile)
 
 	// Create an empty instance first
+	region, _ := cmd.Flags().GetString("region")
 	request := &proto.CreateInstanceRequest{
 		Instance: &proto.Instance{
 			InstanceName: name,
 		},
+		Region: region,
 	}
 
 	instance, err := client.CreateInstance(cmd.Context(), request)
