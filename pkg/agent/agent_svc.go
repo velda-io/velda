@@ -52,6 +52,9 @@ func (s *AgentDaemonService) Mount(ctx context.Context, req *proto.MountRequest)
 	// set up by other plugins.
 	if strings.HasPrefix(source, "velda-volume:") {
 		volName := strings.TrimPrefix(source, "velda-volume:")
+		if volName == "" || strings.Contains(volName, "/") || volName == "." || volName == ".." {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid volume name: %q", volName)
+		}
 		source = path.Join(s.workDir, "volumes", volName)
 		if _, err := os.Stat(source); os.IsNotExist(err) {
 			return nil, status.Errorf(codes.NotFound, "volume not found: %s", volName)
