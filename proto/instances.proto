@@ -36,6 +36,10 @@ message CreateInstanceRequest {
     string image_name = 2;
     SnapshotReference snapshot = 3;
   }
+  // Optional: specify region by name
+  // If not specified, uses the current region.
+  // Only used for hosted / enterprise.
+  string region = 4;
 }
 
 message GetInstanceRequest {
