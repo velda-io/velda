@@ -48,7 +48,15 @@ func (s *AgentDaemonService) Mount(ctx context.Context, req *proto.MountRequest)
 		return nil, status.Errorf(codes.Unimplemented, "unsupported fstype")
 	}
 	source := req.Source
-	if emptyDirRegex.MatchString(source) {
+	// Resolve velda-volume:<name> sources to the per-session volumes directory
+	// set up by other plugins.
+	if strings.HasPrefix(source, "velda-volume:") {
+		volName := strings.TrimPrefix(source, "velda-volume:")
+		source = path.Join(s.workDir, "volumes", volName)
+		if _, err := os.Stat(source); os.IsNotExist(err) {
+			return nil, status.Errorf(codes.NotFound, "volume not found: %s", volName)
+		}
+	} else if emptyDirRegex.MatchString(source) {
 		var err error
 		baseTempDir := s.tempDir
 		if baseTempDir == "" {
@@ -64,7 +72,7 @@ func (s *AgentDaemonService) Mount(ctx context.Context, req *proto.MountRequest)
 		s.tempDirs = append(s.tempDirs, source)
 		log.Printf("Created temporary empty directory: %s to mount %s", source, req.Target)
 	} else if !strings.HasPrefix(source, "/tmp/shared") {
-		// TODO: Properly validate source perission
+		// TODO: Properly validate source permission
 		return nil, status.Errorf(codes.InvalidArgument, "source must be under /tmp")
 	}
 	// Use bind mount
