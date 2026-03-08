@@ -290,11 +290,6 @@ func (c *AwsConfigure) checkAWSPermissions(cmd *cobra.Command, awsCfg aws.Config
 		MaxResults: aws.Int32(5),
 	})
 	handleError("ec2:DescribeSubnets", err)
-	amiId, err := getAmi(cmd.Context(), cfg)
-	if err != nil {
-		return fmt.Errorf("failed to get AMI ID: %w", err)
-	}
-
 	// Test RunInstances permission using dry-run mode
 	// This is the most critical permission for the AWS provisioner
 	_, err = ec2Client.RunInstances(ctx, &ec2.RunInstancesInput{
@@ -302,7 +297,6 @@ func (c *AwsConfigure) checkAWSPermissions(cmd *cobra.Command, awsCfg aws.Config
 		MinCount:     aws.Int32(1),
 		MaxCount:     aws.Int32(1),
 		InstanceType: ec2types.InstanceTypeT2Micro,
-		ImageId:      aws.String(amiId),
 	})
 	handleError("ec2:RunInstances", err)
 
@@ -437,26 +431,6 @@ func (c *AwsConfigure) Configure(cmd *cobra.Command, config *configpb.Config) er
 		Provisioner: &configpb.Provisioner_AwsAuto{
 			AwsAuto: cfg,
 		},
-	}
-
-	defaultAmiId, err := getAmi(cmd.Context(), cfg)
-	if err != nil {
-		cmd.PrintErrf("%s❌ Failed to determine default AMI ID automatically: %v%s\n", utils.ColorRed+utils.ColorBold, err, utils.ColorReset)
-	} else {
-		cmd.PrintErrf("Default AMI ID for current Velda version: %s\n", defaultAmiId)
-	}
-	amiId, err := c.promptUser(cmd, reader, "Override AMI ID or agent version", "default")
-	if err != nil {
-		return fmt.Errorf("failed to get AMI ID: %w", err)
-	}
-	if amiId == "default" {
-		if defaultAmiId == "" {
-			return fmt.Errorf("failed to determine default AMI ID")
-		}
-	} else if strings.HasPrefix(amiId, "ami-") {
-		cfg.AmiId = amiId
-	} else {
-		cfg.AmiName = "velda-agent-" + amiId
 	}
 
 	if err := c.checkAWSPermissions(cmd, awsCfg, ec2Client, cfg); err != nil {
