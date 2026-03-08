@@ -25,15 +25,19 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	pb "github.com/golang/protobuf/proto"
 	"gopkg.in/yaml.v3"
 
+	"velda.io/velda"
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
 	agentpb "velda.io/velda/pkg/proto/agent"
 	proto "velda.io/velda/pkg/proto/config"
 	"velda.io/velda/pkg/utils"
 )
+
+const awsDeepLearningUbuntuAmiSsmParam = "/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id"
 
 type awsPoolBackend struct {
 	cfg                   *proto.AutoscalerBackendAWSLaunchTemplate
@@ -126,6 +130,14 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 			Version:            aws.String("$Default"),
 		}
 	}
+	useStandardImageMode := a.cfg.GetLaunchTemplateName() == "" && a.cfg.GetAmiId() == ""
+	if useStandardImageMode {
+		amiId, err := a.getDefaultAWSMlUbuntuAmi(ctx)
+		if err != nil {
+			return "", err
+		}
+		input.ImageId = aws.String(amiId)
+	}
 	var name string
 	tags := []ec2types.Tag{}
 	if a.cfg.GetUseInstanceIdAsName() {
@@ -164,14 +176,39 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	if a.cfg.InstanceType != "" {
 		input.InstanceType = ec2types.InstanceType(a.cfg.InstanceType)
 	}
+	version := a.cfg.GetAgentVersionOverride()
+	if version == "" {
+		version = velda.Version
+	}
+	if useStandardImageMode && (version == "" || version == "dev") {
+		return "", fmt.Errorf("failed to determine Velda version: version is empty or dev")
+	}
 	agentConfig := a.cfg.AgentConfigContent
-	if agentConfig != "" {
-		cloudInitData, err := yaml.Marshal(map[string]interface{}{
-			"bootcmd": []string{
-				"mkdir -p /run/velda",
-				fmt.Sprintf("cat << EOF > /run/velda/velda.yaml\n%s\nEOF", agentConfig),
-			},
-		})
+	if agentConfig != "" || useStandardImageMode || a.cfg.GetAgentVersionOverride() != "" {
+		bootcmd := []string{"mkdir -p /run/velda"}
+		if agentConfig != "" {
+			bootcmd = append(bootcmd, fmt.Sprintf("cat << EOF > /run/velda/velda.yaml\n%s\nEOF", agentConfig))
+		}
+
+		cloudInitConfig := map[string]interface{}{
+			"bootcmd": bootcmd,
+		}
+		if useStandardImageMode {
+			cloudInitConfig["runcmd"] = []string{
+				"curl -fsSL https://releases.velda.io/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh || true",
+				fmt.Sprintf("[ \"$(/bin/velda version || true)\" != \"%s\" ] && curl -fsSL https://releases.velda.io/velda-%s-linux-amd64 -o /tmp/velda && chmod +x /tmp/velda && mv /tmp/velda /bin/velda || true", version, version),
+				"[ ! -e /usr/lib/systemd/system/velda-agent.service ] && curl -fsSL https://releases.velda.io/velda-agent.service -o /usr/lib/systemd/system/velda-agent.service && systemctl daemon-reload && systemctl enable velda-agent.service && systemctl start velda-agent.service",
+			}
+		} else if a.cfg.GetAgentVersionOverride() != "" {
+			bootcmd = append(bootcmd, "systemctl disable --now velda-agent.service || true")
+			cloudInitConfig["bootcmd"] = bootcmd
+			cloudInitConfig["runcmd"] = []string{
+				fmt.Sprintf("curl -fsSL https://releases.velda.io/velda-%s-linux-amd64 -o /tmp/velda && chmod +x /tmp/velda && mv /tmp/velda /bin/velda", version),
+				"systemctl daemon-reload && systemctl enable velda-agent.service && systemctl restart velda-agent.service",
+			}
+		}
+
+		cloudInitData, err := yaml.Marshal(cloudInitConfig)
 		if err != nil {
 			return "", fmt.Errorf("failed to marshal cloud-init data: %w", err)
 		}
@@ -196,6 +233,25 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	}
 	log.Printf("Created instance %s AS %s", *result.Instances[0].InstanceId, name)
 	return name, nil
+}
+
+func (a *awsPoolBackend) getDefaultAWSMlUbuntuAmi(ctx context.Context) (string, error) {
+	ssmClient := ssm.NewFromConfig(a.awsCfg, func(o *ssm.Options) {
+		o.Region = a.cfg.Region
+	})
+
+	resp, err := ssmClient.GetParameter(ctx, &ssm.GetParameterInput{
+		Name: aws.String(awsDeepLearningUbuntuAmiSsmParam),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve default AWS ML Ubuntu AMI via SSM parameter %s: %w", awsDeepLearningUbuntuAmiSsmParam, err)
+	}
+	amiId := aws.ToString(resp.Parameter.Value)
+	if amiId == "" {
+		return "", fmt.Errorf("AWS ML Ubuntu AMI SSM parameter %s returned empty value", awsDeepLearningUbuntuAmiSsmParam)
+	}
+	log.Printf("Using default AWS ML Ubuntu AMI %s from %s", amiId, awsDeepLearningUbuntuAmiSsmParam)
+	return amiId, nil
 }
 
 func (a *awsPoolBackend) RequestDelete(ctx context.Context, workerName string) error {

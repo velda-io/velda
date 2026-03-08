@@ -181,6 +181,10 @@ message AutoscalerBackendAWSLaunchTemplate {
 
   // The max duration to keep an instance stopped for reuse.
   google.protobuf.Duration max_instance_lifetime = 14;
+
+  // Override velda binary version installed during startup.
+  // If unset, uses the server version.
+  string agent_version_override = 15;
 }
 
 message AutoscalerBackendNebiusLaunchTemplate {
