@@ -424,4 +424,11 @@ echo "writable-data" > testdata-writable/writable.txt
 		require.NoError(t, err)
 		assert.Equal(t, "writable-data\n", output, "Writable directory should persist changes")
 	})
+
+	t.Run("PoolDoesNotExist", func(t *testing.T) {
+		// Run a job with a non-existent pool and expect it to fail with appropriate error message
+		_, err := runBatchJob("-P", "nonexistent_pool", "sleep", "1")
+		require.Error(t, err, "Expected error when submitting to non-existent pool")
+		assert.Contains(t, err.Error(), "pool not found", "Error message should indicate pool not found")
+	})
 }

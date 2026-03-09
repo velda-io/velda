@@ -21,7 +21,9 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"velda.io/velda"
@@ -152,6 +154,14 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 		log.Printf("storage checkalive failed for instance %d: %v", req.InstanceId, err)
 	}
 
+	var scheduler *Scheduler
+	if req.Pool != "" {
+		var err error
+		scheduler, err = s.scheduler.GetPool(req.Pool)
+		if err != nil {
+			return nil, err
+		}
+	}
 	user := rbac.UserFromContext(ctx)
 	sessionUser, ok := user.(rbac.SessionUser)
 	inBatch := ok && sessionUser.TaskId() != ""
@@ -181,6 +191,9 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 		}
 	}
 	if req.Workload != nil {
+		if req.Pool == "" {
+			return nil, status.Error(codes.InvalidArgument, "pool is required for workload execution")
+		}
 		// Save writable_dirs and snapshot_name to workload for root task
 		req.Workload.WritableDirs = req.WritableDirs
 		req.Workload.SnapshotName = req.SnapshotName
@@ -221,14 +234,6 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 			Status:    proto.ExecutionStatus_STATUS_QUEUEING,
 			TaskId:    taskid,
 		}, nil
-	}
-	var scheduler *Scheduler
-	if req.Pool != "" {
-		var err error
-		scheduler, err = s.scheduler.GetPool(req.Pool)
-		if err != nil {
-			return nil, err
-		}
 	}
 	session, err := s.sessions.AddSession(req, scheduler)
 	if err != nil && !errors.Is(err, AlreadyExistsError) {
