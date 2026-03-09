@@ -124,6 +124,16 @@ message AgentPool {
 
     // Metadata about the pool.
     PoolMetadata metadata = 11;
+
+    // If scale-up returns any error,
+    // do not retry scale-up for this duration.
+    // Default is 60 seconds.
+    google.protobuf.Duration scale_up_error_retry_delay = 13;
+
+    // Clear allocation error status if there are
+    // no scale-up attempts for this duration.
+    // Default is scale_up_error_retry_delay + 30s.
+    google.protobuf.Duration allocation_error_reset_after = 14;
   }
   AutoScaler auto_scaler = 2;
 }

@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	PoolManagerService_ListPools_FullMethodName = "/velda.PoolManagerService/ListPools"
+	PoolManagerService_GetPool_FullMethodName   = "/velda.PoolManagerService/GetPool"
 )
 
 // PoolManagerServiceClient is the client API for PoolManagerService service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type PoolManagerServiceClient interface {
 	ListPools(ctx context.Context, in *ListPoolsRequest, opts ...grpc.CallOption) (*ListPoolsResponse, error)
+	GetPool(ctx context.Context, in *GetPoolRequest, opts ...grpc.CallOption) (*GetPoolResponse, error)
 }
 
 type poolManagerServiceClient struct {
@@ -47,11 +49,22 @@ func (c *poolManagerServiceClient) ListPools(ctx context.Context, in *ListPoolsR
 	return out, nil
 }
 
+func (c *poolManagerServiceClient) GetPool(ctx context.Context, in *GetPoolRequest, opts ...grpc.CallOption) (*GetPoolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPoolResponse)
+	err := c.cc.Invoke(ctx, PoolManagerService_GetPool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PoolManagerServiceServer is the server API for PoolManagerService service.
 // All implementations must embed UnimplementedPoolManagerServiceServer
 // for forward compatibility.
 type PoolManagerServiceServer interface {
 	ListPools(context.Context, *ListPoolsRequest) (*ListPoolsResponse, error)
+	GetPool(context.Context, *GetPoolRequest) (*GetPoolResponse, error)
 	mustEmbedUnimplementedPoolManagerServiceServer()
 }
 
@@ -64,6 +77,9 @@ type UnimplementedPoolManagerServiceServer struct{}
 
 func (UnimplementedPoolManagerServiceServer) ListPools(context.Context, *ListPoolsRequest) (*ListPoolsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListPools not implemented")
+}
+func (UnimplementedPoolManagerServiceServer) GetPool(context.Context, *GetPoolRequest) (*GetPoolResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPool not implemented")
 }
 func (UnimplementedPoolManagerServiceServer) mustEmbedUnimplementedPoolManagerServiceServer() {}
 func (UnimplementedPoolManagerServiceServer) testEmbeddedByValue()                            {}
@@ -104,6 +120,24 @@ func _PoolManagerService_ListPools_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PoolManagerService_GetPool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPoolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PoolManagerServiceServer).GetPool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PoolManagerService_GetPool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PoolManagerServiceServer).GetPool(ctx, req.(*GetPoolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PoolManagerService_ServiceDesc is the grpc.ServiceDesc for PoolManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -114,6 +148,10 @@ var PoolManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListPools",
 			Handler:    _PoolManagerService_ListPools_Handler,
+		},
+		{
+			MethodName: "GetPool",
+			Handler:    _PoolManagerService_GetPool_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

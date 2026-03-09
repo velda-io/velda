@@ -53,6 +53,42 @@ func local_request_PoolManagerService_ListPools_0(ctx context.Context, marshaler
 	return msg, metadata, err
 }
 
+func request_PoolManagerService_GetPool_0(ctx context.Context, marshaler runtime.Marshaler, client PoolManagerServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetPoolRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	val, ok := pathParams["pool"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "pool")
+	}
+	protoReq.Pool, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "pool", err)
+	}
+	msg, err := client.GetPool(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+}
+
+func local_request_PoolManagerService_GetPool_0(ctx context.Context, marshaler runtime.Marshaler, server PoolManagerServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var (
+		protoReq GetPoolRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	val, ok := pathParams["pool"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "pool")
+	}
+	protoReq.Pool, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "pool", err)
+	}
+	msg, err := server.GetPool(ctx, &protoReq)
+	return msg, metadata, err
+}
+
 // RegisterPoolManagerServiceHandlerServer registers the http handlers for service PoolManagerService to "mux".
 // UnaryRPC     :call PoolManagerServiceServer directly.
 // StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
@@ -78,6 +114,26 @@ func RegisterPoolManagerServiceHandlerServer(ctx context.Context, mux *runtime.S
 			return
 		}
 		forward_PoolManagerService_ListPools_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+	mux.Handle(http.MethodGet, pattern_PoolManagerService_GetPool_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.PoolManagerService/GetPool", runtime.WithHTTPPathPattern("/rest/velda/pool/{pool}"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_PoolManagerService_GetPool_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_PoolManagerService_GetPool_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
 
 	return nil
@@ -136,13 +192,32 @@ func RegisterPoolManagerServiceHandlerClient(ctx context.Context, mux *runtime.S
 		}
 		forward_PoolManagerService_ListPools_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodGet, pattern_PoolManagerService_GetPool_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/GetPool", runtime.WithHTTPPathPattern("/rest/velda/pool/{pool}"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_PoolManagerService_GetPool_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_PoolManagerService_GetPool_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
 	return nil
 }
 
 var (
 	pattern_PoolManagerService_ListPools_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"rest", "velda", "pool"}, ""))
+	pattern_PoolManagerService_GetPool_0   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 2}, []string{"rest", "velda", "pool"}, ""))
 )
 
 var (
 	forward_PoolManagerService_ListPools_0 = runtime.ForwardResponseMessage
+	forward_PoolManagerService_GetPool_0   = runtime.ForwardResponseMessage
 )

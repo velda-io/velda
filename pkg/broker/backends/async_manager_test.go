@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"velda.io/velda/pkg/broker"
 )
 
@@ -285,6 +287,69 @@ func TestRequestScaleUpWithError(t *testing.T) {
 	// Worker should not be created due to error
 	if backend.getWorkerCount() != 0 {
 		t.Errorf("Expected 0 workers due to error, got %d", backend.getWorkerCount())
+	}
+}
+
+func TestRequestScaleUpWithErrorEmitsEvent(t *testing.T) {
+	backend := newMockSyncBackend()
+	backend.createErr = status.Error(codes.ResourceExhausted, "resource exhausted")
+	mgr := MakeAsync(backend).(*asyncBackendManager)
+
+	ctx := context.Background()
+	name, err := mgr.RequestScaleUp(ctx)
+	if err != nil {
+		t.Fatalf("RequestScaleUp should not fail synchronously: %v", err)
+	}
+	if name == "" {
+		t.Fatal("RequestScaleUp returned empty name")
+	}
+
+	select {
+	case event := <-mgr.Events():
+		if event.WorkerName != name {
+			t.Fatalf("expected event worker %s, got %s", name, event.WorkerName)
+		}
+		if event.EventType != broker.ResourcePoolEventTypeResourceExhausted {
+			t.Fatalf("expected resource exhausted event type, got %v", event.EventType)
+		}
+		if event.Detail == "" {
+			t.Fatal("expected non-empty event detail")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for creation error event")
+	}
+}
+
+func TestResumeWorkerErrorEmitsEvent(t *testing.T) {
+	backend := newMockSyncBackend()
+	backend.resumeErr = fmt.Errorf("resume failed")
+	mgr := MakeAsyncResumable(backend, 1).(*asyncBackendManager)
+	ctx := context.Background()
+
+	backend.suspendedWks["worker-suspended"] = WorkerInfo{State: WorkerStateSuspended, Data: "id"}
+	mgr.suspendedWorkers["worker-suspended"] = WorkerInfo{State: WorkerStateSuspended, Data: "id"}
+
+	name, err := mgr.RequestScaleUp(ctx)
+	if err != nil {
+		t.Fatalf("RequestScaleUp failed: %v", err)
+	}
+	if name != "worker-suspended" {
+		t.Fatalf("expected worker-suspended, got %s", name)
+	}
+
+	select {
+	case event := <-mgr.Events():
+		if event.WorkerName != "worker-suspended" {
+			t.Fatalf("expected event worker worker-suspended, got %s", event.WorkerName)
+		}
+		if event.EventType != broker.ResourcePoolEventTypeStartupFailure {
+			t.Fatalf("expected startup failure event type, got %v", event.EventType)
+		}
+		if event.Detail == "" {
+			t.Fatal("expected non-empty event detail")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for resume error event")
 	}
 }
 

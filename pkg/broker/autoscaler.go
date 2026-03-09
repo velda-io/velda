@@ -105,6 +105,23 @@ type ResourcePoolBackend interface {
 	ListWorkers(ctx context.Context) ([]WorkerStatus, error)
 }
 
+type ResourcePoolEvent struct {
+	WorkerName string
+	EventType  ResourcePoolEventType
+	Detail     string
+}
+
+type ResourcePoolEventType int
+
+const (
+	ResourcePoolEventTypeResourceExhausted ResourcePoolEventType = iota
+	ResourcePoolEventTypeStartupFailure    ResourcePoolEventType = iota
+)
+
+type ResourcePoolNotifiable interface {
+	Events() <-chan ResourcePoolEvent
+}
+
 type BatchedPoolBackend interface {
 	RequestBatch(ctx context.Context, count int, label string) ([]string, error)
 }
@@ -127,6 +144,12 @@ State machine of worker:
 */
 
 const defaultSyncInterval = 1 * time.Minute
+const defaultScaleUpErrorRetryDelay = 1 * time.Minute
+
+type PoolAllocationStatus struct {
+	LastAllocationError   string
+	LastAllocationErrorAt time.Time
+}
 
 type workerDetail struct {
 	statusChan    chan AgentStatusRequest
@@ -173,25 +196,35 @@ type AutoScaledPool struct {
 	workerDetail map[string]*workerDetail
 
 	killIdleTimer           *time.Timer
+	scaleUpRetryTimer       *time.Timer
 	killingIdle             bool
 	readyForIdleMaintenance bool
+
+	scaleUpErrorRetryDelay    time.Duration
+	allocationErrorResetAfter time.Duration
+	nextScaleUpAllowedAt      time.Time
+	lastScaleUpAttemptAt      time.Time
+	lastAllocationError       string
+	lastAllocationErrorAt     time.Time
 
 	Metadata atomic.Pointer[proto.PoolMetadata]
 }
 
 type AutoScaledPoolConfig struct {
-	Context              context.Context
-	Backend              ResourcePoolBackend
-	MinIdle              int
-	MaxIdle              int
-	IdleDecay            time.Duration
-	MinSize              int
-	MaxSize              int
-	SyncLoopInterval     time.Duration
-	KillUnknownAfter     time.Duration
-	DefaultSlotsPerAgent int
-	Batch                bool
-	Metadata             *proto.PoolMetadata
+	Context                   context.Context
+	Backend                   ResourcePoolBackend
+	MinIdle                   int
+	MaxIdle                   int
+	IdleDecay                 time.Duration
+	MinSize                   int
+	MaxSize                   int
+	SyncLoopInterval          time.Duration
+	KillUnknownAfter          time.Duration
+	DefaultSlotsPerAgent      int
+	Batch                     bool
+	Metadata                  *proto.PoolMetadata
+	ScaleUpErrorRetryDelay    time.Duration
+	AllocationErrorResetAfter time.Duration
 }
 
 func NewAutoScaledPool(name string, config AutoScaledPoolConfig) *AutoScaledPool {
@@ -229,6 +262,18 @@ func NewAutoScaledPool(name string, config AutoScaledPoolConfig) *AutoScaledPool
 
 func (p *AutoScaledPool) syncLoop(ctx context.Context) {
 	defer p.syncLoopTimer.Stop()
+	var events <-chan ResourcePoolEvent
+	updateEvents := func() {
+		p.mu.Lock()
+		backend := p.backend
+		p.mu.Unlock()
+		if notifiable, ok := backend.(ResourcePoolNotifiable); ok {
+			events = notifiable.Events()
+			return
+		}
+		events = nil
+	}
+	updateEvents()
 	sync := func() {
 		for {
 			err := p.Reconnect(ctx)
@@ -239,6 +284,7 @@ func (p *AutoScaledPool) syncLoop(ctx context.Context) {
 			if err != nil {
 				p.logPrintf("Failed to reconnect: %v", err)
 			}
+			updateEvents()
 			break
 		}
 	}
@@ -249,8 +295,15 @@ func (p *AutoScaledPool) syncLoop(ctx context.Context) {
 			return
 		case <-p.syncLoopTimer.C:
 			sync()
+		case event, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			p.handleResourcePoolEvent(event)
 		case <-p.syncNow:
 			p.syncLoopTimer.Reset(p.syncLoopInterval)
+			updateEvents()
 			sync()
 		}
 	}
@@ -410,6 +463,7 @@ func (p *AutoScaledPool) MarkDeleting(workerName string) error {
 func (p *AutoScaledPool) NotifyAgentAvailable(name string, busy bool, statusChannel chan AgentStatusRequest, availableSlot int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.clearAllocationErrorLocked()
 	var oldStatus WorkerStatusCode
 	if busy {
 		oldStatus = p.setWorkerStatusLocked(name, WorkerStatusRunning, availableSlot)
@@ -499,6 +553,14 @@ func (p *AutoScaledPool) UpdateConfig(config *AutoScaledPoolConfig) {
 	if p.defaultSlotsPerAgent <= 0 {
 		p.defaultSlotsPerAgent = 1
 	}
+	p.scaleUpErrorRetryDelay = config.ScaleUpErrorRetryDelay
+	if p.scaleUpErrorRetryDelay <= 0 {
+		p.scaleUpErrorRetryDelay = defaultScaleUpErrorRetryDelay
+	}
+	p.allocationErrorResetAfter = config.AllocationErrorResetAfter
+	if p.allocationErrorResetAfter <= 0 {
+		p.allocationErrorResetAfter = 30*time.Second + p.scaleUpErrorRetryDelay
+	}
 	if p.maxIdle < p.minIdle+p.defaultSlotsPerAgent-1 {
 		log.Printf("Pool %s: maxIdle (%d) is less than minIdle (%d) + defaultSlotsPerAgent (%d) - 1. Adjusting maxIdle to %d.",
 			p.name, p.maxIdle, p.minIdle, p.defaultSlotsPerAgent, p.minIdle+p.defaultSlotsPerAgent-1)
@@ -538,9 +600,16 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 		return
 	}
 	for !p.batch && (p.idleSizeLocked() < p.minIdle || p.sizeLocked() < p.minSize) && p.sizeLocked() < p.maxSize {
+		now := time.Now()
+		p.maybeResetAllocationErrorLocked(now)
+		if now.Before(p.nextScaleUpAllowedAt) {
+			p.scheduleScaleUpRetryLocked()
+			break
+		}
+		p.lastScaleUpAttemptAt = now
 		name, err := p.backend.RequestScaleUp(p.ctx)
 		if err != nil {
-			// TODO: Needs add backoff
+			p.markAllocationErrorLocked(err.Error())
 			p.logPrintf("Failed to scale up: %v", err)
 			break
 		}
@@ -682,6 +751,9 @@ func (p *AutoScaledPool) idleSizeLocked() int {
 
 func (p *AutoScaledPool) shutdown() {
 	p.killIdleTimer.Stop()
+	if p.scaleUpRetryTimer != nil {
+		p.scaleUpRetryTimer.Stop()
+	}
 }
 
 func (p *AutoScaledPool) setWorkerStatusLocked(name string, status WorkerStatusCode, newIdleSlots int) WorkerStatusCode {
@@ -736,4 +808,90 @@ func (p *AutoScaledPool) logPrintf(format string, args ...interface{}) {
 
 func (p *AutoScaledPool) Backend() ResourcePoolBackend {
 	return p.backend
+}
+
+func (p *AutoScaledPool) GetAllocationStatus() PoolAllocationStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.maybeResetAllocationErrorLocked(time.Now())
+	if p.lastAllocationErrorAt.IsZero() {
+		return PoolAllocationStatus{}
+	}
+	return PoolAllocationStatus{
+		LastAllocationError:   p.lastAllocationError,
+		LastAllocationErrorAt: p.lastAllocationErrorAt,
+	}
+}
+
+func (p *AutoScaledPool) handleResourcePoolEvent(event ResourcePoolEvent) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.markAllocationErrorLocked(event.Detail)
+	if _, ok := p.workerStatus[event.WorkerName]; ok {
+		p.removeWorkerLocked(event.WorkerName)
+	} else if p.pendingUnknownWorkers > 0 {
+		p.pendingUnknownWorkers--
+		p.idleSlots -= p.defaultSlotsPerAgent
+		p.logPrintf("Allocation error for unnamed worker(%s), remaining unknown pending: %d", event.WorkerName, p.pendingUnknownWorkers)
+	} else {
+		p.logPrintf("Allocation error for unknown worker %s", event.WorkerName)
+	}
+	p.maintainIdleWorkers()
+
+}
+
+func (p *AutoScaledPool) markAllocationErrorLocked(detail string) {
+	if detail == "" {
+		detail = "allocation failed"
+	}
+	now := time.Now()
+	p.lastAllocationError = detail
+	p.lastAllocationErrorAt = now
+	p.nextScaleUpAllowedAt = now.Add(p.scaleUpErrorRetryDelay)
+	p.scheduleScaleUpRetryLocked()
+}
+
+func (p *AutoScaledPool) clearAllocationErrorLocked() {
+	p.lastAllocationError = ""
+	p.lastAllocationErrorAt = time.Time{}
+	p.nextScaleUpAllowedAt = time.Time{}
+	if p.scaleUpRetryTimer != nil {
+		p.scaleUpRetryTimer.Stop()
+	}
+}
+
+func (p *AutoScaledPool) maybeResetAllocationErrorLocked(now time.Time) {
+	if p.lastAllocationErrorAt.IsZero() || p.allocationErrorResetAfter <= 0 {
+		return
+	}
+	if p.lastScaleUpAttemptAt.IsZero() {
+		return
+	}
+	if now.Sub(p.lastScaleUpAttemptAt) >= p.allocationErrorResetAfter {
+		p.clearAllocationErrorLocked()
+	}
+}
+
+func (p *AutoScaledPool) scheduleScaleUpRetryLocked() {
+	if p.nextScaleUpAllowedAt.IsZero() {
+		if p.scaleUpRetryTimer != nil {
+			p.scaleUpRetryTimer.Stop()
+		}
+		return
+	}
+	delay := time.Until(p.nextScaleUpAllowedAt)
+	if delay < 0 {
+		delay = 0
+	}
+	if p.scaleUpRetryTimer == nil {
+		p.scaleUpRetryTimer = time.AfterFunc(delay, p.retryScaleUp)
+		return
+	}
+	p.scaleUpRetryTimer.Reset(delay)
+}
+
+func (p *AutoScaledPool) retryScaleUp() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.maintainIdleWorkers()
 }

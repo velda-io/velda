@@ -16,7 +16,11 @@ package backends
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"velda.io/velda/pkg/broker"
 )
@@ -76,6 +80,7 @@ type asyncBackendManager struct {
 	terminatingWorkers map[string]struct{}
 	suspendingWorkers  map[string]struct{}
 	resumingWorkers    map[string]struct{}
+	events             chan broker.ResourcePoolEvent
 
 	lastOp chan struct{}
 }
@@ -92,6 +97,7 @@ func MakeAsync(backend SyncBackend) broker.ResourcePoolBackend {
 		terminatingWorkers: make(map[string]struct{}),
 		suspendingWorkers:  make(map[string]struct{}),
 		resumingWorkers:    make(map[string]struct{}),
+		events:             make(chan broker.ResourcePoolEvent, 16),
 	}
 }
 
@@ -111,7 +117,12 @@ func MakeAsyncResumable(backend SyncBackend, maxSuspended int) broker.ResourcePo
 		terminatingWorkers: make(map[string]struct{}),
 		suspendingWorkers:  make(map[string]struct{}),
 		resumingWorkers:    make(map[string]struct{}),
+		events:             make(chan broker.ResourcePoolEvent, 16),
 	}
+}
+
+func (m *asyncBackendManager) Events() <-chan broker.ResourcePoolEvent {
+	return m.events
 }
 
 // RequestScaleUp implements broker.ResourcePoolBackend
@@ -152,6 +163,7 @@ func (m *asyncBackendManager) RequestScaleUp(ctx context.Context) (string, error
 			err := m.resumable.ResumeWorker(ctx, name, workerInfo)
 			if err != nil {
 				log.Printf("Failed to resume worker %s: %v", name, err)
+				m.emitCreationErrorEvent(name, err)
 				return
 			}
 
@@ -197,6 +209,7 @@ func (m *asyncBackendManager) RequestScaleUp(ctx context.Context) (string, error
 		workerInfo, err := m.backend.CreateWorker(ctx, name)
 		if err != nil {
 			log.Printf("Failed to create worker %s: %v", name, err)
+			m.emitCreationErrorEvent(name, err)
 			return
 		}
 
@@ -366,4 +379,31 @@ func (m *asyncBackendManager) WaitForLastOperation(ctx context.Context) error {
 		<-op
 	}
 	return nil
+}
+
+func (m *asyncBackendManager) emitCreationErrorEvent(workerName string, err error) {
+	event := broker.ResourcePoolEvent{
+		WorkerName: workerName,
+		EventType:  broker.ResourcePoolEventTypeStartupFailure,
+		Detail:     err.Error(),
+	}
+	if isResourceExhaustedError(err) {
+		event.EventType = broker.ResourcePoolEventTypeResourceExhausted
+	}
+	select {
+	case m.events <- event:
+	default:
+		log.Printf("Dropping pool event for worker %s: event channel is full", workerName)
+	}
+}
+
+func isResourceExhaustedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if st, ok := status.FromError(err); ok && st.Code() == codes.ResourceExhausted {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "resource exhausted")
 }
