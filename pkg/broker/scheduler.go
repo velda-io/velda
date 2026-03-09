@@ -15,18 +15,17 @@ package broker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
 
 	"github.com/emirpasic/gods/sets/treeset"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	configproto "velda.io/velda/pkg/proto/config"
 )
-
-var UnknownPoolError = errors.New("pool not found")
 
 type SchedulerSet struct {
 	AllowCreateNewPool bool
@@ -65,7 +64,7 @@ func (s *SchedulerSet) getOrCreatePool(pool string, createAllowed bool) (*Schedu
 			}
 			s.agents[pool] = p
 		} else {
-			return nil, fmt.Errorf("%w: %s", UnknownPoolError, pool)
+			return nil, status.Errorf(codes.NotFound, "pool not found: %s", pool)
 		}
 	}
 	return p, nil

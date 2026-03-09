@@ -76,8 +76,12 @@ func (r *LocalBtrfsRunner) Setup(t *testing.T) {
 
 		// Unmount the filesystem
 		if r.mountPoint != "" {
-			_ = exec.Command("sudo", "umount", r.mountPoint).Run()
-			time.Sleep(1 * time.Second)
+			output, err := exec.Command("sudo", "umount", "-Rfl", r.mountPoint).CombinedOutput()
+			if err != nil {
+				t.Logf("Warning: Failed to unmount %s: %v, output: %s", r.mountPoint, err, string(output))
+			} else {
+				t.Logf("Unmounted %s", r.mountPoint)
+			}
 		}
 
 		// Detach loop device
