@@ -3,6 +3,7 @@ syntax = "proto3";
 package velda;
 
 import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "velda.io/velda/pkg/proto";
 
@@ -10,9 +11,24 @@ message ListPoolsRequest {
   reserved 32 to 64;
 }
 
+message GetPoolRequest {
+  string pool = 1;
+  reserved 32 to 64;
+}
+
+message PoolAutoscalerStatus {
+  string last_allocation_error = 1;
+  google.protobuf.Timestamp last_allocation_error_time = 2;
+}
+
+message GetPoolResponse {
+  Pool pool = 1;
+}
+
 message Pool {
   string name = 1;
   string description = 2;
+  PoolAutoscalerStatus autoscaler_status = 3;
   reserved 50 to 100;
 }
 
@@ -23,7 +39,12 @@ message ListPoolsResponse {
 service PoolManagerService {
   rpc ListPools(ListPoolsRequest) returns (ListPoolsResponse) {
     option (google.api.http) = {
-            get: "/rest/velda/pool"
-        };
+      get : "/rest/velda/pool"
+    };
+  };
+  rpc GetPool(GetPoolRequest) returns (GetPoolResponse) {
+    option (google.api.http) = {
+      get : "/rest/velda/pool/{pool}"
+    };
   };
 }

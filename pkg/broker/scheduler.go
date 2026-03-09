@@ -84,6 +84,30 @@ func (s *SchedulerSet) GetPools() map[string]*configproto.PoolMetadata {
 	return result
 }
 
+func (s *SchedulerSet) GetPoolAllocationStatuses() map[string]PoolAllocationStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make(map[string]PoolAllocationStatus, len(s.agents))
+	for k, v := range s.agents {
+		if strings.Contains(k, ":") || v.PoolManager == nil {
+			continue
+		}
+		result[k] = v.PoolManager.GetAllocationStatus()
+	}
+	return result
+}
+
+func (s *SchedulerSet) GetPoolAllocationStatus(pool string) (PoolAllocationStatus, error) {
+	p, err := s.GetPool(pool)
+	if err != nil {
+		return PoolAllocationStatus{}, err
+	}
+	if p.PoolManager == nil {
+		return PoolAllocationStatus{}, nil
+	}
+	return p.PoolManager.GetAllocationStatus(), nil
+}
+
 type Scheduler struct {
 	PoolManager *AutoScaledPool
 	agents      map[string]*Agent

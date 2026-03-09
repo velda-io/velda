@@ -37,11 +37,21 @@ type FakeBackend struct {
 	deletedWorkers     []string
 	// If true, RequestScaleUp will create a worker but return empty name
 	noWorkerName bool
+	scaleUpErr   error
+	scaleUpCalls int
+	events       chan ResourcePoolEvent
 }
+
+var _ ResourcePoolBackend = (*FakeBackend)(nil)
+var _ ResourcePoolNotifiable = (*FakeBackend)(nil)
 
 func (f *FakeBackend) RequestScaleUp(ctx context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.scaleUpCalls++
+	if f.scaleUpErr != nil {
+		return "", f.scaleUpErr
+	}
 	var name string
 	// Recycle deleted worker names if enabled
 	if f.recycleWorkerNames && len(f.deletedWorkers) > 0 {
@@ -65,6 +75,20 @@ func (f *FakeBackend) RequestScaleUp(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	return name, nil
+}
+
+func (f *FakeBackend) ScaleUpCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.scaleUpCalls
+}
+
+func (f *FakeBackend) Events() <-chan ResourcePoolEvent {
+	return f.events
+}
+
+func (f *FakeBackend) EmitEvent(event ResourcePoolEvent) {
+	f.events <- event
 }
 
 func (f *FakeBackend) GetPending(t *testing.T) string {
@@ -639,4 +663,191 @@ func TestWorkerRestartWithSameID(t *testing.T) {
 		assert.Equal(t, 1, backend.NumWorkers(),
 			"No extra worker should be provisioned on reconnect")
 	})
+}
+
+func TestPoolStatusRetryDelayAndReset(t *testing.T) {
+	backend := &FakeBackend{
+		workers:    []WorkerStatus{},
+		clock:      time.Now,
+		scaleUpErr: fmt.Errorf("temporary capacity issue"),
+	}
+
+	pool := NewAutoScaledPool("pool", AutoScaledPoolConfig{
+		Context:                   context.Background(),
+		Backend:                   backend,
+		MinIdle:                   0,
+		MaxIdle:                   1,
+		MaxSize:                   5,
+		ScaleUpErrorRetryDelay:    80 * time.Millisecond,
+		AllocationErrorResetAfter: 120 * time.Millisecond,
+		DefaultSlotsPerAgent:      1,
+	})
+
+	pool.ReadyForIdleMaintenance()
+	require.NoError(t, pool.RequestWorker())
+	require.Equal(t, 1, backend.ScaleUpCallCount())
+	status1 := pool.GetAllocationStatus()
+	require.NotEmpty(t, status1.LastAllocationError)
+
+	for i := 0; i < 3; i++ {
+		require.NoError(t, pool.RequestWorker())
+	}
+	require.Equal(t, 1, backend.ScaleUpCallCount(), "should be rate-limited during cooldown")
+
+	time.Sleep(90 * time.Millisecond)
+	require.NoError(t, pool.RequestWorker())
+	require.Eventually(t, func() bool {
+		return backend.ScaleUpCallCount() >= 2
+	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, pool.RequestCancelled())
+	require.NoError(t, pool.RequestCancelled())
+	require.NoError(t, pool.RequestCancelled())
+	require.NoError(t, pool.RequestCancelled())
+	require.NoError(t, pool.RequestCancelled())
+
+	time.Sleep(140 * time.Millisecond)
+	status2 := pool.GetAllocationStatus()
+	require.Empty(t, status2.LastAllocationError, "status should reset after no scale-up attempts period")
+}
+
+func TestPoolStatusResetOnNotifyAgentAvailable(t *testing.T) {
+	backend := &FakeBackend{
+		workers:    []WorkerStatus{},
+		clock:      time.Now,
+		scaleUpErr: fmt.Errorf("allocation failed"),
+	}
+
+	pool := NewAutoScaledPool("pool", AutoScaledPoolConfig{
+		Context:              context.Background(),
+		Backend:              backend,
+		MinIdle:              1,
+		MaxIdle:              1,
+		MaxSize:              2,
+		DefaultSlotsPerAgent: 1,
+	})
+
+	pool.ReadyForIdleMaintenance()
+	require.NotEmpty(t, pool.GetAllocationStatus().LastAllocationError)
+
+	require.NoError(t, pool.NotifyAgentAvailable("worker-1", false, make(chan AgentStatusRequest, 1), 1))
+	require.Empty(t, pool.GetAllocationStatus().LastAllocationError)
+}
+
+func TestAllocationErrorEventWithUnknownWorkerName(t *testing.T) {
+	backend := &FakeBackend{
+		workers:      []WorkerStatus{},
+		clock:        time.Now,
+		noWorkerName: true,
+		events:       make(chan ResourcePoolEvent, 2),
+	}
+
+	pool := NewAutoScaledPool("pool", AutoScaledPoolConfig{
+		Context:                context.Background(),
+		Backend:                backend,
+		MinIdle:                1,
+		MaxIdle:                1,
+		MaxSize:                2,
+		DefaultSlotsPerAgent:   1,
+		ScaleUpErrorRetryDelay: 80 * time.Millisecond,
+	})
+
+	require.Eventually(t, func() bool {
+		return backend.ScaleUpCallCount() >= 1
+	}, time.Second, 10*time.Millisecond)
+
+	backend.EmitEvent(ResourcePoolEvent{
+		WorkerName: backend.GetPending(t),
+		EventType:  ResourcePoolEventTypeStartupFailure,
+		Detail:     "startup failed",
+	})
+
+	require.Eventually(t, func() bool {
+		return backend.ScaleUpCallCount() >= 2
+	}, time.Second, 10*time.Millisecond)
+	require.NotEmpty(t, pool.GetAllocationStatus().LastAllocationError)
+}
+
+func TestScaleUpRetriesAfterCooldownWithoutRequestWorker(t *testing.T) {
+	backend := &FakeBackend{
+		workers: []WorkerStatus{},
+		clock:   time.Now,
+	}
+
+	backend.scaleUpErr = fmt.Errorf("first allocation failed")
+
+	pool := NewAutoScaledPool("pool", AutoScaledPoolConfig{
+		Context:                context.Background(),
+		Backend:                backend,
+		MinIdle:                1,
+		MaxIdle:                1,
+		MaxSize:                5,
+		ScaleUpErrorRetryDelay: 80 * time.Millisecond,
+		DefaultSlotsPerAgent:   1,
+	})
+
+	pool.ReadyForIdleMaintenance()
+	require.Equal(t, 1, backend.ScaleUpCallCount())
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		backend.mu.Lock()
+		backend.scaleUpErr = nil
+		backend.mu.Unlock()
+	}()
+
+	require.Eventually(t, func() bool {
+		return backend.ScaleUpCallCount() >= 2
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestScaleUpSuccessThenStartupFailureEventRetriesUntilRecovered(t *testing.T) {
+	backend := &FakeBackend{
+		workers: []WorkerStatus{},
+		clock:   time.Now,
+		events:  make(chan ResourcePoolEvent),
+	}
+
+	pool := NewAutoScaledPool("pool", AutoScaledPoolConfig{
+		Context:                   context.Background(),
+		Backend:                   backend,
+		MinIdle:                   1,
+		MaxIdle:                   1,
+		MaxSize:                   5,
+		ScaleUpErrorRetryDelay:    80 * time.Millisecond,
+		AllocationErrorResetAfter: 100 * time.Second,
+		DefaultSlotsPerAgent:      1,
+	})
+
+	pool.ReadyForIdleMaintenance()
+	require.Equal(t, 1, backend.ScaleUpCallCount())
+
+	event := ResourcePoolEvent{
+		WorkerName: backend.GetPending(t),
+		EventType:  ResourcePoolEventTypeResourceExhausted,
+		Detail:     "resource exhausted",
+	}
+	t1 := time.Now()
+	backend.EmitEvent(event)
+
+	require.Eventually(t, func() bool {
+		return backend.ScaleUpCallCount() >= 2
+	}, 600*time.Millisecond, 10*time.Millisecond)
+
+	require.NotEmpty(t, pool.GetAllocationStatus().LastAllocationError)
+	assert.Greater(t, time.Since(t1), 80*time.Millisecond, "should wait for cooldown before retrying")
+
+	t2 := time.Now()
+
+	backend.EmitEvent(ResourcePoolEvent{
+		WorkerName: backend.GetPending(t),
+		EventType:  ResourcePoolEventTypeResourceExhausted,
+		Detail:     "Resource exhausted 2",
+	})
+
+	require.Eventually(t, func() bool {
+		return backend.ScaleUpCallCount() >= 3
+	}, 600*time.Millisecond, 10*time.Millisecond)
+	assert.Greater(t, time.Since(t2), 80*time.Millisecond, "should wait for cooldown before retrying")
+
+	pool.NotifyAgentAvailable(backend.GetPending(t), false, make(chan AgentStatusRequest, 1), 1)
 }

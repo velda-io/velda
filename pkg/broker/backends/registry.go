@@ -82,18 +82,20 @@ func AutoScaledConfigFromConfig(ctx context.Context, cfg *proto.AgentPool, defau
 
 func AutoScaledConfigFromBackend(ctx context.Context, backend broker.ResourcePoolBackend, autoScalerCfg *proto.AgentPool_AutoScaler) *broker.AutoScaledPoolConfig {
 	return &broker.AutoScaledPoolConfig{
-		Context:              ctx,
-		Backend:              backend,
-		MinIdle:              int(autoScalerCfg.MinIdleAgents),
-		MaxIdle:              int(autoScalerCfg.MaxIdleAgents),
-		IdleDecay:            autoScalerCfg.IdleDecay.AsDuration(),
-		MaxSize:              int(autoScalerCfg.MaxAgents),
-		MinSize:              int(autoScalerCfg.GetMinAgents()),
-		SyncLoopInterval:     autoScalerCfg.SyncLoopInterval.AsDuration(),
-		KillUnknownAfter:     autoScalerCfg.KillUnknownAfter.AsDuration(),
-		DefaultSlotsPerAgent: int(autoScalerCfg.DefaultSlotsPerAgent),
-		Batch:                autoScalerCfg.Mode == proto.AgentPool_AutoScaler_MODE_BATCH,
-		Metadata:             autoScalerCfg.Metadata,
+		Context:                   ctx,
+		Backend:                   backend,
+		MinIdle:                   int(autoScalerCfg.MinIdleAgents),
+		MaxIdle:                   int(autoScalerCfg.MaxIdleAgents),
+		IdleDecay:                 autoScalerCfg.IdleDecay.AsDuration(),
+		MaxSize:                   int(autoScalerCfg.MaxAgents),
+		MinSize:                   int(autoScalerCfg.GetMinAgents()),
+		SyncLoopInterval:          autoScalerCfg.SyncLoopInterval.AsDuration(),
+		KillUnknownAfter:          autoScalerCfg.KillUnknownAfter.AsDuration(),
+		DefaultSlotsPerAgent:      int(autoScalerCfg.DefaultSlotsPerAgent),
+		Batch:                     autoScalerCfg.Mode == proto.AgentPool_AutoScaler_MODE_BATCH,
+		Metadata:                  autoScalerCfg.Metadata,
+		ScaleUpErrorRetryDelay:    autoScalerCfg.GetScaleUpErrorRetryDelay().AsDuration(),
+		AllocationErrorResetAfter: autoScalerCfg.GetAllocationErrorResetAfter().AsDuration(),
 	}
 }
 
