@@ -37,6 +37,12 @@ import (
 
 const CheckPointedExitCode = 100
 
+const (
+	workloadMemReserveMinBytes    = 256 * 1024 * 1024
+	workloadMemReserveNumerator   = 10
+	workloadMemReserveDenominator = 100
+)
+
 type Runner struct {
 	proto.UnimplementedAgentDaemonServer
 	executable  string
@@ -356,6 +362,13 @@ func (r *Runner) setupCgroup(session string) (string, error) {
 		return cgroupPath, fmt.Errorf("WriteFile cgroup.subtree_control: %w", err)
 	}
 
+	workloadMemMax, err := r.workloadMemoryLimitBytes()
+	if err != nil {
+		return cgroupPath, fmt.Errorf("calculate workload memory limit: %w", err)
+	}
+	if err := os.WriteFile(path.Join(workloadCg, "memory.max"), []byte(strconv.FormatUint(workloadMemMax, 10)), 0400); err != nil {
+		return cgroupPath, fmt.Errorf("WriteFile workload memory.max: %w", err)
+	}
 	return cgroupPath, nil
 }
 
@@ -365,4 +378,68 @@ func (r *Runner) cleanupCgroup(session string) error {
 		return fmt.Errorf("RemoveAll cgroup: %w", err)
 	}
 	return nil
+}
+
+func (r *Runner) workloadMemoryLimitBytes() (uint64, error) {
+	systemLimitBytes, err := systemMemoryLimitBytes()
+	if err != nil {
+		return 0, fmt.Errorf("read system memory limit: %w", err)
+	}
+
+	rootCgroupLimitBytes, err := parseCgroupMemMax(path.Join("/sys/fs/cgroup", r.baseCgroup[1:], "memory.max"))
+	if err != nil {
+		return 0, fmt.Errorf("read root cgroup memory.max: %w", err)
+	}
+
+	effectiveLimitBytes := systemLimitBytes
+	if rootCgroupLimitBytes > 0 && rootCgroupLimitBytes < effectiveLimitBytes {
+		effectiveLimitBytes = rootCgroupLimitBytes
+	}
+
+	reserveBytes := effectiveLimitBytes * workloadMemReserveNumerator / workloadMemReserveDenominator
+	if reserveBytes < workloadMemReserveMinBytes {
+		reserveBytes = workloadMemReserveMinBytes
+	}
+	if effectiveLimitBytes <= reserveBytes {
+		return 0, fmt.Errorf("effective memory limit %d is too small for reserve %d", effectiveLimitBytes, reserveBytes)
+	}
+	return effectiveLimitBytes - reserveBytes, nil
+}
+
+func systemMemoryLimitBytes() (uint64, error) {
+	meminfo, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0, err
+	}
+	for _, line := range strings.Split(string(meminfo), "\n") {
+		if !strings.HasPrefix(line, "MemTotal:") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			return 0, fmt.Errorf("invalid MemTotal line: %q", line)
+		}
+		kib, err := strconv.ParseUint(parts[1], 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse MemTotal: %w", err)
+		}
+		return kib * 1024, nil
+	}
+	return 0, fmt.Errorf("MemTotal not found")
+}
+
+func parseCgroupMemMax(cgroupMemMaxPath string) (uint64, error) {
+	data, err := os.ReadFile(cgroupMemMaxPath)
+	if err != nil {
+		return 0, err
+	}
+	v := strings.TrimSpace(string(data))
+	if v == "max" {
+		return 0, nil
+	}
+	memMax, err := strconv.ParseUint(v, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("unexpected memory.max value %q: %w", v, err)
+	}
+	return memMax, nil
 }
