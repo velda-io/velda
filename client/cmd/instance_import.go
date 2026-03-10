@@ -59,7 +59,7 @@ func init() {
 	f := importContainerCmd.Flags()
 	f.String("auth", "anonymous",
 		"Registry auth method: anonymous (default), docker (default keychain), google (GCR/AR), manual (stdin prompt)")
-	f.Bool("post-install", false, "Whether to run post-install script included in the image, if any. By default, the post-install script will be run if detected. Set this flag to false to skip running the post-install script.")
+	f.Bool("post-install", true, "Whether to run post-install script included in the image, if any. By default, the post-install script will be run if detected. Set this flag to false to skip running the post-install script.")
 }
 
 func runImportContainer(cmd *cobra.Command, args []string) error {
@@ -130,6 +130,7 @@ func remountRootReadWrite() error {
 func extractTarToRoot(cmd *cobra.Command, r io.Reader) error {
 	tr := tar.NewReader(r)
 
+	// This is only used to initialize from an empty root, so we don't check if writing to symlink will escape.
 	var entryCount int64
 	for {
 		hdr, err := tr.Next()
