@@ -260,9 +260,9 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 # Initialize user
 install_sudo() {
     echo "Installing sudo..."
-    $(which -s apt-get) && apt-get update && apt-get install -y sudo && return 0
-    $(which -s yum) && yum install -y sudo && return 0
-    $(which -s dnf) && dnf install -y sudo && return 0
+    $(which apt-get) && apt-get update && apt-get install -y sudo && return 0
+    $(which yum) && yum install -y sudo && return 0
+    $(which dnf) && dnf install -y sudo && return 0
 	echo "Could not install sudo, unsupported package manager"
 }
 
