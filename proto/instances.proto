@@ -23,6 +23,8 @@ message Instance {
   // Only to be filled by the server.
   int64 id = 1;
   string instance_name = 2;
+  // Optional: set by CreateInstance when docker_image initialization is enqueued.
+  string init_task_id = 50;
 }
 
 message SnapshotReference {
@@ -40,6 +42,13 @@ message CreateInstanceRequest {
   // If not specified, uses the current region.
   // Only used for hosted / enterprise.
   string region = 4;
+
+  // Optional: if set, the server will enqueue a remote initialization task
+  // that imports this container image into the newly created instance.
+  string docker_image = 5;
+
+  // Optional: skip the post-install initialization script when docker_image is set.
+  bool skip_docker_init_script = 6;
 }
 
 message GetInstanceRequest {

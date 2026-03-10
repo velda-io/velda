@@ -46,10 +46,8 @@ var createInstanceCmd = &cobra.Command{
 		snapshotName, _ := cmd.Flags().GetString("snapshot")
 		dockerImage, _ := cmd.Flags().GetString("docker-image")
 		tarFile, _ := cmd.Flags().GetString("tar-file")
-
 		region, _ := cmd.Flags().GetString("region")
 
-		// Validate that only one source is specified
 		sourceCount := 0
 		if image != "" {
 			sourceCount++
@@ -64,54 +62,43 @@ var createInstanceCmd = &cobra.Command{
 			sourceCount++
 		}
 		if sourceCount > 1 {
-			return fmt.Errorf("Only one of --image, --from-instance, or --docker-image can be specified")
+			return fmt.Errorf("Only one of --image, --from-instance, --docker-image, or --tar-file can be specified")
 		}
 
-		// Handle docker-image creation
 		if dockerImage != "" {
 			return createInstanceFromDocker(cmd, client, name, dockerImage)
 		}
-
-		// Handle tar-file creation
 		if tarFile != "" {
 			return createInstanceFromTar(cmd, client, name, tarFile)
 		}
 
 		request := &proto.CreateInstanceRequest{
-			Instance: &proto.Instance{
-				InstanceName: name,
-			},
-			Region: region,
+			Instance: &proto.Instance{InstanceName: name},
+			Region:   region,
 		}
 		if image != "" {
-			request.Source = &proto.CreateInstanceRequest_ImageName{
-				ImageName: image,
-			}
+			request.Source = &proto.CreateInstanceRequest_ImageName{ImageName: image}
 			cmd.Printf("Using image %s\n", image)
 		} else if fromInstance != "" {
-			instanceId, err := clientlib.ParseInstanceId(
-				cmd.Context(), fromInstance, clientlib.FallbackToSession)
+			instanceId, err := clientlib.ParseInstanceId(cmd.Context(), fromInstance, clientlib.FallbackToSession)
 			if err != nil {
 				return fmt.Errorf("Error parsing instance ID: %v", err)
 			}
 			cmd.Printf("Cloning from instance %d@%s\n", instanceId, snapshotName)
 			request.Source = &proto.CreateInstanceRequest_Snapshot{
-				Snapshot: &proto.SnapshotReference{
-					InstanceId:   instanceId,
-					SnapshotName: snapshotName,
-				},
+				Snapshot: &proto.SnapshotReference{InstanceId: instanceId, SnapshotName: snapshotName},
 			}
 		} else {
 			cmd.Println(`No image or instance specified, creating empty instance.
 Use scp/SFTP to upload files to the instance.`)
 		}
+
 		cmd.Printf("Creating instance %s\n", name)
 		instance, err := client.CreateInstance(cmd.Context(), request)
 		if err != nil {
 			return fmt.Errorf("Error creating instance: %v", err)
 		}
-		cmd.Printf("Instance %s created with ID %d\n",
-			instance.InstanceName, instance.Id)
+		cmd.Printf("Instance %s created with ID %d\n", instance.InstanceName, instance.Id)
 		return nil
 	},
 }
@@ -131,24 +118,22 @@ func init() {
 	flags.String("region", "", "Region to create the instance in (defaults to current region)")
 }
 
-// createInstanceFromDocker creates an instance and initializes it from a container image
-// using a remote batch workload. No local docker/container runtime is required.
 func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceClient, name, dockerImage string) error {
 	quiet, _ := cmd.Flags().GetBool("quiet")
 	region, _ := cmd.Flags().GetString("region")
+	noInit, _ := cmd.Flags().GetBool("no-init")
 	pr := func(format string, a ...interface{}) {
 		if !quiet {
 			cmd.PrintErrf(format, a...)
 		}
 	}
-	pr("Creating instance %s from container image %s\n", name, dockerImage)
 
-	// Create an empty instance first
+	pr("Creating instance %s from container image %s\n", name, dockerImage)
 	request := &proto.CreateInstanceRequest{
-		Instance: &proto.Instance{
-			InstanceName: name,
-		},
-		Region: region,
+		Instance:             &proto.Instance{InstanceName: name},
+		Region:               region,
+		DockerImage:          dockerImage,
+		SkipDockerInitScript: noInit,
 	}
 
 	instance, err := client.CreateInstance(cmd.Context(), request)
@@ -157,38 +142,9 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 	}
 	pr("Instance %s created with ID %d\n", instance.InstanceName, instance.Id)
 
-	brokerClient, err := clientlib.GetBrokerClient()
-	if err != nil {
-		return fmt.Errorf("failed to get broker client: %v", err)
-	}
-
-	noInit, _ := cmd.Flags().GetBool("no-init")
-	postInstall := !noInit
-
-	pr("Submitting remote initialization workload...\n")
-	args := []string{"instance", "import", "--auth", "anonymous", dockerImage}
-	if postInstall {
-		args = append(args, "--post-install")
-	}
-	resp, err := brokerClient.RequestSession(cmd.Context(), &proto.SessionRequest{
-		ServiceName: "docker-init",
-		InstanceId:  instance.Id,
-		Pool:        "shell",
-		User:        "root",
-		Workload: &proto.Workload{
-			Command:    "/run/velda/velda",
-			Args:       args,
-			WorkingDir: "/",
-			LoginUser:  "root",
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to submit remote initialization workload: %v", err)
-	}
-
-	taskID := strings.TrimSpace(resp.GetTaskId())
+	taskID := strings.TrimSpace(instance.GetInitTaskId())
 	if taskID == "" {
-		return fmt.Errorf("remote initialization workload was submitted but no task ID was returned")
+		return fmt.Errorf("instance created but server did not return init task ID")
 	}
 
 	pr("Queued remote initialization for instance %s from image %s\n", name, dockerImage)
@@ -199,7 +155,6 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 	if follow {
 		return followTask(taskID)
 	}
-
 	return nil
 }
 
@@ -217,10 +172,8 @@ func createInstanceFromTar(cmd *cobra.Command, client proto.InstanceServiceClien
 	// Create an empty instance first
 	region, _ := cmd.Flags().GetString("region")
 	request := &proto.CreateInstanceRequest{
-		Instance: &proto.Instance{
-			InstanceName: name,
-		},
-		Region: region,
+		Instance: &proto.Instance{InstanceName: name},
+		Region:   region,
 	}
 
 	instance, err := client.CreateInstance(cmd.Context(), request)
