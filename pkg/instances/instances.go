@@ -15,10 +15,12 @@ package instances
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"regexp"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -58,14 +60,16 @@ type service struct {
 	db          InstanceDb
 	storage     storage.Storage
 	permissions rbac.Permissions
+	broker      proto.BrokerServiceServer
 	shardCount  int
 }
 
-func NewService(db InstanceDb, storagebackend storage.Storage, permissions rbac.Permissions, shardCount int) proto.InstanceServiceServer {
+func NewService(db InstanceDb, storagebackend storage.Storage, permissions rbac.Permissions, brokerService proto.BrokerServiceServer, shardCount int) proto.InstanceServiceServer {
 	return &service{
 		db:          db,
 		storage:     storagebackend,
 		permissions: permissions,
+		broker:      brokerService,
 		shardCount:  shardCount,
 	}
 }
@@ -132,7 +136,47 @@ func (s *service) CreateInstance(ctx context.Context, in *proto.CreateInstanceRe
 	if err := committer.Commit(); err != nil {
 		return nil, err
 	}
+
+	if in.GetDockerImage() != "" {
+		initTaskID, err := s.enqueueDockerInitTask(ctx, instance.Id, in.GetDockerImage(), in.GetSkipDockerInitScript())
+		if err != nil {
+			return nil, err
+		}
+		instance.InitTaskId = initTaskID
+	}
+
 	return instance, nil
+}
+
+func (s *service) enqueueDockerInitTask(ctx context.Context, instanceID int64, dockerImage string, skipInitScript bool) (string, error) {
+	if s.broker == nil {
+		return "", status.Errorf(codes.FailedPrecondition, "broker service not available")
+	}
+
+	args := []string{"instance", "import", "--auth", "anonymous", dockerImage}
+	if !skipInitScript {
+		args = append(args, "--post-install")
+	}
+	resp, err := s.broker.RequestSession(ctx, &proto.SessionRequest{
+		ServiceName: "instance-init",
+		InstanceId:  instanceID,
+		Pool:        "shell",
+		User:        "root",
+		Workload: &proto.Workload{
+			Command:    "/run/velda/velda",
+			Args:       args,
+			WorkingDir: "/",
+			LoginUser:  "root",
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to submit remote initialization workload: %v", err)
+	}
+	initTaskID := strings.TrimSpace(resp.GetTaskId())
+	if initTaskID == "" {
+		return "", errors.New("Instance init task submitted but no task id returned")
+	}
+	return initTaskID, nil
 }
 
 func (s *service) GetInstance(ctx context.Context, in *proto.GetInstanceRequest) (*proto.Instance, error) {

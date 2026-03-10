@@ -152,8 +152,8 @@ func ProvideDb(s storage.Storage, ctx context.Context) (database, error) {
 	return db, nil
 }
 
-func ProvideInstanceService(grpcServer *grpc.Server, mux *runtime.ServeMux, db instances.InstanceDb, storage storage.Storage, perm rbac.Permissions) proto.InstanceServiceServer {
-	s := instances.NewService(db, storage, perm, 1)
+func ProvideInstanceService(grpcServer *grpc.Server, mux *runtime.ServeMux, db instances.InstanceDb, storage storage.Storage, perm rbac.Permissions, broker proto.BrokerServiceServer) proto.InstanceServiceServer {
+	s := instances.NewService(db, storage, perm, broker, 1)
 	proto.RegisterInstanceServiceServer(grpcServer, s)
 	proto.RegisterInstanceServiceHandlerServer(context.Background(), mux, s)
 	return s

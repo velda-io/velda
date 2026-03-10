@@ -14,10 +14,8 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/pkg/sftp"
@@ -48,10 +46,8 @@ var createInstanceCmd = &cobra.Command{
 		snapshotName, _ := cmd.Flags().GetString("snapshot")
 		dockerImage, _ := cmd.Flags().GetString("docker-image")
 		tarFile, _ := cmd.Flags().GetString("tar-file")
-
 		region, _ := cmd.Flags().GetString("region")
 
-		// Validate that only one source is specified
 		sourceCount := 0
 		if image != "" {
 			sourceCount++
@@ -66,54 +62,43 @@ var createInstanceCmd = &cobra.Command{
 			sourceCount++
 		}
 		if sourceCount > 1 {
-			return fmt.Errorf("Only one of --image, --from-instance, or --docker-image can be specified")
+			return fmt.Errorf("Only one of --image, --from-instance, --docker-image, or --tar-file can be specified")
 		}
 
-		// Handle docker-image creation
 		if dockerImage != "" {
 			return createInstanceFromDocker(cmd, client, name, dockerImage)
 		}
-
-		// Handle tar-file creation
 		if tarFile != "" {
 			return createInstanceFromTar(cmd, client, name, tarFile)
 		}
 
 		request := &proto.CreateInstanceRequest{
-			Instance: &proto.Instance{
-				InstanceName: name,
-			},
-			Region: region,
+			Instance: &proto.Instance{InstanceName: name},
+			Region:   region,
 		}
 		if image != "" {
-			request.Source = &proto.CreateInstanceRequest_ImageName{
-				ImageName: image,
-			}
+			request.Source = &proto.CreateInstanceRequest_ImageName{ImageName: image}
 			cmd.Printf("Using image %s\n", image)
 		} else if fromInstance != "" {
-			instanceId, err := clientlib.ParseInstanceId(
-				cmd.Context(), fromInstance, clientlib.FallbackToSession)
+			instanceId, err := clientlib.ParseInstanceId(cmd.Context(), fromInstance, clientlib.FallbackToSession)
 			if err != nil {
 				return fmt.Errorf("Error parsing instance ID: %v", err)
 			}
 			cmd.Printf("Cloning from instance %d@%s\n", instanceId, snapshotName)
 			request.Source = &proto.CreateInstanceRequest_Snapshot{
-				Snapshot: &proto.SnapshotReference{
-					InstanceId:   instanceId,
-					SnapshotName: snapshotName,
-				},
+				Snapshot: &proto.SnapshotReference{InstanceId: instanceId, SnapshotName: snapshotName},
 			}
 		} else {
 			cmd.Println(`No image or instance specified, creating empty instance.
 Use scp/SFTP to upload files to the instance.`)
 		}
+
 		cmd.Printf("Creating instance %s\n", name)
 		instance, err := client.CreateInstance(cmd.Context(), request)
 		if err != nil {
 			return fmt.Errorf("Error creating instance: %v", err)
 		}
-		cmd.Printf("Instance %s created with ID %d\n",
-			instance.InstanceName, instance.Id)
+		cmd.Printf("Instance %s created with ID %d\n", instance.InstanceName, instance.Id)
 		return nil
 	},
 }
@@ -127,29 +112,28 @@ func init() {
 	flags.StringP("docker-image", "d", "", "Docker image to initialize the instance from (e.g., ubuntu:24.04)")
 	flags.String("tar-file", "", "Path to local tar file to initialize the instance from")
 	flags.BoolP("verbose", "v", false, "Enable verbose output during instance creation")
-	flags.BoolP("quiet", "q", false, "Suppress status output (still prints docker stderr on error)")
+	flags.BoolP("quiet", "q", false, "Suppress status output (task ID is still printed)")
+	flags.Bool("follow", true, "Wait for docker-image initialization task and stream status/logs")
 	flags.Bool("no-init", false, "Skip running the initialization script when creating from a Docker image")
 	flags.String("region", "", "Region to create the instance in (defaults to current region)")
 }
 
-// createInstanceFromDocker creates an instance and initializes it from a Docker image
 func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceClient, name, dockerImage string) error {
 	quiet, _ := cmd.Flags().GetBool("quiet")
-	verbose, _ := cmd.Flags().GetBool("verbose")
 	region, _ := cmd.Flags().GetString("region")
+	noInit, _ := cmd.Flags().GetBool("no-init")
 	pr := func(format string, a ...interface{}) {
 		if !quiet {
-			cmd.Printf(format, a...)
+			cmd.PrintErrf(format, a...)
 		}
 	}
-	pr("Creating instance %s from Docker image %s\n", name, dockerImage)
 
-	// Create an empty instance first
+	pr("Creating instance %s from container image %s\n", name, dockerImage)
 	request := &proto.CreateInstanceRequest{
-		Instance: &proto.Instance{
-			InstanceName: name,
-		},
-		Region: region,
+		Instance:             &proto.Instance{InstanceName: name},
+		Region:               region,
+		DockerImage:          dockerImage,
+		SkipDockerInitScript: noInit,
 	}
 
 	instance, err := client.CreateInstance(cmd.Context(), request)
@@ -158,106 +142,19 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 	}
 	pr("Instance %s created with ID %d\n", instance.InstanceName, instance.Id)
 
-	// Connect to instance and copy files (stream docker export directly)
-	conn, err := clientlib.GetApiConnection()
-	if err != nil {
-		return fmt.Errorf("failed to get API connection: %v", err)
-	}
-	defer conn.Close()
-
-	instanceId, err := clientlib.ParseInstanceId(cmd.Context(), name, clientlib.FallbackToSession)
-	if err != nil {
-		return fmt.Errorf("failed to parse instance ID: %v", err)
+	taskID := strings.TrimSpace(instance.GetInitTaskId())
+	if taskID == "" {
+		return fmt.Errorf("instance created but server did not return init task ID")
 	}
 
-	brokerClient, err := clientlib.GetBrokerClient()
-	if err != nil {
-		return fmt.Errorf("failed to get broker client: %v", err)
-	}
+	pr("Queued remote initialization for instance %s from image %s\n", name, dockerImage)
+	pr("Use `velda task get %s` to track progress.\n", taskID)
+	cmd.Println(taskID)
 
-	pr("Allocating compute for initializing instance...\n")
-	var sshClient *clientlib.SshClient
-	sshConnectChan := make(chan error, 1)
-	go func() {
-		// Request a session for file copying
-		resp, err := brokerClient.RequestSession(cmd.Context(), &proto.SessionRequest{
-			ServiceName: "docker-init",
-			InstanceId:  instanceId,
-			Pool:        "shell",
-			User:        "root",
-		})
-		if err != nil {
-			sshConnectChan <- fmt.Errorf("failed to request session: %v", err)
-			return
-		}
-
-		// Connect via SSH
-		sshClient, err = clientlib.SshConnect(cmd, resp.GetSshConnection(), "root")
-		if err != nil {
-			sshConnectChan <- fmt.Errorf("failed to connect to SSH: %v", err)
-			return
-		}
-		sshConnectChan <- nil
-	}()
-	// Create the Docker container before requesting a velda session so the
-	// container exists when the session starts.
-	if _, err := exec.LookPath("docker"); err != nil {
-		return fmt.Errorf("docker is not installed or not in the PATH")
+	follow, _ := cmd.Flags().GetBool("follow")
+	if follow {
+		return followTask(taskID)
 	}
-	createCmd := exec.Command("docker", "create", dockerImage)
-	var createStderr bytes.Buffer
-	if quiet {
-		createCmd.Stderr = &createStderr
-	} else {
-		// stream docker stderr live when not quiet
-		createCmd.Stderr = cmd.ErrOrStderr()
-	}
-	containerOutput, err := createCmd.Output()
-	if err != nil {
-		// Print docker stderr even in quiet mode
-		if createStderr.Len() > 0 {
-			cmd.ErrOrStderr().Write(createStderr.Bytes())
-		}
-		return fmt.Errorf("failed to create Docker container: %v", err)
-	}
-	containerID := strings.TrimSpace(string(containerOutput))
-	defer func() {
-		// cleanup container if session request fails
-		exec.Command("docker", "rm", containerID).Run()
-	}()
-
-	err = <-sshConnectChan
-	if err != nil {
-		return err
-	}
-	defer sshClient.Close()
-	// Create SFTP client
-	sftpClient, err := sftp.NewClient(sshClient.Client)
-	if err != nil {
-		return fmt.Errorf("failed to create SFTP client: %v", err)
-	}
-	defer sftpClient.Close()
-
-	pr("Uploading files...\n")
-	// Copy files to instance (stream from docker export)
-	if err := streamDockerImageToSftp(cmd, containerID, sftpClient, verbose, quiet); err != nil {
-		return fmt.Errorf("failed to stream docker image to instance: %v", err)
-	}
-
-	// Run initialization script unless --no-init is specified
-	noInit, _ := cmd.Flags().GetBool("no-init")
-	if !noInit {
-		scriptContent := getInitSandboxScript()
-		if err := runInitScript(cmd, sshClient, scriptContent, quiet); err != nil {
-			return fmt.Errorf("failed to run init script: %v", err)
-		}
-	} else {
-		pr("Skipping initialization script (--no-init specified)\n")
-	}
-
-	pr("✓ Instance %s successfully initialized from Docker image %s\n", name, dockerImage)
-	pr("Use `velda run --instance %s` to connect to the instance.\n", name)
-
 	return nil
 }
 
@@ -275,10 +172,8 @@ func createInstanceFromTar(cmd *cobra.Command, client proto.InstanceServiceClien
 	// Create an empty instance first
 	region, _ := cmd.Flags().GetString("region")
 	request := &proto.CreateInstanceRequest{
-		Instance: &proto.Instance{
-			InstanceName: name,
-		},
-		Region: region,
+		Instance: &proto.Instance{InstanceName: name},
+		Region:   region,
 	}
 
 	instance, err := client.CreateInstance(cmd.Context(), request)

@@ -378,6 +378,9 @@ func runExportContainer(cmd *cobra.Command, args []string) error {
 // returning; if stdin is a terminal the password read is non-echoing.
 func resolveRegistryAuth(method string) (remote.Option, error) {
 	switch method {
+	case "anonymous":
+		return remote.WithAuth(authn.Anonymous), nil
+
 	case "docker", "":
 		return remote.WithAuthFromKeychain(authn.DefaultKeychain), nil
 
@@ -427,7 +430,7 @@ func resolveRegistryAuth(method string) (remote.Option, error) {
 		return remote.WithAuth(auth), nil
 
 	default:
-		return nil, fmt.Errorf("unknown auth method %q; valid values: docker, google, manual", method)
+		return nil, fmt.Errorf("unknown auth method %q; valid values: anonymous, docker, google, manual", method)
 	}
 }
 

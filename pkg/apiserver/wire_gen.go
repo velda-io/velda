@@ -70,7 +70,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	taskLogDb := ProvideTaskLogDb(config, storageStorage)
 	taskServiceServer := ProvideTaskService(context, server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
 	poolManagerServiceServer := ProvidePoolService(server, runtimeServeMux, schedulerSet)
-	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storageStorage, permissions)
+	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storageStorage, permissions, brokerServiceServer)
 	taskLogServiceServer := ProvideTaskLogService(server, config)
 	registry := _wireRegistryValue
 	metricRegistryRunner := ProvideMetrics(registry, serverMetrics)

@@ -35,7 +35,11 @@ var listPoolCmd = &cobra.Command{
 		}
 		client := proto.NewPoolManagerServiceClient(conn)
 
-		pools, err := client.ListPools(cmd.Context(), &proto.ListPoolsRequest{})
+		region, _ := cmd.Flags().GetString("region")
+
+		pools, err := client.ListPools(cmd.Context(), &proto.ListPoolsRequest{
+			Region: region,
+		})
 		if err != nil {
 			return fmt.Errorf("Error listing pools: %w", err)
 		}
@@ -56,4 +60,5 @@ var listPoolCmd = &cobra.Command{
 
 func init() {
 	poolCmd.AddCommand(listPoolCmd)
+	listPoolCmd.Flags().String("region", "", "The region to query")
 }

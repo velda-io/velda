@@ -155,12 +155,12 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		fmt.Sprintf("cat << EOF > /run/velda/velda.yaml\n%s\nEOF", agentConfig),
 		"nvidia-smi",
 	}
-	for _, fs := range n.cfg.GetFilesystems() {
+	for i, fs := range n.cfg.GetFilesystems() {
 		if fs.GetFilesystemId() == "" || fs.GetMountPath() == "" {
 			continue
 		}
 		bootcmds = append(bootcmds, fmt.Sprintf("mkdir -p %s", fs.GetMountPath()))
-		runcmds = append(runcmds, fmt.Sprintf("mount -t virtiofs %s %s", fs.GetFilesystemId(), fs.GetMountPath()))
+		bootcmds = append(bootcmds, fmt.Sprintf("mount -t virtiofs fs-%d %s", i, fs.GetMountPath()))
 	}
 
 	runcmds = append(runcmds,
@@ -247,7 +247,7 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 
 	// Build attached filesystem specs
 	var attachedFilesystems []*compute.AttachedFilesystemSpec
-	for _, fs := range n.cfg.GetFilesystems() {
+	for id, fs := range n.cfg.GetFilesystems() {
 		if fs.GetFilesystemId() == "" {
 			continue
 		}
@@ -258,6 +258,7 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 					Id: fs.GetFilesystemId(),
 				},
 			},
+			MountTag: fmt.Sprintf("fs-%d", id),
 		})
 	}
 

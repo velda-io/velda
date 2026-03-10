@@ -8,12 +8,13 @@ import "google/protobuf/timestamp.proto";
 option go_package = "velda.io/velda/pkg/proto";
 
 message ListPoolsRequest {
-  reserved 32 to 64;
+  string region = 32;
 }
 
 message GetPoolRequest {
   string pool = 1;
-  reserved 32 to 64;
+  string region = 32;
+  reserved 33 to 64;
 }
 
 message PoolAutoscalerStatus {
