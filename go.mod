@@ -1,6 +1,6 @@
 module velda.io/velda
 
-go 1.24.0
+go 1.25.0
 
 require (
 	cloud.google.com/go/storage v1.50.0
@@ -43,6 +43,7 @@ require (
 	github.com/vishvananda/netlink v1.3.0
 	github.com/vishvananda/netns v0.0.4
 	golang.org/x/crypto v0.44.0
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20260213171211-a408498e5541
 	golang.org/x/oauth2 v0.33.0
 	golang.org/x/sys v0.41.0
 	golang.org/x/term v0.37.0

@@ -15,11 +15,9 @@ package cmd
 
 import (
 	"archive/tar"
-	"bytes"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -31,58 +29,6 @@ import (
 
 	"velda.io/velda/pkg/clientlib"
 )
-
-// streamDockerImageToSftp streams a docker image (via `docker export`) directly
-// to the provided SFTP client, writing files into the instance. This avoids
-// extracting the entire image to a temp directory.
-// containerID: container to export (created by caller).
-// verbose: print per-file progress; quiet: suppress status output (but docker
-// stderr will still be printed on error).
-func streamDockerImageToSftp(cmd *cobra.Command, containerID string, sftpClient *sftp.Client, verbose, quiet bool) error {
-	if _, err := exec.LookPath("docker"); err != nil {
-		return fmt.Errorf("docker is not installed or not in the PATH")
-	}
-	exportCmd := exec.Command("docker", "export", containerID)
-	var exportStderr bytes.Buffer
-	if quiet {
-		// buffer stderr and print only on error
-		exportCmd.Stderr = &exportStderr
-	} else {
-		// stream docker stderr live when not quiet
-		exportCmd.Stderr = cmd.ErrOrStderr()
-	}
-	pipe, err := exportCmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to get export pipe: %v", err)
-	}
-	if err := exportCmd.Start(); err != nil {
-		if exportStderr.Len() > 0 {
-			cmd.ErrOrStderr().Write(exportStderr.Bytes())
-		}
-		return fmt.Errorf("failed to start docker export: %v", err)
-	}
-
-	// Delegate tar parsing and sftp writes to the generic tar reader helper
-	if err := streamTarReaderToSftp(cmd, pipe, sftpClient, verbose, quiet); err != nil {
-		if err != nil {
-			exportCmd.Process.Kill()
-		}
-		exportCmd.Wait()
-		if exportStderr.Len() > 0 {
-			cmd.ErrOrStderr().Write(exportStderr.Bytes())
-		}
-		return err
-	}
-
-	if err := exportCmd.Wait(); err != nil {
-		if exportStderr.Len() > 0 {
-			cmd.ErrOrStderr().Write(exportStderr.Bytes())
-		}
-		return fmt.Errorf("docker export failed: %v", err)
-	}
-
-	return nil
-}
 
 // streamTarReaderToSftp parses a tar stream from r and writes entries to sftpClient.
 // It preserves mode, ownership and times where possible.
@@ -278,7 +224,7 @@ func runInitScript(cmd *cobra.Command, sshClient *clientlib.SshClient, scriptCon
 	defer pipeReader.Close()
 
 	// Execute sh on the remote side
-	if err := session.Exec("sh"); err != nil {
+	if err := session.Exec("/bin/sh"); err != nil {
 		pipeWriter.Close()
 		return fmt.Errorf("failed to execute sh: %v", err)
 	}
@@ -310,6 +256,7 @@ func runInitScript(cmd *cobra.Command, sshClient *clientlib.SshClient, scriptCon
 func getInitSandboxScript() string {
 	return `
 set -e
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 # Initialize user
 install_sudo() {
     echo "Installing sudo..."

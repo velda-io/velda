@@ -39,6 +39,19 @@ velda instance create my-instance --docker-image ubuntu:24.04
 velda instance create my-instance --docker-image registry.company.com/custom:latest
 ```
 
+### Import Current Instance Root from a Public Container Image
+
+If you are already connected to an instance and want to replace its root filesystem
+without Docker/container runtime, import directly from an OCI image:
+
+```bash
+# Import from Docker Hub (requires root privileges)
+sudo velda instance import ubuntu:24.04
+
+# Import from another public registry
+sudo velda instance import ghcr.io/org/project:latest
+```
+
 ## Listing Instances
 
 View all your instances:
