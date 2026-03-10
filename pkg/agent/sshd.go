@@ -167,6 +167,17 @@ func (s *SSHD) Start() (net.Addr, error) {
 				continue
 			}
 
+			// Setup /run/user/{uid}
+			if err := syscall.Mkdir("/run/user", 0755); err != nil && !os.IsExist(err) {
+				log.Printf("failed to create /run/user: %v", err)
+			}
+			if err := syscall.Mkdir(fmt.Sprintf("/run/user/%s", user.Uid), 0700); err != nil && !os.IsExist(err) {
+				log.Printf("failed to create /run/user/%s: %v", user.Uid, err)
+			}
+			if err := syscall.Chown(fmt.Sprintf("/run/user/%s", user.Uid), int(user.Credential.Uid), int(user.Credential.Gid)); err != nil {
+				log.Printf("failed to chown /run/user/%s: %v", user.Uid, err)
+			}
+
 			func() {
 				s.mu.Lock()
 				defer s.mu.Unlock()
