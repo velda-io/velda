@@ -19,10 +19,17 @@ import "google/protobuf/empty.proto";
 
 option go_package = "velda.io/velda/pkg/proto";
 
+enum InstanceStatus {
+  INSTANCE_STATUS_UNSPECIFIED = 0;
+  INSTANCE_STATUS_ACTIVE = 1;
+  INSTANCE_STATUS_TERMINATED = 2;
+}
+
 message Instance {
   // Only to be filled by the server.
   int64 id = 1;
   string instance_name = 2;
+  InstanceStatus status = 5;
   // Optional: set by CreateInstance when docker_image initialization is enqueued.
   string init_task_id = 50;
 }
