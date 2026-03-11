@@ -47,17 +47,23 @@ func (l *LocalDirLogDb) GetTaskLogs(ctx context.Context, instanceId int64, taskI
 // ctx is cancelled.
 func readLocalFile(ctx context.Context, path string, follow bool) ByteStream {
 	bs := ByteStream{
-		Data: make(chan []byte, 64),
-		Err:  make(chan error, 1),
+		Updates: make(chan ByteStreamUpdate, 64),
 	}
 	go func() {
-		defer close(bs.Data)
+		defer close(bs.Updates)
+		sendUpdate := func(update ByteStreamUpdate) {
+			select {
+			case bs.Updates <- update:
+			case <-ctx.Done():
+				return
+			}
+		}
 		var watcher *fsnotify.Watcher
 		if follow {
 			var err error
 			watcher, err = fsnotify.NewWatcher()
 			if err != nil {
-				bs.Err <- fmt.Errorf("create watcher: %w", err)
+				sendUpdate(ByteStreamUpdate{Err: fmt.Errorf("create watcher: %w", err)})
 				return
 			}
 			defer watcher.Close()
@@ -66,7 +72,7 @@ func readLocalFile(ctx context.Context, path string, follow bool) ByteStream {
 		// Wait for file to exist when following (task may not have started yet).
 		if follow {
 			if err := waitForFile(ctx, path, watcher); err != nil {
-				bs.Err <- err
+				sendUpdate(ByteStreamUpdate{Err: err})
 				return
 			}
 		}
@@ -74,18 +80,18 @@ func readLocalFile(ctx context.Context, path string, follow bool) ByteStream {
 		f, err := os.Open(path)
 		if os.IsNotExist(err) {
 			// File doesn't exist and we're not following — just return EOF.
-			bs.Err <- io.EOF
+			sendUpdate(ByteStreamUpdate{Err: io.EOF})
 			return
 		}
 		if err != nil {
-			bs.Err <- fmt.Errorf("open %s: %w", path, err)
+			sendUpdate(ByteStreamUpdate{Err: fmt.Errorf("open %s: %w", path, err)})
 			return
 		}
 		defer f.Close()
 
 		if follow {
 			if err := watcher.Add(path); err != nil {
-				bs.Err <- fmt.Errorf("watch %s: %w", path, err)
+				sendUpdate(ByteStreamUpdate{Err: fmt.Errorf("watch %s: %w", path, err)})
 				return
 			}
 		}
@@ -97,26 +103,26 @@ func readLocalFile(ctx context.Context, path string, follow bool) ByteStream {
 				chunk := make([]byte, n)
 				copy(chunk, buf[:n])
 				select {
-				case bs.Data <- chunk:
+				case bs.Updates <- ByteStreamUpdate{Data: chunk}:
 				case <-ctx.Done():
-					bs.Err <- ctx.Err()
+					sendUpdate(ByteStreamUpdate{Err: ctx.Err()})
 					return
 				}
 			}
 			if readErr == io.EOF {
 				if !follow {
-					bs.Err <- io.EOF
+					sendUpdate(ByteStreamUpdate{Err: io.EOF})
 					return
 				}
 				// Follow mode: wait for new data or context cancellation.
 				if err := waitForData(ctx, watcher); err != nil {
-					bs.Err <- err
+					sendUpdate(ByteStreamUpdate{Err: err})
 					return
 				}
 				continue
 			}
 			if readErr != nil {
-				bs.Err <- readErr
+				sendUpdate(ByteStreamUpdate{Err: readErr})
 				return
 			}
 		}
