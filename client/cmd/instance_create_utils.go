@@ -255,18 +255,12 @@ func runInitScript(cmd *cobra.Command, sshClient *clientlib.SshClient, scriptCon
 
 func getInitSandboxScript() string {
 	return `
-set -e
+set -ex
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+export HOME="/root"
 # Initialize user
-install_sudo() {
-    echo "Installing sudo..."
-    $(which apt-get) && apt-get update && apt-get install -y sudo && return 0
-    $(which yum) && yum install -y sudo && return 0
-    $(which dnf) && dnf install -y sudo && return 0
-	echo "Could not install sudo, unsupported package manager"
-}
 
-$(which -s sudo) || install_sudo
+$(which sudo >/dev/null 2>&1) || apt-get update && apt-get install -y sudo || true
 useradd user -m -s /bin/bash || true
 passwd -d user
 mkdir -p /etc/sudoers.d
@@ -280,5 +274,7 @@ ln -sf /run/velda/velda /usr/bin/velda
 ln -sf /run/velda/velda /usr/bin/vbatch
 ln -sf /run/velda/velda /usr/bin/vrun
 ln -sf /run/velda/velda /sbin/mount.host
-`
+` + ExtraInitScript
 }
+
+var ExtraInitScript = ""

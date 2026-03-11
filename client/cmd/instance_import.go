@@ -23,11 +23,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/spf13/cobra"
@@ -81,7 +83,12 @@ func runImportContainer(cmd *cobra.Command, args []string) error {
 	}
 
 	cmd.PrintErrf("Pulling image %s...\n", parsedRef)
-	img, err := remote.Image(parsedRef, remoteOpt)
+	img, err := remote.Image(parsedRef, remoteOpt, remote.WithPlatform(
+		v1.Platform{
+			Architecture: runtime.GOARCH,
+			OS:           runtime.GOOS,
+		},
+	))
 	if err != nil {
 		return fmt.Errorf("pulling image %s: %w", parsedRef, err)
 	}
@@ -100,12 +107,13 @@ func runImportContainer(cmd *cobra.Command, args []string) error {
 
 	cmd.PrintErrf("Successfully imported %s\n", parsedRef)
 	if postInstall, _ := cmd.Flags().GetBool("post-install"); postInstall {
+		cmd.PrintErrln("Running post-install script to initialize as Velda sandbox...")
 		initScript := getInitSandboxScript()
-		cmd := exec.Command("/bin/sh")
-		cmd.Stdin = strings.NewReader(initScript)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+		shell := exec.Command("/bin/sh")
+		shell.Stdin = strings.NewReader(initScript)
+		shell.Stdout = os.Stdout
+		shell.Stderr = os.Stderr
+		if err := shell.Run(); err != nil {
 			return fmt.Errorf("running post-install script: %w", err)
 		}
 	}
@@ -132,6 +140,7 @@ func extractTarToRoot(cmd *cobra.Command, r io.Reader) error {
 
 	// This is only used to initialize from an empty root, so we don't check if writing to symlink will escape.
 	var entryCount int64
+	var written int64
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -194,9 +203,11 @@ func extractTarToRoot(cmd *cobra.Command, r io.Reader) error {
 			if err != nil {
 				return fmt.Errorf("creating file %s: %w", dstPath, err)
 			}
-			if _, err := io.Copy(file, tr); err != nil {
+			if total, err := io.Copy(file, tr); err != nil {
 				file.Close()
 				return fmt.Errorf("writing file %s: %w", dstPath, err)
+			} else {
+				written += total
 			}
 			if err := file.Close(); err != nil {
 				return fmt.Errorf("closing file %s: %w", dstPath, err)
@@ -217,13 +228,26 @@ func extractTarToRoot(cmd *cobra.Command, r io.Reader) error {
 
 		entryCount++
 		if entryCount%1000 == 0 {
-			cmd.PrintErrf("Extracted %d entries...\n", entryCount)
+			cmd.PrintErrf("Extracted %d entries, total %s written...\n", entryCount, formatSize(written))
 		}
 	}
 
 	// Ensure the command prints a completion line even for small images.
-	cmd.PrintErrf("Extracted %d entries\n", entryCount)
+	cmd.PrintErrf("Extracted %d entries, total %s written...\n", entryCount, formatSize(written))
 	return nil
+}
+
+func formatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 func cleanExtractPath(name string) (string, error) {
