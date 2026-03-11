@@ -183,16 +183,23 @@ func (s *service) GetInstance(ctx context.Context, in *proto.GetInstanceRequest)
 	if err := s.permissions.Check(ctx, ActionGetInsance, fmt.Sprintf("instances/%d", in.InstanceId)); err != nil {
 		return nil, err
 	}
-	return s.db.GetInstance(ctx, in)
+	instance, err := s.db.GetInstance(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if instance.GetStatus() == proto.InstanceStatus_INSTANCE_STATUS_TERMINATED {
+		return nil, status.Errorf(codes.NotFound, "Instance with ID %d not found", in.InstanceId)
+	}
+	return instance, nil
 }
 
 func (s *service) GetInstanceByName(ctx context.Context, in *proto.GetInstanceByNameRequest) (*proto.Instance, error) {
-	// Always filter by owner.
+	// Always filter by owner and status.
 	return s.db.GetInstanceByName(ctx, in)
 }
 
 func (s *service) ListInstances(ctx context.Context, in *proto.ListInstancesRequest) (*proto.ListInstancesResponse, error) {
-	// Always filter by owner.
+	// Always filter by owner and status.
 	return s.db.ListInstances(ctx, in)
 }
 
