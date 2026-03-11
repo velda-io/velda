@@ -18,9 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"strings"
-	"sync"
 
 	"github.com/simonfxr/pubsub"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -315,27 +313,35 @@ func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskServ
 	if err != nil {
 		return err
 	}
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	handleStream := func(streamType proto.LogTaskResponse_Stream, s storage.ByteStream) {
-		defer wg.Done()
-		for {
-			select {
-			case line := <-s.Data:
-				stream.Send(&proto.LogTaskResponse{Stream: streamType, Data: line})
-			case err := <-s.Err:
-				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return
-				}
-				log.Printf("Error reading stderr for task %s: %v", in.TaskId, err)
-				return
+	finished := 0
+	for {
+		var source proto.LogTaskResponse_Stream
+		var update storage.ByteStreamUpdate
+		select {
+		case update = <-stdout.Updates:
+			source = proto.LogTaskResponse_STREAM_STDOUT
+		case update = <-stderr.Updates:
+			source = proto.LogTaskResponse_STREAM_STDERR
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if len(update.Data) > 0 {
+			if err := stream.Send(&proto.LogTaskResponse{Stream: source, Data: update.Data}); err != nil {
+				return err
 			}
 		}
+		if update.Err == nil {
+			continue
+		}
+		if errors.Is(update.Err, io.EOF) || errors.Is(update.Err, context.Canceled) {
+			finished += 1
+			if finished == 2 {
+				return nil
+			}
+			continue
+		}
+		return update.Err
 	}
-	go handleStream(proto.LogTaskResponse_STREAM_STDOUT, stdout)
-	go handleStream(proto.LogTaskResponse_STREAM_STDERR, stderr)
-	wg.Wait()
-	return nil
 }
 
 func (s *TaskServiceServer) patchTaskStatus(ctx context.Context, tasks ...*proto.Task) error {

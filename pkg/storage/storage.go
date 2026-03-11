@@ -20,8 +20,12 @@ import (
 )
 
 type ByteStream struct {
-	Data chan []byte
-	Err  chan error
+	Updates chan ByteStreamUpdate
+}
+
+type ByteStreamUpdate struct {
+	Data []byte
+	Err  error
 }
 
 type ReadFileOptions struct {
