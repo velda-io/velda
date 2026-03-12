@@ -658,13 +658,13 @@ func (s *Session) startQuotaMonitoring() {
 	go func() {
 		for {
 			newGrant, err := s.helpers.GrantQuota(ctx, s.Request.Pool, s.quotaGrant, time.Since(s.startTime))
-			s.quotaGrant = newGrant
 			if err != nil {
 				log.Printf("Session %s quota check failed, terminating: %v", s.id, err)
 				// Terminate session due to quota expiration
 				s.Kill(ctx, false)
 				return
 			}
+			s.quotaGrant = newGrant
 			select {
 			case <-time.After(newGrant.NextCheck()):
 			case <-s.quotaCheckDone:
