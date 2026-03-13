@@ -15,10 +15,11 @@ package nebius
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
-	"sync"
 
 	"github.com/nebius/gosdk"
 	"github.com/nebius/gosdk/auth"
@@ -37,21 +38,13 @@ import (
 	"velda.io/velda/pkg/utils"
 )
 
+const configHashLabel = "velda/config-hash"
+
 type nebiusPoolBackend struct {
 	cfg             *proto.AutoscalerBackendNebiusLaunchTemplate
 	sdk             *gosdk.SDK
 	instanceService computeservice.InstanceService
 	diskService     computeservice.DiskService
-
-	// Cache for available disks
-	diskPoolMu       sync.RWMutex
-	diskPool         map[string]diskInfo
-	lastScannedDisks map[string]diskInfo
-}
-
-type diskInfo struct {
-	diskId   string
-	diskName string
 }
 
 func NewNebiusPoolBackend(cfg *proto.AutoscalerBackendNebiusLaunchTemplate, sdk *gosdk.SDK) broker.ResourcePoolBackend {
@@ -59,15 +52,13 @@ func NewNebiusPoolBackend(cfg *proto.AutoscalerBackendNebiusLaunchTemplate, sdk 
 	diskService := sdk.Services().Compute().V1().Disk()
 
 	backend := &nebiusPoolBackend{
-		cfg:              cfg,
-		sdk:              sdk,
-		instanceService:  instanceService,
-		diskService:      diskService,
-		diskPool:         make(map[string]diskInfo),
-		lastScannedDisks: make(map[string]diskInfo),
+		cfg:             cfg,
+		sdk:             sdk,
+		instanceService: instanceService,
+		diskService:     diskService,
 	}
 
-	return backends.MakeAsync(backend)
+	return backends.MakeAsyncResumable(backend, int(cfg.GetMaxDiskPoolSize()))
 }
 
 // diskTypeFromProto converts the proto NebiusBootDiskType to the Nebius SDK DiskSpec_DiskType enum.
@@ -87,28 +78,41 @@ func (n *nebiusPoolBackend) GenerateWorkerName() string {
 	return fmt.Sprintf("%s-%s", n.cfg.InstanceNamePrefix, utils.RandString(5))
 }
 
-// getAvailableDisk retrieves and removes a disk from the pool
-func (n *nebiusPoolBackend) getAvailableDisk() *diskInfo {
-	n.diskPoolMu.Lock()
-	defer n.diskPoolMu.Unlock()
-
-	if len(n.diskPool) == 0 {
-		return nil
+func (n *nebiusPoolBackend) desiredVersion() string {
+	version := n.cfg.GetAgentVersionOverride()
+	if version == "" {
+		version = velda.Version
 	}
-
-	// Get the first available disk
-	for _, disk := range n.diskPool {
-		delete(n.diskPool, disk.diskId)
-		return &disk
-	}
-	return nil
+	return version
 }
 
-// getDiskPoolCount returns the current count of disks in the pool
-func (n *nebiusPoolBackend) getDiskPoolCount() int {
-	n.diskPoolMu.RLock()
-	defer n.diskPoolMu.RUnlock()
-	return len(n.diskPool)
+func (n *nebiusPoolBackend) currentConfigHash() string {
+	// Create MarshalOptions with Deterministic set to true.
+	options := pb.MarshalOptions{
+		Deterministic: true,
+	}
+
+	// Marshal the message into a byte slice.
+	data, err := options.Marshal(n.cfg)
+	if err != nil {
+		panic(err)
+	}
+	hasher := sha256.New()
+	hasher.Write(data)
+	hasher.Write([]byte(n.desiredVersion()))
+	sum := hasher.Sum(nil)
+
+	return hex.EncodeToString(sum[:16])
+}
+
+func (n *nebiusPoolBackend) baseLabels() map[string]string {
+	labels := make(map[string]string)
+	for k, v := range n.cfg.GetLabels() {
+		labels[k] = v
+	}
+	labels["managed-by"] = "velda"
+	labels[configHashLabel] = n.currentConfigHash()
+	return labels
 }
 
 // CreateWorker implements SyncBackend interface
@@ -121,18 +125,11 @@ func (n *nebiusPoolBackend) CreateWorker(ctx context.Context, name string) (back
 }
 
 func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (string, error) {
-	labels := make(map[string]string)
-
-	for k, v := range n.cfg.GetLabels() {
-		labels[k] = v
-	}
+	labels := n.baseLabels()
 	// Prepare cloud-init user data
 	var userData string
 	agentConfig := n.cfg.AgentConfigContent
-	version := n.cfg.AgentVersionOverride
-	if version == "" {
-		version = velda.Version
-	}
+	version := n.desiredVersion()
 
 	// Build runcmd list
 	runcmds := []string{}
@@ -198,44 +195,33 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		diskSizeGb = 40
 	}
 
-	// Try to use an available disk from the pool first
-	pooledDisk := n.getAvailableDisk()
-	var diskId string
-	if pooledDisk != nil {
-		log.Printf("Reusing pooled disk %s(%s) for new instance %s", pooledDisk.diskName, pooledDisk.diskId, name)
-		diskId = pooledDisk.diskId
-	}
-
-	// If no pooled disk available or retrieval failed, create a new one
-	if diskId == "" {
-		diskName := utils.RandString(12) + "-boot-disk"
-		log.Printf("Creating new boot disk %s", diskName)
-		diskOp, err := n.diskService.Create(ctx, &compute.CreateDiskRequest{
-			Metadata: &common.ResourceMetadata{
-				ParentId: n.cfg.GetParentId(),
-				Name:     diskName,
-				Labels:   labels,
-			},
-			Spec: &compute.DiskSpec{
-				Size:           &compute.DiskSpec_SizeGibibytes{SizeGibibytes: diskSizeGb},
-				BlockSizeBytes: 4096,
-				Type:           diskTypeFromProto(n.cfg.GetBootDiskType()),
-				Source: &compute.DiskSpec_SourceImageFamily{
-					SourceImageFamily: &compute.SourceImageFamily{
-						ImageFamily: "ubuntu24.04-cuda12",
-					},
+	diskName := name + "-boot-disk"
+	log.Printf("Creating new boot disk %s", diskName)
+	diskOp, err := n.diskService.Create(ctx, &compute.CreateDiskRequest{
+		Metadata: &common.ResourceMetadata{
+			ParentId: n.cfg.GetParentId(),
+			Name:     diskName,
+			Labels:   labels,
+		},
+		Spec: &compute.DiskSpec{
+			Size:           &compute.DiskSpec_SizeGibibytes{SizeGibibytes: diskSizeGb},
+			BlockSizeBytes: 4096,
+			Type:           diskTypeFromProto(n.cfg.GetBootDiskType()),
+			Source: &compute.DiskSpec_SourceImageFamily{
+				SourceImageFamily: &compute.SourceImageFamily{
+					ImageFamily: "ubuntu24.04-cuda12",
 				},
 			},
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to create boot disk: %w", err)
-		}
-		_, err = diskOp.Wait(ctx)
-		if err != nil {
-			return "", fmt.Errorf("failed to create boot disk: %w", err)
-		}
-		diskId = diskOp.ResourceID()
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create boot disk: %w", err)
 	}
+	_, err = diskOp.Wait(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to create boot disk: %w", err)
+	}
+	diskId := diskOp.ResourceID()
 	networkSpec := &compute.NetworkInterfaceSpec{
 		Name:      "eth0",
 		IpAddress: &compute.IPAddress{},
@@ -312,71 +298,110 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 
 // DeleteWorker implements SyncBackend interface
 func (n *nebiusPoolBackend) DeleteWorker(ctx context.Context, workerName string, workerInfo backends.WorkerInfo) error {
-	return n.performDelete(ctx, workerName)
+	instanceID, err := n.instanceIDFromWorker(ctx, workerName, workerInfo)
+	if err != nil {
+		return err
+	}
+	instance, err := n.instanceService.Get(ctx, &compute.GetInstanceRequest{Id: instanceID})
+	if err != nil {
+		return err
+	}
+	return n.terminateInstanceAndDeleteBootDisk(ctx, instanceID, getInstanceBootDiskID(instance), workerName)
 }
 
-func (n *nebiusPoolBackend) performDelete(ctx context.Context, workerName string) error {
-	// WorkerName is the instance ID (we always use instance ID as the worker name)
+func (n *nebiusPoolBackend) instanceIDFromWorker(ctx context.Context, workerName string, workerInfo backends.WorkerInfo) (string, error) {
+	if instanceID, ok := workerInfo.Data.(string); ok && instanceID != "" {
+		return instanceID, nil
+	}
 	instance, err := n.instanceService.GetByName(ctx, &common.GetByNameRequest{
 		ParentId: n.cfg.GetParentId(),
 		Name:     workerName,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
+	return instance.GetMetadata().GetId(), nil
+}
 
-	instanceId := instance.Metadata.Id
-	bootDiskId := instance.Spec.BootDisk.GetExistingDisk().GetId()
+func getInstanceBootDiskID(instance *compute.Instance) string {
+	if instance == nil || instance.GetSpec() == nil || instance.GetSpec().GetBootDisk() == nil {
+		return ""
+	}
+	if disk := instance.GetSpec().GetBootDisk().GetExistingDisk(); disk != nil {
+		return disk.GetId()
+	}
+	return ""
+}
 
-	// Terminate the instance
-	log.Printf("Terminating Nebius instance %s (%s)", instanceId, workerName)
-	operation, err := n.instanceService.Delete(ctx, &compute.DeleteInstanceRequest{
-		Id: instanceId,
-	})
+func (n *nebiusPoolBackend) terminateInstanceAndDeleteBootDisk(ctx context.Context, instanceID, bootDiskID, workerName string) error {
+	log.Printf("Terminating Nebius instance %s (%s)", instanceID, workerName)
+	operation, err := n.instanceService.Delete(ctx, &compute.DeleteInstanceRequest{Id: instanceID})
 	if err != nil {
 		return err
 	}
-	_, err = operation.Wait(ctx)
-	if err != nil {
+	if _, err = operation.Wait(ctx); err != nil {
 		return err
 	}
-	// Try to pool the disk if we have room in the cache
-	if n.cfg.MaxDiskPoolSize > 0 && int32(n.getDiskPoolCount()) < n.cfg.MaxDiskPoolSize {
-		log.Printf("Pooling disk %s for reuse", bootDiskId)
-		// Disk is automatically detached when instance is deleted
-		// Add it to the pool for future use
-		n.diskPoolMu.Lock()
-		n.diskPool[bootDiskId] = diskInfo{
-			diskId:   bootDiskId,
-			diskName: instance.Metadata.Name + "-boot-disk",
-		}
-		n.diskPoolMu.Unlock()
+	if bootDiskID == "" {
 		return nil
 	}
 
-	// Either pooling is disabled or cache is full, delete the disk
-	log.Printf("Deleting disk %s", bootDiskId)
-	operation, err = n.diskService.Delete(ctx, &compute.DeleteDiskRequest{
-		Id: bootDiskId,
-	})
+	log.Printf("Deleting disk %s for instance %s", bootDiskID, instanceID)
+	operation, err = n.diskService.Delete(ctx, &compute.DeleteDiskRequest{Id: bootDiskID})
 	if err != nil {
 		return err
 	}
-
-	_, err = operation.Wait(ctx)
-	if err != nil {
+	if _, err = operation.Wait(ctx); err != nil {
 		return err
 	}
 	return nil
 }
 
-// ListRemoteWorkers implements SyncBackend interface
-func (n *nebiusPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]backends.WorkerInfo, error) {
-	listReq := &compute.ListInstancesRequest{
-		ParentId: n.cfg.GetParentId(),
+// SuspendWorker implements backends.Resumable interface
+func (n *nebiusPoolBackend) SuspendWorker(ctx context.Context, workerName string, activeWorker backends.WorkerInfo) error {
+	instanceID, err := n.instanceIDFromWorker(ctx, workerName, activeWorker)
+	if err != nil {
+		return err
 	}
 
+	log.Printf("Stopping Nebius instance %s (%s) for reuse", instanceID, workerName)
+	op, err := n.instanceService.Stop(ctx, &compute.StopInstanceRequest{Id: instanceID})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
+}
+
+// ResumeWorker implements backends.Resumable interface
+func (n *nebiusPoolBackend) ResumeWorker(ctx context.Context, workerName string, suspendedWorker backends.WorkerInfo) error {
+	instanceID, err := n.instanceIDFromWorker(ctx, workerName, suspendedWorker)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Starting suspended Nebius instance %s (%s)", instanceID, workerName)
+	op, err := n.instanceService.Start(ctx, &compute.StartInstanceRequest{Id: instanceID})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
+}
+
+type stoppedInstanceCleanup struct {
+	name       string
+	instanceID string
+	bootDiskID string
+}
+
+// ListRemoteWorkers implements SyncBackend interface
+func (n *nebiusPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]backends.WorkerInfo, error) {
+	listReq := &compute.ListInstancesRequest{ParentId: n.cfg.GetParentId()}
 	workers := make(map[string]backends.WorkerInfo)
+	stoppedToCleanup := make([]stoppedInstanceCleanup, 0)
+	expectedConfigHash := n.currentConfigHash()
+
 	for instance, err := range n.instanceService.Filter(ctx, listReq) {
 		if err != nil {
 			log.Printf("Failed to filter instances: %v", err)
@@ -384,13 +409,14 @@ func (n *nebiusPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]b
 		}
 		metadata := instance.GetMetadata()
 		status := instance.GetStatus()
+		instanceName := metadata.GetName()
+		instanceID := metadata.GetId()
 
-		// Skip instances being deleted
 		if status.GetState() == compute.InstanceStatus_DELETING {
 			continue
 		}
 
-		// Client-side label/tag filtering
+		// Client-side label/tag filtering by configured labels only.
 		if len(n.cfg.GetLabels()) > 0 {
 			instLabels := metadata.GetLabels()
 			matched := true
@@ -405,124 +431,36 @@ func (n *nebiusPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]b
 			}
 		}
 
-		instanceId := metadata.GetName()
-		workers[instanceId] = backends.WorkerInfo{State: backends.WorkerStateActive, Data: instance.Metadata.Id}
-	}
-
-	// Scan for unattached disks to populate the disk pool
-	if n.cfg.MaxDiskPoolSize > 0 {
-		// TODO: This may have race conditions if a disk is being reused.
-		go n.scanAndUpdateDiskPool(ctx)
-	}
-	return workers, nil
-}
-
-// scanAndUpdateDiskPool scans for unattached disks and updates the disk pool
-func (n *nebiusPoolBackend) scanAndUpdateDiskPool(ctx context.Context) {
-	disksFound := make(map[string]diskInfo)
-	disksToDelete := make([]string, 0)
-
-	// List all disks with matching labels
-	listReq := &compute.ListDisksRequest{
-		ParentId: n.cfg.GetParentId(),
-	}
-
-	for disk, err := range n.diskService.Filter(ctx, listReq) {
-		if err != nil {
-			log.Printf("Failed to filter disks: %v", err)
-			return
-		}
-
-		metadata := disk.GetMetadata()
-		status := disk.GetStatus()
-
-		// Skip disks being deleted or created
-		if status.GetState() == compute.DiskStatus_DELETING || status.GetState() == compute.DiskStatus_CREATING {
-			continue
-		}
-
-		// Client-side label/tag filtering
-		if len(n.cfg.GetLabels()) > 0 {
-			diskLabels := metadata.GetLabels()
-			matched := true
-			for k, v := range n.cfg.GetLabels() {
-				if lv, ok := diskLabels[k]; !ok || lv != v {
-					matched = false
-					break
-				}
-			}
-			if !matched {
+		if status.GetState() == compute.InstanceStatus_STOPPED {
+			instConfigHash := metadata.GetLabels()[configHashLabel]
+			if instConfigHash != expectedConfigHash {
+				stoppedToCleanup = append(stoppedToCleanup, stoppedInstanceCleanup{
+					name:       instanceName,
+					instanceID: instanceID,
+					bootDiskID: getInstanceBootDiskID(instance),
+				})
 				continue
 			}
-		}
-
-		// Only consider unattached disks (disks without instance attachment)
-		if status.GetReadWriteAttachment() != "" || len(status.GetReadOnlyAttachments()) > 0 {
+			workers[instanceName] = backends.WorkerInfo{State: backends.WorkerStateSuspended, Data: instanceID}
 			continue
 		}
 
-		diskId := metadata.GetId()
-		diskName := metadata.GetName()
-
-		disksFound[diskId] = diskInfo{
-			diskId:   diskId,
-			diskName: diskName,
-		}
+		workers[instanceName] = backends.WorkerInfo{State: backends.WorkerStateActive, Data: instanceID}
 	}
 
-	// Update disk pool with what we found
-	n.diskPoolMu.Lock()
-	defer n.diskPoolMu.Unlock()
-
-	// Add new found disks to the pool
-	for id, disk := range disksFound {
-		_, inPool := n.diskPool[id]
-		if inPool {
-			continue
-		}
-		_, existInLastScan := n.lastScannedDisks[id]
-		if existInLastScan {
-			// Was previously scanned, may already be used
-			continue
-		}
-		if len(n.diskPool) >= int(n.cfg.MaxDiskPoolSize) {
-			log.Printf("Max disk pool size reached (%d), deleting disk %s", n.cfg.MaxDiskPoolSize, id)
-			disksToDelete = append(disksToDelete, id)
-			continue
-		}
-		log.Printf("Adding unattached disk %s to pool", id)
-		n.diskPool[id] = disk
-	}
-
-	// Remove disks from pool that are no longer unattached
-	for id := range n.diskPool {
-		_, found := disksFound[id]
-		if !found {
-			log.Printf("Removing disk %s from pool (no longer available)", id)
-			delete(n.diskPool, id)
-		}
-	}
-
-	n.lastScannedDisks = disksFound
-
-	// Delete excess disks outside the lock
-	if len(disksToDelete) > 0 {
-		go func() {
-			for _, diskId := range disksToDelete {
-				operation, err := n.diskService.Delete(ctx, &compute.DeleteDiskRequest{
-					Id: diskId,
-				})
-				if err != nil {
-					log.Printf("Failed to delete excess disk %s: %v", diskId, err)
-					continue
-				}
-				_, err = operation.Wait(ctx)
-				if err != nil {
-					log.Printf("Failed to wait for disk deletion %s: %v", diskId, err)
+	if len(stoppedToCleanup) > 0 {
+		go func(cleanupItems []stoppedInstanceCleanup) {
+			cleanupCtx := context.WithoutCancel(ctx)
+			for _, item := range cleanupItems {
+				log.Printf("Deleting stopped Nebius instance %s (%s) due to config hash mismatch (%s)", item.instanceID, item.name, configHashLabel)
+				if err := n.terminateInstanceAndDeleteBootDisk(cleanupCtx, item.instanceID, item.bootDiskID, item.name); err != nil {
+					log.Printf("Failed to delete mismatched stopped instance %s (%s): %v", item.instanceID, item.name, err)
 				}
 			}
-		}()
+		}(stoppedToCleanup)
 	}
+
+	return workers, nil
 }
 
 type nebiusLaunchTemplatePoolFactory struct{}
