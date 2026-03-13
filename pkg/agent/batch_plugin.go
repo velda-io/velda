@@ -35,11 +35,11 @@ type BatchPlugin struct {
 	PluginBase
 	waiterPlugin     any // *WaiterPlugin
 	requestPlugin    any // *SessionRequestPlugin
-	completionSignal any // *CompletionSignalPlugin
+	completionSignal *CompletionSignalPlugin
 	commandModifier  CommandModifier
 }
 
-func NewBatchPlugin(waiterPlugin any, requestPlugin any, completionSignal any, commandModifier CommandModifier) *BatchPlugin {
+func NewBatchPlugin(waiterPlugin any, requestPlugin any, completionSignal *CompletionSignalPlugin, commandModifier CommandModifier) *BatchPlugin {
 	return &BatchPlugin{
 		waiterPlugin:     waiterPlugin,
 		requestPlugin:    requestPlugin,
@@ -51,7 +51,6 @@ func NewBatchPlugin(waiterPlugin any, requestPlugin any, completionSignal any, c
 func (p *BatchPlugin) Run(ctx context.Context) error {
 	sessionReq := ctx.Value(p.requestPlugin).(*proto.SessionRequest)
 	if sessionReq.Workload != nil {
-		completionChan := ctx.Value(p.completionSignal).(chan error)
 		waiter := ctx.Value(p.waiterPlugin).(*Waiter)
 		wait := waiter.AcquireLock()
 		cmd, logsDone, err := p.start(ctx, sessionReq)
@@ -64,6 +63,7 @@ func (p *BatchPlugin) Run(ctx context.Context) error {
 			Pid:   cmd.Process.Pid,
 			State: processStateChan,
 		}
+		completion := make(chan struct{})
 		go func() {
 			processState := <-processStateChan
 			// Release resources managed by exec.Cmd
@@ -71,13 +71,19 @@ func (p *BatchPlugin) Run(ctx context.Context) error {
 			// Wait for all log streaming goroutines to finish.
 			logsDone.Wait()
 			err := p.handleResult(processState)
-			if err != nil {
-				completionChan <- err
-			}
-			close(completionChan)
+			p.completionSignal.Complete(ctx, err)
+			close(completion)
 		}()
+		err = p.RunNext(ctx)
+		if err != nil {
+			// TODO: Kill all processes to avoid orphaned sub-process, especially if they inherit stdout/stderr
+			cmd.Process.Kill()
+		}
+		<-completion
+		return err
+	} else {
+		return p.RunNext(ctx)
 	}
-	return p.RunNext(ctx)
 }
 
 func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionRequest) (*exec.Cmd, *sync.WaitGroup, error) {
@@ -177,6 +183,7 @@ func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionReques
 
 	finalWg := &sync.WaitGroup{}
 	finalWg.Add(1)
+	var pushMu sync.Mutex
 	streamLog := func(r *os.File, streamType proto.LogTaskResponse_Stream) {
 		defer wg.Done()
 		defer r.Close()
@@ -185,6 +192,7 @@ func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionReques
 			n, readErr := r.Read(buf)
 			if n > 0 {
 				data := buf[:n]
+				pushMu.Lock()
 				if pushStream != nil {
 					chunk := make([]byte, n)
 					copy(chunk, data)
@@ -194,9 +202,10 @@ func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionReques
 						Data:   chunk,
 					}); serr != nil {
 						log.Printf("PushLogs: send error for task %s: %v", taskId, serr)
-						pushStream = nil // stop streaming, but continue writing locally
+						pushStream = nil // stop streaming, but continue consuming the pipe
 					}
 				}
+				pushMu.Unlock()
 			}
 			if readErr == io.EOF {
 				break
@@ -215,6 +224,14 @@ func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionReques
 	go func() {
 		wg.Wait()
 		if pushStream != nil {
+			// Add error messages from the other source
+			if err := p.completionSignal.GetError(ctx); err != nil {
+				pushStream.Send(&proto.PushLogsRequest{
+					TaskId: taskId,
+					Stream: proto.LogTaskResponse_STREAM_STDERR,
+					Data:   ([]byte)(err.Error() + "\n"),
+				})
+			}
 			if _, err := pushStream.CloseAndRecv(); err != nil && err != io.EOF {
 				log.Printf("PushLogs: CloseAndRecv error for task %s: %v", taskId, err)
 			}

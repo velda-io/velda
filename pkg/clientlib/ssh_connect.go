@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -86,12 +86,21 @@ func SshConnectWithAuth(ctx context.Context, sshConn *proto.ExecutionStatus_SshC
 		go client.HandleGlobalRequests(reqs)
 		return client, nil
 	}
-
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port), clientConfig)
+	addr := fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port)
+	d := net.Dialer{}
+	rawConn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
+		return nil, err
+	}
+
+	conn, channels, reqs, err := ssh.NewClientConn(rawConn, addr, clientConfig)
+	if err != nil {
+		rawConn.Close()
 		return nil, fmt.Errorf("Error dialing ssh: %v", err)
 	}
-	return &SshClient{Client: client}, nil
+	result := &SshClient{Client: ssh.NewClient(conn, channels, nil)}
+	go result.HandleGlobalRequests(reqs)
+	return result, nil
 }
 
 type jumpConn struct {

@@ -30,11 +30,11 @@ type SshdPlugin struct {
 	authDecoderPlugin any // *AuthPlugin
 	waiter            any // *WaiterPlugin
 	request           any // *SessionRequestPlugin
-	completionSignal  any // *CompletionSignalPlugin
+	completionSignal  *CompletionSignalPlugin
 	commandModifier   CommandModifier
 }
 
-func NewSshdPlugin(agentName string, authDecoderPlugin any, waiter any, request any, completionSignal any, commandModifier CommandModifier) *SshdPlugin {
+func NewSshdPlugin(agentName string, authDecoderPlugin any, waiter any, request any, completionSignal *CompletionSignalPlugin, commandModifier CommandModifier) *SshdPlugin {
 	return &SshdPlugin{
 		AgentName:         agentName,
 		authDecoderPlugin: authDecoderPlugin,
@@ -68,10 +68,9 @@ func (p *SshdPlugin) Run(ctx context.Context) (err error) {
 	sshd.CommandModifier = p.commandModifier
 	batch := req.Workload != nil
 	if !batch {
-		completion := ctx.Value(p.completionSignal).(chan error)
 		sshd.OnShutdown = func() {
 			log.Printf("no more connections, stopping sandbox")
-			close(completion)
+			p.completionSignal.Complete(ctx, nil)
 		}
 	}
 	_, err = sshd.Start()
