@@ -18,6 +18,7 @@ import (
 	"errors"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -34,8 +35,66 @@ func NewCompletionSignalPlugin() *CompletionSignalPlugin {
 }
 
 func (p *CompletionSignalPlugin) Run(ctx context.Context) error {
-	completion := make(chan error)
-	return p.RunNext(context.WithValue(ctx, p, completion))
+	h := NewCompletionHandle()
+	return p.RunNext(context.WithValue(ctx, p, h))
+}
+
+// CompletionHandle represents a session completion state. It allows waiting
+// for completion, retrieving the error, and completing with an error.
+type CompletionHandle struct {
+	mu        sync.Mutex
+	done      chan struct{}
+	err       error
+	completed bool
+}
+
+func NewCompletionHandle() *CompletionHandle {
+	return &CompletionHandle{done: make(chan struct{})}
+}
+
+// Error returns the completion error (nil if none or not completed yet).
+func (h *CompletionHandle) Error() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.err
+}
+
+// Complete sets the error and closes the done channel (idempotent).
+func (h *CompletionHandle) Complete(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.completed {
+		return
+	}
+	h.err = err
+	h.completed = true
+	close(h.done)
+}
+
+// getHandle returns the CompletionHandle stored in context, or nil.
+func (p *CompletionSignalPlugin) getHandle(ctx context.Context) *CompletionHandle {
+	if v := ctx.Value(p); v != nil {
+		if h, ok := v.(*CompletionHandle); ok {
+			return h
+		}
+	}
+	return nil
+}
+
+// GetError returns the current completion error (non-blocking). If no
+// completion handle is present, returns nil.
+func (p *CompletionSignalPlugin) GetError(ctx context.Context) error {
+	if h := p.getHandle(ctx); h != nil {
+		return h.Error()
+	}
+	return nil
+}
+
+// Complete marks the session as completed with provided error.
+func (p *CompletionSignalPlugin) Complete(ctx context.Context, err error) {
+	if h := p.getHandle(ctx); h != nil {
+		h.Complete(err)
+	}
 }
 
 func (p *CompletionSignalPlugin) GetWaiterPlugin() *CompletionWaitPlugin {
@@ -51,7 +110,8 @@ type CompletionWaitPlugin struct {
 }
 
 func (p *CompletionWaitPlugin) Run(ctx context.Context) error {
-	completion := ctx.Value(p.SignalPlugin).(chan error)
+	handle := p.SignalPlugin.getHandle(ctx)
+	doneChan := handle.done
 	var timeoutChan <-chan time.Time
 	if p.MaxTime > 0 {
 		timeoutChan = time.After(p.MaxTime)
@@ -61,8 +121,8 @@ func (p *CompletionWaitPlugin) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case err := <-completion:
-		return err
+	case <-doneChan:
+		return handle.Error()
 	case <-sig:
 		return SigTermError
 	case <-timeoutChan:
