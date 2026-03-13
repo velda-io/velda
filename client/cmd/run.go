@@ -251,7 +251,6 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 
 		followFlag, _ := cmd.Flags().GetBool("follow")
 		if followFlag {
-			// follow mode: extracted to helper
 			if err := followTask(taskId); err != nil {
 				return err
 			}
@@ -594,7 +593,6 @@ func followTask(taskId string) error {
 	if err != nil {
 		return fmt.Errorf("Error getting API connection for follow: %w", err)
 	}
-	defer conn.Close()
 	taskClient := proto.NewTaskServiceClient(conn)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -643,7 +641,7 @@ func followTask(taskId string) error {
 		select {
 		case task, ok := <-statusCh:
 			if !ok {
-				return nil
+				return <-errorCh
 			}
 			state := task.GetStatus()
 			if state != lastState {
@@ -691,6 +689,7 @@ func streamTaskLogs(ctx context.Context, taskClient proto.TaskServiceClient, tas
 		resp, err := stream.Recv()
 		if err != nil {
 			if err == io.EOF {
+				errorCh <- nil
 				return
 			}
 			errorCh <- fmt.Errorf("Error receiving log data: %w", err)

@@ -283,11 +283,9 @@ func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskServ
 		return err
 	}
 	options := &storage.ReadFileOptions{}
+	taskTerminated := make(chan struct{})
 	if in.Follow && (task.Status == proto.TaskStatus_TASK_STATUS_PENDING || task.Status == proto.TaskStatus_TASK_STATUS_QUEUEING) {
 		// Wait until the task is started, and finish when completed.
-		subctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		ctx = subctx
 		taskStarted := make(chan struct{})
 		s.taskTracker.WatchTask(ctx, in.TaskId, func(status *proto.ExecutionStatus) bool {
 			if status == nil {
@@ -297,17 +295,17 @@ func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskServ
 			case proto.ExecutionStatus_STATUS_RUNNING:
 				close(taskStarted)
 			case proto.ExecutionStatus_STATUS_TERMINATED:
-				cancel()
+				close(taskTerminated)
 				return false
 			}
 			return true
 		})
 		select {
 		case <-taskStarted:
-			options.Follow = true
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+		options.Follow = true
 	}
 	stdout, stderr, err := s.logDb.GetTaskLogs(ctx, task.InstanceId, in.TaskId, options)
 	if err != nil {
@@ -322,6 +320,8 @@ func (s *TaskServiceServer) Logs(in *proto.LogTaskRequest, stream proto.TaskServ
 			source = proto.LogTaskResponse_STREAM_STDOUT
 		case update = <-stderr.Updates:
 			source = proto.LogTaskResponse_STREAM_STDERR
+		case <-taskTerminated:
+			return nil
 		case <-ctx.Done():
 			return ctx.Err()
 		}
