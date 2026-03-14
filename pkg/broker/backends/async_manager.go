@@ -350,21 +350,27 @@ func (m *asyncBackendManager) ListWorkers(ctx context.Context) ([]broker.WorkerS
 				m.suspendedWorkers[workerName] = workerInfo
 			}
 		} else {
+			delete(m.suspendedWorkers, workerName)
 			m.activeWorkers[workerName] = workerInfo
 		}
-	}
-	m.mu.Unlock()
 
-	// Add remote workers to result (only active ones)
-	for workerName, workerInfo := range remoteWorkers {
+		// Add remote workers to result (only active ones)
 		if _, exists := seen[workerName]; exists {
 			continue
 		}
 		if workerInfo.State == WorkerStateActive {
 			res = append(res, broker.WorkerStatus{Name: workerName})
-			seen[workerName] = struct{}{}
+		}
+		seen[workerName] = struct{}{}
+	}
+
+	// Remove suspended worker that is not seen
+	for workerName := range m.suspendedWorkers {
+		if _, exists := seen[workerName]; !exists {
+			delete(m.suspendedWorkers, workerName)
 		}
 	}
+	m.mu.Unlock()
 
 	return res, nil
 }

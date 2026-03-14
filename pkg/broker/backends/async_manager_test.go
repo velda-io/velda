@@ -791,3 +791,48 @@ func TestListWorkersExcludesSuspended(t *testing.T) {
 		t.Errorf("Expected worker-1, got %s", workers[0].Name)
 	}
 }
+
+func TestSilentRemoveSuspendedWorkerStartsNewAfterSync(t *testing.T) {
+	backend := newMockSyncBackend()
+	mgr := MakeAsyncResumable(backend, 3).(*asyncBackendManager)
+	ctx := context.Background()
+
+	// Put a suspended worker in both backend and manager caches
+	backend.suspendedWks["worker-silent"] = WorkerInfo{State: WorkerStateSuspended, Data: "id-silent"}
+	mgr.suspendedWorkers["worker-silent"] = WorkerInfo{State: WorkerStateSuspended, Data: "id-silent"}
+
+	// Backend silently removes the suspended worker (e.g., external deletion)
+	delete(backend.suspendedWks, "worker-silent")
+
+	// Sync caches via ListWorkers
+	_, err := mgr.ListWorkers(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkers failed: %v", err)
+	}
+
+	// After sync, manager should no longer have the suspended worker cached
+	mgr.mu.RLock()
+	if _, ok := mgr.suspendedWorkers["worker-silent"]; ok {
+		t.Errorf("Expected suspended worker to be removed from manager cache after sync")
+	}
+	mgr.mu.RUnlock()
+
+	// Request scale up: since suspended was removed, manager should create a new worker (not resume)
+	name, err := mgr.RequestScaleUp(ctx)
+	if err != nil {
+		t.Fatalf("RequestScaleUp failed: %v", err)
+	}
+	if name == "worker-silent" {
+		t.Fatalf("Expected a new worker name, got resumed name %s", name)
+	}
+
+	// Wait for creation to complete
+	time.Sleep(100 * time.Millisecond)
+
+	if backend.createCallCount != 1 {
+		t.Errorf("Expected create call when suspended worker missing, got %d", backend.createCallCount)
+	}
+	if backend.resumeCallCount != 0 {
+		t.Errorf("Did not expect resume call, got %d", backend.resumeCallCount)
+	}
+}
