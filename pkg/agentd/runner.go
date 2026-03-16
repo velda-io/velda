@@ -339,11 +339,11 @@ func (r *Runner) initCgroup() error {
 	// Require CPU & Memory controllers to be enabled for resource monitoring
 	err = os.WriteFile(path.Join("/sys/fs/cgroup", r.baseCgroup[1:], "cgroup.subtree_control"), []byte("+memory +cpu"), 0400)
 	if err != nil {
-		return fmt.Errorf("WriteFile cgroup.subtree_control: %w", err)
+		log.Printf("WriteFile cgroup.subtree_control: %v", err)
 	}
 	err = os.WriteFile(path.Join("/sys/fs/cgroup", r.baseCgroup[1:], "memory.oom.group"), []byte("0"), 0400)
 	if err != nil {
-		return fmt.Errorf("WriteFile memory.oom.group: %w", err)
+		log.Printf("WriteFile memory.oom.group: %v", err)
 	}
 	return nil
 }
@@ -359,15 +359,16 @@ func (r *Runner) setupCgroup(session string) (string, error) {
 	}
 	// Enable subtree-control
 	if err := os.WriteFile(path.Join("/sys/fs/cgroup", r.baseCgroup[1:], session, "cgroup.subtree_control"), []byte("+memory +cpu"), 0400); err != nil {
-		return cgroupPath, fmt.Errorf("WriteFile cgroup.subtree_control: %w", err)
+		log.Printf("WriteFile cgroup.subtree_control: %v", err)
 	}
 
 	workloadMemMax, err := r.workloadMemoryLimitBytes()
 	if err != nil {
-		return cgroupPath, fmt.Errorf("calculate workload memory limit: %w", err)
-	}
-	if err := os.WriteFile(path.Join(workloadCg, "memory.max"), []byte(strconv.FormatUint(workloadMemMax, 10)), 0400); err != nil {
-		return cgroupPath, fmt.Errorf("WriteFile workload memory.max: %w", err)
+		log.Printf("calculate workload memory limit: %v", err)
+	} else {
+		if err := os.WriteFile(path.Join(workloadCg, "memory.max"), []byte(strconv.FormatUint(workloadMemMax, 10)), 0400); err != nil {
+			log.Printf("WriteFile workload memory.max: %v", err)
+		}
 	}
 	return cgroupPath, nil
 }
