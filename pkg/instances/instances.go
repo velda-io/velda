@@ -43,6 +43,8 @@ const (
 	ActionCreateSnapshot    = "instance.create_snapshot"
 	ActionCloneFromSnapshot = "instance.clone_from_snapshot"
 	ActionDeleteSnapshot    = "instance.delete_snapshot"
+
+	deleteInstanceSessionPollInterval = 500 * time.Millisecond
 )
 
 var validNameRegex = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
@@ -207,6 +209,9 @@ func (s *service) DeleteInstance(ctx context.Context, in *proto.DeleteInstanceRe
 	if err := s.permissions.Check(ctx, ActionDeleteInsance, fmt.Sprintf("instances/%d", in.InstanceId)); err != nil {
 		return nil, err
 	}
+	if err := s.killAndWaitSessionsForInstance(ctx, in.InstanceId); err != nil {
+		return nil, err
+	}
 	committer, inst, err := s.db.DeleteInstance(ctx, in)
 	if err != nil {
 		return nil, err
@@ -220,6 +225,38 @@ func (s *service) DeleteInstance(ctx context.Context, in *proto.DeleteInstanceRe
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil
+}
+
+func (s *service) killAndWaitSessionsForInstance(ctx context.Context, instanceID int64) error {
+	ticker := time.NewTicker(deleteInstanceSessionPollInterval)
+	defer ticker.Stop()
+
+	for {
+		sessionsResp, err := s.broker.ListSessions(ctx, &proto.ListSessionsRequest{InstanceId: instanceID})
+		if err != nil {
+			return fmt.Errorf("failed to list sessions before deleting instance: %w", err)
+		}
+		if len(sessionsResp.GetSessions()) == 0 {
+			return nil
+		}
+
+		for _, session := range sessionsResp.GetSessions() {
+			log.Printf("Killing session %s for instance %d before deletion", session.GetSessionId(), instanceID)
+			if _, err := s.broker.KillSession(ctx, &proto.KillSessionRequest{
+				InstanceId: instanceID,
+				SessionId:  session.GetSessionId(),
+				Force:      true,
+			}); err != nil {
+				return fmt.Errorf("failed to kill session %s for instance %d: %w", session.GetSessionId(), instanceID, err)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *service) CreateSnapshot(ctx context.Context, in *proto.CreateSnapshotRequest) (*proto.SnapshotReference, error) {
