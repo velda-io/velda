@@ -84,6 +84,7 @@ func RunAsDaemon(args []string, logfile, pidfile string) error {
 	if err != nil {
 		return fmt.Errorf("Failed to get executable path: %v", err)
 	}
+	log.Println("Starting service in the background")
 	args = append(args, "--foreground", "--ready-fd", "3")
 	subprocess := exec.Command(executable, args...)
 	if logfile != "" {
