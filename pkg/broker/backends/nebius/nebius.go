@@ -197,22 +197,30 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 
 	diskName := name + "-boot-disk"
 	log.Printf("Creating new boot disk %s", diskName)
+	diskSpec := &compute.DiskSpec{
+		Size:           &compute.DiskSpec_SizeGibibytes{SizeGibibytes: diskSizeGb},
+		BlockSizeBytes: 4096,
+		Type:           diskTypeFromProto(n.cfg.GetBootDiskType()),
+		Source: &compute.DiskSpec_SourceImageFamily{
+			SourceImageFamily: &compute.SourceImageFamily{
+				ImageFamily: "ubuntu24.04-cuda12",
+			},
+		},
+	}
+	if diskSpec.GetType() != compute.DiskSpec_NETWORK_SSD {
+		// Enable encryption
+		diskSpec.DiskEncryption = &compute.DiskEncryption{
+			Type: compute.DiskEncryption_DISK_ENCRYPTION_MANAGED,
+		}
+	}
+
 	diskOp, err := n.diskService.Create(ctx, &compute.CreateDiskRequest{
 		Metadata: &common.ResourceMetadata{
 			ParentId: n.cfg.GetParentId(),
 			Name:     diskName,
 			Labels:   labels,
 		},
-		Spec: &compute.DiskSpec{
-			Size:           &compute.DiskSpec_SizeGibibytes{SizeGibibytes: diskSizeGb},
-			BlockSizeBytes: 4096,
-			Type:           diskTypeFromProto(n.cfg.GetBootDiskType()),
-			Source: &compute.DiskSpec_SourceImageFamily{
-				SourceImageFamily: &compute.SourceImageFamily{
-					ImageFamily: "ubuntu24.04-cuda12",
-				},
-			},
-		},
+		Spec: diskSpec,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create boot disk: %w", err)
