@@ -270,6 +270,11 @@ usermod -aG sudo user || true
 echo "<empty> /tmp host defaults 0 0" >> /etc/fstab
 echo "<empty> /var/lib/docker host defaults 0 0" >> /etc/fstab
 
+cat << EOF > /etc/resolv.conf
+nameserver 127.0.0.1
+search local.velda
+EOF
+
 ln -sf /run/velda/velda /usr/bin/velda
 ln -sf /run/velda/velda /usr/bin/vbatch
 ln -sf /run/velda/velda /usr/bin/vrun
