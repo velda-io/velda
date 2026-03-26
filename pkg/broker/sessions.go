@@ -33,7 +33,7 @@ import (
 
 type schedulingState int
 
-const DefaultStaleTimeout = 2 * time.Minute
+const DefaultStaleTimeout = 50 * time.Second
 
 const (
 	schedulingStateUnknown schedulingState = iota
@@ -383,6 +383,14 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 				if ctx == nil {
 					// Stale and no connection request. Terminate.
 					s.completeLocked(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_WORKER_LOST)
+
+					if s.agent != nil {
+						schedulerCtx := rbac.ContextWithUser(s.scheduler.ctx, s.user)
+						err := s.agent.delegate.RevokeAccessToAgent(schedulerCtx, s.agent, s)
+						if err != nil {
+							log.Printf("Failed to revoke access to agent %s for session %s: %v", s.agent.id, s.id, err)
+						}
+					}
 					nextState = schedulingStateTerminated
 					return
 				} else {
