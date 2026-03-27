@@ -20,9 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"path"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
@@ -41,18 +44,7 @@ var sandboxCmd = &cobra.Command{
 	Short:  "Start a velda sandbox",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if os.Getenv("VELDA_SANDBOX_PPROF") != "" {
-			go func() {
-				pid1, _ := cmd.Flags().GetBool("pid1")
-				var port string
-				if pid1 {
-					port = ":6062"
-				} else {
-					port = ":6061"
-				}
-				cmd.Printf("Pprof finished with %s\n", http.ListenAndServe(port, nil))
-			}()
-		}
+		go startPprofServer(cmd)
 		netns, _ := cmd.Flags().GetInt("netfd")
 		pid1, _ := cmd.Flags().GetBool("pid1")
 		sandboxConfig := clientlib.GetAgentSandboxConfig()
@@ -116,4 +108,27 @@ func shimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agentpb.
 
 func pid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agentpb.SandboxConfig) agent.AbstractPlugin {
 	return agent_runner.NewPid1Runner(ctx, cmd, sandboxConfig)
+}
+
+func startPprofServer(cmd *cobra.Command) {
+	pid1, _ := cmd.Flags().GetBool("pid1")
+	var socketName string
+	workdir, _ := cmd.Flags().GetString("workdir")
+	if pid1 {
+		socketName = "pid1.sock"
+	} else {
+		socketName = "shim.sock"
+	}
+	socketPath := path.Join(workdir, socketName)
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("Failed to remove existing pprof socket: %v\n", err)
+	}
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		log.Printf("Failed to listen on pprof socket: %v\n", err)
+		return
+	}
+	if err := http.Serve(ln, nil); err != nil {
+		log.Printf("pprof server error: %v\n", err)
+	}
 }
