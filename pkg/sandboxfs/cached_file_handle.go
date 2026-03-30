@@ -16,6 +16,7 @@ package sandboxfs
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"syscall"
 	"time"
@@ -30,6 +31,10 @@ type CachedFileHandle struct {
 	*fs.LoopbackFile
 	cache      CacheManager
 	cachedStat *syscall.Stat_t
+	debug      *DebugTracker
+	path       string
+
+	debugHandleID uint64
 
 	// For caching operations
 	mu           sync.Mutex
@@ -56,6 +61,10 @@ func (f *CachedFileHandle) switchToCachedFd(cachedFd int, st *syscall.Stat_t) {
 	f.LoopbackFile = fs.NewLoopbackFile(cachedFd).(*fs.LoopbackFile)
 	f.cachedStat = st
 	f.cacheOps = false // Disable further caching since we're now using cache
+	f.debug.UpdateHandle(f.debugHandleID, func(handle *DebugHandleSnapshot) {
+		handle.Backing = "cache"
+		handle.CacheOps = false
+	})
 	if f.cacheWrite != nil {
 		f.cacheWrite.Abort()
 	}
@@ -102,6 +111,9 @@ func (f *CachedFileHandle) Getattr(ctx context.Context, out *fuse.AttrOut) sysca
 
 // Read implements FileReader
 func (f *CachedFileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	opID := f.debug.StartOperation("handle-read", f.path, fmt.Sprintf("offset=%d size=%d", off, len(dest)))
+	defer f.debug.FinishOperation(opID)
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	fd, _ := f.PassthroughFd()
@@ -131,6 +143,9 @@ func (f *CachedFileHandle) Read(ctx context.Context, dest []byte, off int64) (fu
 
 // Write implements FileWriter
 func (f *CachedFileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
+	opID := f.debug.StartOperation("handle-write", f.path, fmt.Sprintf("offset=%d size=%d", off, len(data)))
+	defer f.debug.FinishOperation(opID)
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -174,6 +189,9 @@ func (f *CachedFileHandle) Write(ctx context.Context, data []byte, off int64) (u
 
 // Lseek implements FileLseeker - seeking aborts caching
 func (f *CachedFileHandle) Lseek(ctx context.Context, off uint64, whence uint32) (uint64, syscall.Errno) {
+	opID := f.debug.StartOperation("handle-seek", f.path, fmt.Sprintf("offset=%d whence=%d", off, whence))
+	defer f.debug.FinishOperation(opID)
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -185,6 +203,9 @@ func (f *CachedFileHandle) Lseek(ctx context.Context, off uint64, whence uint32)
 
 // Flush implements FileFlusher - commits cache on flush
 func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
+	opID := f.debug.StartOperation("handle-flush", f.path, "flush")
+	defer f.debug.FinishOperation(opID)
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	errno := f.LoopbackFile.Flush(ctx)
@@ -210,6 +231,9 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 		}
 		f.cacheWrite = nil
 		f.cacheOps = false // Disable further caching after flush
+		f.debug.UpdateHandle(f.debugHandleID, func(handle *DebugHandleSnapshot) {
+			handle.CacheOps = false
+		})
 	} else if f.cacheOps && !f.isWrite && f.cacheWrite != nil && f.bytesWritten > 0 {
 		// Reading sequentially.
 		// Get current mtime & size
@@ -224,6 +248,9 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 			}
 		}
 		f.cacheOps = false // Disable further caching after flush
+		f.debug.UpdateHandle(f.debugHandleID, func(handle *DebugHandleSnapshot) {
+			handle.CacheOps = false
+		})
 	} else if f.cacheWrite != nil {
 		// Abort any pending cache write that wasn't sequential - ABORTED
 		if GlobalCacheMetrics != nil {
@@ -232,6 +259,9 @@ func (f *CachedFileHandle) Flush(ctx context.Context) syscall.Errno {
 		f.cacheWrite.Abort()
 		f.cacheWrite = nil
 		f.cacheOps = false
+		f.debug.UpdateHandle(f.debugHandleID, func(handle *DebugHandleSnapshot) {
+			handle.CacheOps = false
+		})
 	}
 
 	return 0
@@ -244,6 +274,7 @@ func (f *CachedFileHandle) Release(ctx context.Context) syscall.Errno {
 
 	oldfile := f.LoopbackFile
 	f.LoopbackFile = nil
+	f.debug.UnregisterHandle(f.debugHandleID)
 	return oldfile.Release(ctx)
 }
 
@@ -258,4 +289,7 @@ func (f *CachedFileHandle) abortCaching(reason string) {
 		f.cacheWrite = nil
 	}
 	f.cacheOps = false
+	f.debug.UpdateHandle(f.debugHandleID, func(handle *DebugHandleSnapshot) {
+		handle.CacheOps = false
+	})
 }

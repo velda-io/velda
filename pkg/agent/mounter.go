@@ -217,6 +217,8 @@ func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, works
 		"agent",
 		"sandboxfs",
 		"--readyfd=3",
+		"--workdir",
+		path.Dir(workspaceDir),
 		"--name",
 		name,
 	}

@@ -75,6 +75,7 @@ type DirectFSClient struct {
 
 	// Cache from sandboxfs
 	cache *DirectoryCacheManager
+	debug *DebugTracker
 
 	// Additional cache sources (HTTP URLs, NFS paths, etc.)
 	cacheSources       []string
@@ -100,6 +101,7 @@ type prefetchJob struct {
 	client *DirectFSClient
 	fh     unix.FileHandle
 	attr   fileserver.FileAttr
+	path   string
 }
 
 // NewDirectFSClient creates a new direct filesystem client
@@ -111,6 +113,7 @@ func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager, cacheSou
 		partialPackets:     make(map[uint32]*partialMessage),
 		inodes:             make(map[uint64]*fs.Inode),
 		cache:              cache,
+		debug:              NewDebugTracker(),
 		cacheSources:       cacheSources,
 		cacheSourceClients: initializeCacheSources(cacheSources),
 		prefetchQueue:      make(chan *prefetchJob, 1000),
@@ -178,6 +181,7 @@ func (sc *DirectFSClient) Mount(mountPoint string) (*VeldaServer, error) {
 	return &VeldaServer{
 		Server: server,
 		Cache:  sc.cache,
+		debug:  sc.debug,
 	}, nil
 }
 
@@ -334,6 +338,9 @@ func (sc *DirectFSClient) prefetchWorker() {
 
 // processPrefetchJob processes a single prefetch job
 func (sc *DirectFSClient) processPrefetchJob(job *prefetchJob) {
+	opID := sc.debug.StartOperation("directfs-prefetch", job.path, fmt.Sprintf("inode=%d size=%d", job.attr.Ino, job.attr.Size))
+	defer sc.debug.FinishOperation(opID)
+
 	// Check if file has SHA256
 	var zeroHash [32]byte
 	if job.attr.Sha256 == zeroHash {
@@ -932,6 +939,7 @@ func (n *SnapshotNode) prefetchSmallFiles() {
 					client: n.client,
 					fh:     childNode.fh,
 					attr:   childNode.attr,
+					path:   childNode.Path(nil),
 				}
 
 				select {
@@ -970,13 +978,22 @@ func (n *SnapshotNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, u
 				GlobalCacheMetrics.CacheHit.Inc()
 				// Use LoopbackFile for passthrough mode
 				loopbackFile := fs.NewLoopbackFile(fd).(*fs.LoopbackFile)
-				return &SnapshotFile{
+				file := &SnapshotFile{
 					cachedBackingFile: loopbackFile,
 					client:            n.client,
 					fh:                n.fh,
 					attr:              n.attr,
 					cache:             n.client.cache,
-				}, fuse.FOPEN_KEEP_CACHE, fs.OK
+					debug:             n.client.debug,
+					path:              n.Path(nil),
+				}
+				file.debugHandleID = n.client.debug.RegisterHandle(DebugHandleSnapshot{
+					Kind:    "directfs",
+					Path:    file.path,
+					Access:  "read",
+					Backing: "cache",
+				})
+				return file, fuse.FOPEN_KEEP_CACHE, fs.OK
 			}
 		}
 		GlobalCacheMetrics.CacheMiss.Inc()
@@ -991,7 +1008,14 @@ func (n *SnapshotNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, u
 		attr:   n.attr,
 		cache:  n.client.cache,
 		path:   n.Path(nil),
+		debug:  n.client.debug,
 	}
+	file.debugHandleID = n.client.debug.RegisterHandle(DebugHandleSnapshot{
+		Kind:    "directfs",
+		Path:    file.path,
+		Access:  "read",
+		Backing: "remote",
+	})
 
 	// Start eager fetch in background
 	go file.eagerFetchAndCache(cacheKeyExists, sha256Hex)
@@ -1062,6 +1086,8 @@ type SnapshotFile struct {
 	fh                unix.FileHandle
 	attr              fileserver.FileAttr
 	cache             *DirectoryCacheManager
+	debug             *DebugTracker
+	debugHandleID     uint64
 
 	// Eager fetch state
 	fetchMu     sync.Mutex
@@ -1081,6 +1107,9 @@ var _ fs.FileReleaser = (*SnapshotFile)(nil)
 // eagerFetchAndCache fetches the entire file from server and caches it using 1MB buffered chunks
 // It first tries to fetch from configured cache sources, then falls back to fileserver
 func (f *SnapshotFile) eagerFetchAndCache(hasExistingKey bool, expectedSHA string) {
+	opID := f.debug.StartOperation("directfs-eager-fetch", f.path, fmt.Sprintf("size=%d expected_sha=%s", f.attr.Size, expectedSHA))
+	defer f.debug.FinishOperation(opID)
+
 	f.fetchMu.Lock()
 	if f.cacheWriter != nil {
 		f.fetchMu.Unlock()
@@ -1192,6 +1221,9 @@ func (f *SnapshotFile) eagerFetchAndCache(hasExistingKey bool, expectedSHA strin
 
 	// Update fetch state and set cachedBackingFile
 	f.cachedBackingFile = fs.NewLoopbackFile(fd).(*fs.LoopbackFile)
+	f.debug.UpdateHandle(f.debugHandleID, func(handle *DebugHandleSnapshot) {
+		handle.Backing = "cache"
+	})
 
 	if GlobalCacheMetrics != nil {
 		GlobalCacheMetrics.CacheSaved.Inc()
@@ -1200,6 +1232,9 @@ func (f *SnapshotFile) eagerFetchAndCache(hasExistingKey bool, expectedSHA strin
 
 // Read reads data from the file with caching
 func (f *SnapshotFile) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	opID := f.debug.StartOperation("handle-read", f.path, fmt.Sprintf("offset=%d size=%d", off, len(dest)))
+	defer f.debug.FinishOperation(opID)
+
 	// Check if eager fetch is in progress or completed
 	f.fetchMu.Lock()
 	// If file is from cache, use passthrough mode
@@ -1263,6 +1298,7 @@ func (f *SnapshotFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fus
 func (f *SnapshotFile) Release(ctx context.Context) syscall.Errno {
 	f.fetchMu.Lock()
 	defer f.fetchMu.Unlock()
+	f.debug.UnregisterHandle(f.debugHandleID)
 	if f.cachedBackingFile != nil {
 		return f.cachedBackingFile.Release(ctx)
 	}

@@ -17,6 +17,7 @@ package sandboxfs
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"hash"
 	"sync"
 	"syscall"
@@ -30,6 +31,9 @@ import (
 // It does not read from cache or write data to cache, only sets the cache key (xattr) during write.
 type NoCacheFileHandle struct {
 	*fs.LoopbackFile
+	debug         *DebugTracker
+	path          string
+	debugHandleID uint64
 
 	// For cache key operations
 	mu           sync.Mutex
@@ -47,6 +51,9 @@ var _ = (fs.FilePassthroughFder)((*NoCacheFileHandle)(nil))
 
 // Write implements FileWriter - computes hash for cache key but does not write to cache
 func (f *NoCacheFileHandle) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
+	opID := f.debug.StartOperation("handle-write", f.path, fmt.Sprintf("offset=%d size=%d", off, len(data)))
+	defer f.debug.FinishOperation(opID)
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -74,6 +81,9 @@ func (f *NoCacheFileHandle) Write(ctx context.Context, data []byte, off int64) (
 
 // Flush implements FileFlusher - sets cache key (xattr) but does not commit to cache
 func (f *NoCacheFileHandle) Flush(ctx context.Context) syscall.Errno {
+	opID := f.debug.StartOperation("handle-flush", f.path, "flush")
+	defer f.debug.FinishOperation(opID)
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	errno := f.LoopbackFile.Flush(ctx)
@@ -113,6 +123,7 @@ func (f *NoCacheFileHandle) Release(ctx context.Context) syscall.Errno {
 
 	oldfile := f.LoopbackFile
 	f.LoopbackFile = nil
+	f.debug.UnregisterHandle(f.debugHandleID)
 	return oldfile.Release(ctx)
 }
 

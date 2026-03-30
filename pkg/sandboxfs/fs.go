@@ -102,6 +102,14 @@ func WithCacheSources(sources []string) MountOptions {
 type VeldaServer struct {
 	*fuse.Server
 	Cache *DirectoryCacheManager
+	debug *DebugTracker
+}
+
+func (s *VeldaServer) DebugSnapshot() DebugSnapshot {
+	if s == nil {
+		return DebugSnapshot{}
+	}
+	return s.debug.Snapshot()
 }
 
 // MountWorkDir mounts a workspace directory with caching support
@@ -157,11 +165,14 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 		veldaOpts.FuseOptions.NegativeTimeout = &infiniteTimeout
 	}
 
-	var rootNode fs.InodeEmbedder
+	var (
+		rootNode     fs.InodeEmbedder
+		directClient *DirectFSClient
+	)
 	// Handle DirectFS mode
 	if veldaOpts.DirectFSMode {
-		client := NewDirectFSClient(baseDir, cache, veldaOpts.CacheSources, veldaOpts.VerboseLog)
-		rootNode, err = client.Connect()
+		directClient = NewDirectFSClient(baseDir, cache, veldaOpts.CacheSources, veldaOpts.VerboseLog)
+		rootNode, err = directClient.Connect()
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to DirectFS server: %w", err)
 		}
@@ -183,6 +194,11 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 	veldaServer := &VeldaServer{
 		Server: server,
 		Cache:  cache,
+	}
+	if veldaOpts.DirectFSMode {
+		veldaServer.debug = directClient.debug
+	} else if loopbackRoot, ok := rootNode.(*CachedLoopbackNode); ok {
+		veldaServer.debug = loopbackRoot.mountCtx.debug
 	}
 
 	go func() {

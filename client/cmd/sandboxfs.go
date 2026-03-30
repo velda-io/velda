@@ -17,11 +17,15 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
+	"path"
+
+	"net/http/pprof"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
@@ -36,13 +40,6 @@ var sandboxfsCmd = &cobra.Command{
 	Short: "Mount sandbox file system",
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		if os.Getenv("VELDA_SANDBOX_PPROF") != "" {
-			go func() {
-				port := ":6063"
-				http.Handle("/metrics", promhttp.Handler())
-				cmd.Printf("PProf finished with %s", http.ListenAndServe(port, nil))
-			}()
-		}
 		base := args[0]
 		target := args[1]
 		cacheDir, _ := cmd.Flags().GetString("cache-dir")
@@ -81,6 +78,7 @@ var sandboxfsCmd = &cobra.Command{
 
 		server, err := sandboxfs.MountWorkDir(base, target, cacheDir, mountOpts...)
 		cobra.CheckErr(err)
+		go startSandboxfsDebugServer(cmd, target, server)
 		readyfd, _ := cmd.Flags().GetInt("readyfd")
 		if readyfd != 0 {
 			file := os.NewFile(uintptr(readyfd), "")
@@ -98,9 +96,50 @@ var sandboxfsCmd = &cobra.Command{
 	},
 }
 
+func startSandboxfsDebugServer(cmd *cobra.Command, target string, server *sandboxfs.VeldaServer) {
+	workdir, _ := cmd.Flags().GetString("workdir")
+	if workdir == "" {
+		workdir = path.Dir(target)
+	}
+	socketPath := path.Join(workdir, "sandboxfs.sock")
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("Failed to remove existing sandboxfs pprof socket: %v", err)
+		return
+	}
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		log.Printf("Failed to listen on sandboxfs pprof socket: %v", err)
+		return
+	}
+	if err := http.Serve(ln, newSandboxfsDebugMux(server)); err != nil {
+		log.Printf("sandboxfs pprof server error: %v", err)
+	}
+}
+
+func newSandboxfsDebugMux(server *sandboxfs.VeldaServer) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	mux.HandleFunc("/debug/sandboxfs/state", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(server.DebugSnapshot()); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
+	mux.HandleFunc("/debug/sandboxfs", func(w http.ResponseWriter, r *http.Request) {
+		sandboxfs.ServeSandboxfsDebugUI(w, server)
+	})
+	return mux
+}
+
 func init() {
 	AgentCmd.AddCommand(sandboxfsCmd)
 	sandboxfsCmd.Flags().Int("readyfd", 0, "File descriptor to signal when the mount is ready")
+	sandboxfsCmd.Flags().String("workdir", "", "Session workdir used for debug socket placement")
 	sandboxfsCmd.Flags().String("name", "", "Name of the mount")
 	sandboxfsCmd.Flags().String("cache-dir", "/tmp/velda_cas_cache", "Directory for caching")
 	sandboxfsCmd.Flags().String("mode", "standard", "Mount mode: standard, snapshot, nocache, directfs or directfs-snapshot")
