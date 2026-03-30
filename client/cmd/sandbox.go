@@ -25,7 +25,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"path"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
@@ -119,7 +119,7 @@ func startPprofServer(cmd *cobra.Command) {
 	} else {
 		socketName = "shim.sock"
 	}
-	socketPath := path.Join(workdir, socketName)
+	socketPath := filepath.Join(workdir, socketName)
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		log.Printf("Failed to remove existing pprof socket: %v\n", err)
 	}

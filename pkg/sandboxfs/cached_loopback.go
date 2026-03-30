@@ -71,6 +71,7 @@ type statJob struct {
 type MountContext struct {
 	rootData        *fs.LoopbackRoot
 	cache           CacheManager
+	debug           *DebugTracker
 	eagerFetchQueue chan *eagerFetchJob
 	statQueue       chan *statJob
 	workersDone     chan struct{}
@@ -98,6 +99,7 @@ func NewCachedLoopbackRoot(rootPath string, cache CacheManager, snapshotMode boo
 	mountCtx := &MountContext{
 		rootData:        root,
 		cache:           cache,
+		debug:           NewDebugTracker(),
 		eagerFetchQueue: make(chan *eagerFetchJob, 1000), // Buffered channel for job queue
 		statQueue:       make(chan *statJob, 1000),       // Buffered channel for stat jobs
 		workersDone:     make(chan struct{}),
@@ -190,17 +192,22 @@ func (n *CachedLoopbackNode) statWorker() {
 			if job == nil {
 				return
 			}
+			opID := n.mountCtx.debug.StartOperation("loopback-stat", job.fullPath, "prefetch metadata")
 			// Invoke stat - this warms the kernel buffer cache
 			var st syscall.Stat_t
 			syscall.Lstat(job.fullPath, &st)
 			// Invoke getxattr - this also warms the kernel buffer cache
 			unix.Lgetxattr(job.fullPath, xattrCacheName, xattrBuf[:])
+			n.mountCtx.debug.FinishOperation(opID)
 		}
 	}
 }
 
 // processEagerFetch processes a single eager fetch job
 func (n *CachedLoopbackNode) processEagerFetch(job *eagerFetchJob, buf []byte) {
+	opID := n.mountCtx.debug.StartOperation("loopback-eager-fetch", job.fullPath, fmt.Sprintf("size=%d", job.st.Size))
+	defer n.mountCtx.debug.FinishOperation(opID)
+
 	// Fetch and cache the file
 	// In snapshot mode, skip if no cache key exists
 	skipIfNoKey := n.mountCtx.SnapshotMode
@@ -326,22 +333,14 @@ func (n *CachedLoopbackNode) Create(ctx context.Context, name string, flags uint
 
 	// In NoCacheMode, use NoCacheFileHandle
 	if n.mountCtx.NoCacheMode {
-		fh := &NoCacheFileHandle{
-			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-			isWrite:      true,
-			hasher:       sha256.New(),
-		}
+		fh := n.newNoCacheFileHandle(fd, fullPath, true)
+		fh.hasher = sha256.New()
 		return ch, fh, 0, 0
 	}
 
 	// Create file handle with caching enabled for writes
 	//log.Printf("Created file %s, enabling write caching", fullPath)
-	fh := &CachedFileHandle{
-		LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-		cache:        n.mountCtx.cache,
-		isWrite:      true,
-		cacheOps:     true,
-	}
+	fh := n.newCachedFileHandle(fd, fullPath, true, true, nil, "real")
 
 	return ch, fh, 0, 0
 }
@@ -356,6 +355,50 @@ func (n *CachedLoopbackNode) preserveOwner(ctx context.Context, path string) err
 		return nil
 	}
 	return syscall.Lchown(path, int(caller.Uid), int(caller.Gid))
+}
+
+func (n *CachedLoopbackNode) newCachedFileHandle(fd int, fullPath string, isWrite bool, cacheOps bool, cachedStat *syscall.Stat_t, backing string) *CachedFileHandle {
+	access := "read"
+	if isWrite {
+		access = "write"
+	}
+	handle := &CachedFileHandle{
+		LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+		cache:        n.mountCtx.cache,
+		cachedStat:   cachedStat,
+		isWrite:      isWrite,
+		cacheOps:     cacheOps,
+		debug:        n.mountCtx.debug,
+		path:         fullPath,
+	}
+	handle.debugHandleID = n.mountCtx.debug.RegisterHandle(DebugHandleSnapshot{
+		Kind:     "loopback",
+		Path:     fullPath,
+		Access:   access,
+		Backing:  backing,
+		CacheOps: cacheOps,
+	})
+	return handle
+}
+
+func (n *CachedLoopbackNode) newNoCacheFileHandle(fd int, fullPath string, isWrite bool) *NoCacheFileHandle {
+	access := "read"
+	if isWrite {
+		access = "write"
+	}
+	handle := &NoCacheFileHandle{
+		LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
+		isWrite:      isWrite,
+		debug:        n.mountCtx.debug,
+		path:         fullPath,
+	}
+	handle.debugHandleID = n.mountCtx.debug.RegisterHandle(DebugHandleSnapshot{
+		Kind:    "nocache",
+		Path:    fullPath,
+		Access:  access,
+		Backing: "real",
+	})
+	return handle
 }
 
 // eagerFetchAndCacheSync reads the entire file and caches it, returning the cached file descriptor
@@ -455,10 +498,7 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 			return nil, 0, fs.ToErrno(err)
 		}
 
-		fh := &NoCacheFileHandle{
-			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-			isWrite:      isWrite,
-		}
+		fh := n.newNoCacheFileHandle(fd, fullPath, isWrite)
 		// Initialize hasher for write operations
 		if isWrite {
 			fh.hasher = sha256.New()
@@ -472,12 +512,7 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 		if err != nil {
 			return nil, 0, fs.ToErrno(err)
 		}
-		return &CachedFileHandle{
-			LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-			cache:        n.mountCtx.cache,
-			isWrite:      true,
-			cacheOps:     true,
-		}, 0, 0
+		return n.newCachedFileHandle(fd, fullPath, true, true, nil, "real"), 0, 0
 	}
 
 	// For read operations, check cache with mtime verification
@@ -505,12 +540,7 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 						GlobalCacheMetrics.CacheHit.Inc()
 					}
 					//log.Printf("Cache hit for %s (mtime match)", fullPath)
-					return &CachedFileHandle{
-						LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-						cache:        n.mountCtx.cache,
-						isWrite:      false,
-						cachedStat:   &st,
-					}, fuse.FOPEN_KEEP_CACHE, 0
+					return n.newCachedFileHandle(fd, fullPath, false, false, &st, "cache"), fuse.FOPEN_KEEP_CACHE, 0
 				}
 				// Fall through if cached file can't be opened
 			}
@@ -529,12 +559,7 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 				}
 
 				// Create file handle with real fd
-				fh := &CachedFileHandle{
-					LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-					cache:        n.mountCtx.cache,
-					isWrite:      false,
-					cacheOps:     false, // Disable lazy caching since we'll eager fetch
-				}
+				fh := n.newCachedFileHandle(fd, fullPath, false, false, nil, "real")
 
 				// Submit eager fetch job to front of queue (high priority)
 				job := &eagerFetchJob{
@@ -587,12 +612,7 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 			}
 
 			// Create file handle with real fd
-			fh := &CachedFileHandle{
-				LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-				cache:        n.mountCtx.cache,
-				isWrite:      false,
-				cacheOps:     false, // Disable lazy caching since we'll eager fetch
-			}
+			fh := n.newCachedFileHandle(fd, fullPath, false, false, nil, "real")
 
 			// Submit eager fetch job to front of queue (high priority)
 			job := &eagerFetchJob{
@@ -644,12 +664,7 @@ func (n *CachedLoopbackNode) Open(ctx context.Context, flags uint32) (fs.FileHan
 	}
 
 	// For sequential reads, we'll cache the content
-	return &CachedFileHandle{
-		LoopbackFile: fs.NewLoopbackFile(fd).(*fs.LoopbackFile),
-		cache:        n.mountCtx.cache,
-		isWrite:      false,
-		cacheOps:     true,
-	}, 0, 0
+	return n.newCachedFileHandle(fd, fullPath, false, true, nil, "real"), 0, 0
 }
 
 // prefetchDirStats submits stat jobs for children of a directory

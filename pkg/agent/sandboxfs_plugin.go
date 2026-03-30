@@ -61,8 +61,15 @@ func (p *SandboxFsPlugin) Run(ctx context.Context) (err error) {
 
 	// This should run regardless if previous return function returns error
 	defer func() {
-		// Unmount all workspace mounts first
-		err := umountAll(p.WorkspaceDir)
+		// First unmount workspace
+		workspaceDir := path.Join(p.WorkspaceDir, "workspace")
+		err := umountAll(workspaceDir)
+		if err != nil {
+			log.Printf("Error unmounting workspace dir %s: %v. Attempting to continue cleanup.", workspaceDir, err)
+		}
+
+		// Unmount all remaining volumes
+		err = umountAll(p.WorkspaceDir)
 		if err != nil {
 			err = fmt.Errorf("umount workspace: %w", err)
 			if cleanup != nil {
