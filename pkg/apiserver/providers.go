@@ -269,6 +269,8 @@ func ProvidePoolService(grpcServer *grpc.Server, mux *runtime.ServeMux, schedule
 
 type ServerAuthUnaryInterceptor grpc.UnaryServerInterceptor
 type ServerAuthStreamInterceptor grpc.StreamServerInterceptor
+type ServerMtlsUnaryInterceptor grpc.UnaryServerInterceptor
+type ServerMtlsStreamInterceptor grpc.StreamServerInterceptor
 
 func ProvideGrpcMetrics() *prometheus_grpc.ServerMetrics {
 	return prometheus_grpc.NewServerMetrics(
@@ -276,15 +278,23 @@ func ProvideGrpcMetrics() *prometheus_grpc.ServerMetrics {
 	)
 }
 
-func ProvideGrpcServer(metrics *prometheus_grpc.ServerMetrics, authUnaryInterceptor ServerAuthUnaryInterceptor, authStreamInterceptor ServerAuthStreamInterceptor) *grpc.Server {
+func ProvideGrpcServer(
+	metrics *prometheus_grpc.ServerMetrics,
+	mtlsUnaryInterceptor ServerMtlsUnaryInterceptor,
+	mtlsStreamInterceptor ServerMtlsStreamInterceptor,
+	authUnaryInterceptor ServerAuthUnaryInterceptor,
+	authStreamInterceptor ServerAuthStreamInterceptor,
+) *grpc.Server {
 	return grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			metrics.UnaryServerInterceptor(),
+			grpc.UnaryServerInterceptor(mtlsUnaryInterceptor),
 			grpc.UnaryServerInterceptor(authUnaryInterceptor),
 			ErrorWrapperUnaryInterceptor(),
 		),
 		grpc.ChainStreamInterceptor(
 			metrics.StreamServerInterceptor(),
+			grpc.StreamServerInterceptor(mtlsStreamInterceptor),
 			grpc.StreamServerInterceptor(authStreamInterceptor),
 			ErrorWrapperStreamInterceptor(),
 		),
@@ -429,6 +439,10 @@ var ServiceProviders = wire.NewSet(
 	ProvideHttpHandler,
 	ProvideGrpcMux,
 	ProvideGrpcMetrics,
+	ProvideMTLSMethodCNMap,
+	ProvideMTLSVerifier,
+	ProvideMTLSUnaryInterceptor,
+	ProvideMTLSStreamInterceptor,
 	ProvideMetrics,
 	ProvideProvisioners,
 	ProvideGrpcServer,

@@ -110,7 +110,7 @@ func (s *server) AgentUpdate(stream proto.BrokerService_AgentUpdateServer) error
 				user, err := s.ReGrantAccessToAgent(stream.Context(), agent, sess)
 				if err != nil {
 					// TODO: should session be killed?
-					log.Printf("Failed to regrant access for sess: %v", sess.Key())
+					log.Printf("Failed to regrant access for sess %v: %v", sess.Key(), err)
 				}
 				sess.user = user
 			}

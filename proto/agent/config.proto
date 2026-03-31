@@ -109,12 +109,20 @@ message DaemonConfig {
   // If not set, all sessions will share the host network.
   // If set, each session will have its own network namespace.
   Network network = 3;
+
+  // The network device name for detecting the IP address and NFS connection.
+  string primary_network_device_name = 4;
 }
 
 message BrokerInfo {
-  // The URL of the broker.
+// The URL of the broker.
   string address = 1;
   string public_address = 2;
+
+  // Optional mTLS files used by the agent when connecting to the broker.
+  // When set, these are interpreted as file paths on the agent host.
+  string mtls_client_cert_path = 3;
+  string mtls_client_key_path = 4;
 }
 
 message AgentConfig {

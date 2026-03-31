@@ -15,6 +15,8 @@ package clientlib
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/url"
@@ -95,7 +97,31 @@ func GetApiConnection() (*grpc.ClientConn, error) {
 
 		var credential credentials.TransportCredentials
 		if brokerUrl.Scheme == "https" {
-			credential = credentials.NewTLS(nil)
+			tlsConfig := &tls.Config{ServerName: brokerUrl.Hostname()}
+			systemRoots, err := x509.SystemCertPool()
+			if err != nil {
+				connErr = fmt.Errorf("failed to load system cert pool: %w", err)
+				return
+			}
+			tlsConfig.RootCAs = systemRoots
+			if agentConfig != nil && agentConfig.GetBroker() != nil {
+				brokerCfg := agentConfig.GetBroker()
+				clientCertPath := brokerCfg.GetMtlsClientCertPath()
+				clientKeyPath := brokerCfg.GetMtlsClientKeyPath()
+				if clientCertPath != "" || clientKeyPath != "" {
+					if clientCertPath == "" || clientKeyPath == "" {
+						connErr = errors.New("both broker mTLS client cert and key must be set")
+						return
+					}
+					clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
+					if err != nil {
+						connErr = fmt.Errorf("failed to load broker mTLS client cert/key: %w", err)
+						return
+					}
+					tlsConfig.Certificates = []tls.Certificate{clientCert}
+				}
+			}
+			credential = credentials.NewTLS(tlsConfig)
 		} else {
 			credential = insecure.NewCredentials()
 		}

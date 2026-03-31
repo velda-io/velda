@@ -27,6 +27,8 @@ message AgentIdentity {
   string agent_id = 1;
   string hostname = 2;
   string pool = 3;
+  // Optional self-reported address for agent-side connectivity.
+  string ip_address = 4;
 }
 
 message AgentUpdateRequest {
