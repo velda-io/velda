@@ -763,10 +763,6 @@ func (p *AutoScaledPool) setWorkerStatusLocked(name string, status WorkerStatusC
 		if currentStatus == WorkerStatusUnknown || currentStatus == WorkerStatusPending || currentStatus == WorkerStatusLost {
 			delete(p.lastKnownTime, name)
 		}
-		if status == WorkerStatusPending && currentStatus == WorkerStatusDeleting {
-			status = WorkerStatusDisconnected
-			p.logPrintf("Worker %s is being marked as pending while deleting, marking as Disconnected", name)
-		}
 	} else if !ok {
 		p.workerDetail[name] = &workerDetail{}
 	}
