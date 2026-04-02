@@ -356,7 +356,7 @@ func (p *AutoScaledPool) Reconnect(ctx context.Context) error {
 	for _, status := range nonActiveStatus {
 		workers := p.workersByStatus[status]
 		for name, value := range workers {
-			if value != curVersion {
+			if value != curVersion && value != curVersion-1 {
 				p.logPrintf("Worker %s is removed from backend. Was %v", name, status)
 				p.removeWorkerLocked(name)
 			}

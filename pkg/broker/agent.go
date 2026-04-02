@@ -85,6 +85,14 @@ func newAgent(initialReq *proto.AgentUpdateRequest, peerInfo *peer.Peer, schedul
 		panic("Failed to get TCP address")
 	}
 	identity := initialReq.AgentIdentity
+	hostIP := addr.IP
+	if identity.GetIpAddress() != "" {
+		if ip := net.ParseIP(identity.GetIpAddress()); ip != nil {
+			hostIP = ip
+		} else {
+			log.Printf("Agent %s reported invalid ip_address %q, falling back to peer IP %s", identity.GetAgentId(), identity.GetIpAddress(), addr.IP)
+		}
+	}
 	concurrency := initialReq.Slots
 	if concurrency <= 0 {
 		concurrency = 1
@@ -92,7 +100,7 @@ func newAgent(initialReq *proto.AgentUpdateRequest, peerInfo *peer.Peer, schedul
 	return &Agent{
 		id:            identity.AgentId,
 		Pool:          identity.Pool,
-		Host:          addr.IP,
+		Host:          hostIP,
 		PeerInfo:      peerInfo,
 		sessionReq:    make(chan SessionRequest, concurrency),
 		slots:         int(concurrency),

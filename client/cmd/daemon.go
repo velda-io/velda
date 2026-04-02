@@ -33,6 +33,8 @@ import (
 )
 
 var agentPool string
+var brokerMtlsClientCertPath string
+var brokerMtlsClientKeyPath string
 
 // daemonCmd represents the daemon command
 var daemonCmd = &cobra.Command{
@@ -60,6 +62,17 @@ var daemonCmd = &cobra.Command{
 		}
 		if agentPool == "" {
 			return errors.New("agent pool is not specified")
+		}
+		if cfg := clientlib.GetAgentConfig(); cfg != nil {
+			if cfg.Broker == nil {
+				cfg.Broker = &agentpb.BrokerInfo{}
+			}
+			if brokerMtlsClientCertPath != "" {
+				cfg.Broker.MtlsClientCertPath = brokerMtlsClientCertPath
+			}
+			if brokerMtlsClientKeyPath != "" {
+				cfg.Broker.MtlsClientKeyPath = brokerMtlsClientKeyPath
+			}
 		}
 
 		nonPriv, _ := cmd.Flags().GetBool("non-privileged")
@@ -107,4 +120,6 @@ func init() {
 	AgentCmd.AddCommand(daemonCmd)
 	daemonCmd.Flags().StringVarP(&agentPool, "pool", "p", "", "Agent pool")
 	daemonCmd.Flags().Bool("non-privileged", false, "Run the agent daemon in non-privileged mode.")
+	daemonCmd.Flags().StringVar(&brokerMtlsClientCertPath, "broker-mtls-client-cert", "", "Path to client cert for broker mTLS")
+	daemonCmd.Flags().StringVar(&brokerMtlsClientKeyPath, "broker-mtls-client-key", "", "Path to client private key for broker mTLS")
 }

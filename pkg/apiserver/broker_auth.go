@@ -35,8 +35,18 @@ func NewBrokerAuth(storageAuth storage.StorageAuth) *BrokerAuth {
 }
 
 func (n *BrokerAuth) GrantAccessToAgent(ctx context.Context, agent *broker.Agent, session *broker.Session) (rbac.User, error) {
+	peerIP := ""
+	if peerAddr, ok := agent.PeerInfo.Addr.(*net.TCPAddr); ok {
+		peerIP = peerAddr.IP.String()
+	}
 	agentHost := agent.Host.String()
-	nfsServer := agent.PeerInfo.LocalAddr.(*net.TCPAddr).IP.String()
+	if agentHost == "" || agentHost == "<nil>" {
+		agentHost = peerIP
+	}
+	nfsServer := peerIP
+	if localAddr, ok := agent.PeerInfo.LocalAddr.(*net.TCPAddr); ok {
+		nfsServer = localAddr.IP.String()
+	}
 	if err := n.storageAuth.GrantAccess(ctx, session.Request, agentHost, nfsServer); err != nil {
 		return nil, fmt.Errorf("failed to grant NFS access: %w", err)
 	}

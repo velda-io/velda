@@ -16,8 +16,10 @@ package agentd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -254,10 +256,90 @@ func (a *Agent) getIdentity() (*proto.AgentIdentity, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	return &proto.AgentIdentity{
+	identity := &proto.AgentIdentity{
 		AgentId:  a.id,
 		Hostname: hostname,
 		Pool:     a.pool,
-	}, nil
+	}
+
+	cfg := clientlib.GetAgentConfig()
+	deviceName := cfg.GetDaemonConfig().GetPrimaryNetworkDeviceName()
+	ip, err := detectReportIP(deviceName)
+	if err != nil {
+		log.Printf("Failed to detect self-reported IP for agent %s: %v", a.id, err)
+		return identity, nil
+	}
+	if ip != nil {
+		identity.IpAddress = ip.String()
+	}
+
+	return identity, nil
+}
+
+func detectReportIP(deviceName string) (net.IP, error) {
+	if deviceName != "" {
+		return detectInterfaceIPv4(deviceName)
+	}
+	return detectDefaultPublicIPv4()
+}
+
+func detectInterfaceIPv4(deviceName string) (net.IP, error) {
+	iface, err := net.InterfaceByName(deviceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find interface %q: %w", deviceName, err)
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list addresses for interface %q: %w", deviceName, err)
+	}
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipNet.IP.To4()
+		if ip == nil || ip.IsLoopback() {
+			continue
+		}
+		return ip, nil
+	}
+	return nil, fmt.Errorf("no usable IPv4 address found on interface %q", deviceName)
+}
+
+func detectDefaultPublicIPv4() (net.IP, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list interfaces: %w", err)
+	}
+
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP.To4()
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			dialer := &net.Dialer{
+				Timeout:   time.Second,
+				LocalAddr: &net.UDPAddr{IP: ip, Port: 0},
+			}
+			conn, err := dialer.Dial("udp", "8.8.8.8:53")
+			if err == nil {
+				_ = conn.Close()
+				return ip, nil
+			}
+		}
+	}
+
+	return nil, errors.New("no interface with public connectivity found")
 }

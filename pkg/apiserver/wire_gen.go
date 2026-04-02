@@ -22,18 +22,22 @@ import (
 
 func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	serverMetrics := ProvideGrpcMetrics()
-	serverAuthUnaryInterceptor := _wireServerAuthUnaryInterceptorValue
-	serverAuthStreamInterceptor := _wireServerAuthStreamInterceptorValue
-	server := ProvideGrpcServer(serverMetrics, serverAuthUnaryInterceptor, serverAuthStreamInterceptor)
-	serveMux := ProvideHttpHandler()
-	runtimeServeMux := ProvideGrpcMux(serveMux)
-	serviceCtx := ProvideBaseCtx()
-	context := ProvideCtx(serviceCtx)
 	configPath := ProvideConfigPath(flag)
 	config, err := ProvideConfig(configPath)
 	if err != nil {
 		return nil, err
 	}
+	mtlsMethodCNMap := ProvideMTLSMethodCNMap(config)
+	apiserverMtlsVerifier := ProvideMTLSVerifier(mtlsMethodCNMap)
+	serverMtlsUnaryInterceptor := ProvideMTLSUnaryInterceptor(apiserverMtlsVerifier)
+	serverMtlsStreamInterceptor := ProvideMTLSStreamInterceptor(apiserverMtlsVerifier)
+	serverAuthUnaryInterceptor := _wireServerAuthUnaryInterceptorValue
+	serverAuthStreamInterceptor := _wireServerAuthStreamInterceptorValue
+	server := ProvideGrpcServer(serverMetrics, serverMtlsUnaryInterceptor, serverMtlsStreamInterceptor, serverAuthUnaryInterceptor, serverAuthStreamInterceptor)
+	serveMux := ProvideHttpHandler()
+	runtimeServeMux := ProvideGrpcMux(serveMux)
+	serviceCtx := ProvideBaseCtx()
+	context := ProvideCtx(serviceCtx)
 	brokerInfo := ProvideBrokerInfo(context, config)
 	schedulerSet, err := ProvideSchedulers(context, config, brokerInfo)
 	if err != nil {

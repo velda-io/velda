@@ -25,6 +25,11 @@ message Server {
   string grpc_address = 1;
   string http_address = 2;
 
+  // If non-empty, /velda.BrokerService/AgentUpdate requests must include
+  // x-forwarded-client-cert metadata whose Subject CN contains cert_cn as an
+  // exact word match. Empty means mTLS is not required for AgentUpdate.
+  string cert_cn = 6;
+
   reserved 3, 4, 5;
   reserved 64 to 127;
 }
