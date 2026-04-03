@@ -558,6 +558,8 @@ type AutoscalerBackendAWSLaunchTemplate struct {
 	// If set, this will also be used to identify instances launched by the pool.
 	Tags map[string]string `protobuf:"bytes,9,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// AMI ID
+	// If set to "aws-ml", it will use the latest AWS Deep Learning AMI for the
+	// region, initialize the instance with a setup script to install the agent.
 	AmiId string `protobuf:"bytes,10,opt,name=ami_id,json=amiId,proto3" json:"ami_id,omitempty"`
 	// Security group ids to attach to the instance.
 	// If not set, will use the default from launch template.

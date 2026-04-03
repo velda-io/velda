@@ -484,6 +484,8 @@ func (p *AutoScaledPool) NotifyAgentAvailable(name string, busy bool, statusChan
 		}
 	} else if oldStatus == WorkerStatusUnknown {
 		p.logPrintf("Unknown worker %s reconnected. Busy: %t", name, busy)
+	} else {
+		p.logPrintf("Worker %s connected, was %v. Busy: %t", name, oldStatus, busy)
 	}
 	p.workerDetail[name].statusChan = statusChannel
 	p.workerDetail[name].availableSlot = availableSlot

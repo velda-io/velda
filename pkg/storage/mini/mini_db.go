@@ -255,6 +255,3 @@ func (d *MiniInstanceDb) DeleteInstance(ctx context.Context, in *proto.DeleteIns
 
 	return &dummyCommitter{}, instance, nil
 }
-
-func (d *MiniInstanceDb) RunMaintenances(ctx context.Context) {
-}

@@ -185,6 +185,8 @@ message AutoscalerBackendAWSLaunchTemplate {
   map<string, string> tags = 9;
 
   // AMI ID
+  // If set to "aws-ml", it will use the latest AWS Deep Learning AMI for the
+  // region, initialize the instance with a setup script to install the agent.
   string ami_id = 10;
 
   // Security group ids to attach to the instance.

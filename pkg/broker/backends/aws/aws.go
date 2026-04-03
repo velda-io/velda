@@ -51,6 +51,11 @@ type awsPoolBackend struct {
 	stoppedInstancesMu          sync.RWMutex
 	stoppedInstances            map[string]stoppedInstanceInfo
 	lastScannedStoppedInstances map[string]stoppedInstanceInfo
+
+	// Cache for default AWS ML Ubuntu AMI (24h TTL)
+	amiCacheMu    sync.RWMutex
+	cachedAmiId   string
+	cachedAmiTime time.Time
 }
 
 type stoppedInstanceInfo struct {
@@ -130,14 +135,8 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 			Version:            aws.String("$Default"),
 		}
 	}
-	useStandardImageMode := a.cfg.GetLaunchTemplateName() == "" && a.cfg.GetAmiId() == ""
-	if useStandardImageMode {
-		amiId, err := a.getDefaultAWSMlUbuntuAmi(ctx)
-		if err != nil {
-			return "", err
-		}
-		input.ImageId = aws.String(amiId)
-	}
+	useStandardImageMode := a.cfg.GetLaunchTemplateName() == "" && a.cfg.GetAmiId() == "" || a.cfg.GetAmiId() == "aws-ml"
+
 	var name string
 	tags := []ec2types.Tag{}
 	if a.cfg.GetUseInstanceIdAsName() {
@@ -170,7 +169,13 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 			Tags:         tags,
 		}}
 	}
-	if a.cfg.AmiId != "" {
+	if useStandardImageMode {
+		amiId, err := a.getDefaultAWSMlUbuntuAmi(ctx)
+		if err != nil {
+			return "", err
+		}
+		input.ImageId = aws.String(amiId)
+	} else if a.cfg.AmiId != "" {
 		input.ImageId = &a.cfg.AmiId
 	}
 	if a.cfg.InstanceType != "" {
@@ -199,6 +204,11 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 				fmt.Sprintf("[ \"$(/bin/velda version || true)\" != \"%s\" ] && curl -fsSL https://releases.velda.io/velda-%s-linux-amd64 -o /tmp/velda && chmod +x /tmp/velda && mv /tmp/velda /bin/velda || true", version, version),
 				"[ ! -e /usr/lib/systemd/system/velda-agent.service ] && curl -fsSL https://releases.velda.io/velda-agent.service -o /usr/lib/systemd/system/velda-agent.service && systemctl daemon-reload && systemctl enable velda-agent.service && systemctl start velda-agent.service",
 			}
+			cloudInitConfig["packages"] = []string{
+				"nfs-common",
+			}
+			cloudInitConfig["package_update"] = true
+			cloudInitConfig["package_upgrade"] = false
 		} else if a.cfg.GetAgentVersionOverride() != "" {
 			bootcmd = append(bootcmd, "systemctl disable --now velda-agent.service || true")
 			cloudInitConfig["bootcmd"] = bootcmd
@@ -236,6 +246,16 @@ func (a *awsPoolBackend) RequestScaleUp(ctx context.Context) (string, error) {
 }
 
 func (a *awsPoolBackend) getDefaultAWSMlUbuntuAmi(ctx context.Context) (string, error) {
+	// Check cache first (24h TTL)
+	a.amiCacheMu.RLock()
+	if a.cachedAmiId != "" && time.Since(a.cachedAmiTime) < 24*time.Hour {
+		defer a.amiCacheMu.RUnlock()
+		log.Printf("Using cached AWS ML Ubuntu AMI %s", a.cachedAmiId)
+		return a.cachedAmiId, nil
+	}
+	a.amiCacheMu.RUnlock()
+
+	// Cache miss or expired, fetch from SSM
 	ssmClient := ssm.NewFromConfig(a.awsCfg, func(o *ssm.Options) {
 		o.Region = a.cfg.Region
 	})
@@ -250,7 +270,14 @@ func (a *awsPoolBackend) getDefaultAWSMlUbuntuAmi(ctx context.Context) (string, 
 	if amiId == "" {
 		return "", fmt.Errorf("AWS ML Ubuntu AMI SSM parameter %s returned empty value", awsDeepLearningUbuntuAmiSsmParam)
 	}
-	log.Printf("Using default AWS ML Ubuntu AMI %s from %s", amiId, awsDeepLearningUbuntuAmiSsmParam)
+
+	// Update cache
+	a.amiCacheMu.Lock()
+	defer a.amiCacheMu.Unlock()
+	a.cachedAmiId = amiId
+	a.cachedAmiTime = time.Now()
+
+	log.Printf("Using default AWS ML Ubuntu AMI %s from %s (cached for 24h)", amiId, awsDeepLearningUbuntuAmiSsmParam)
 	return amiId, nil
 }
 
