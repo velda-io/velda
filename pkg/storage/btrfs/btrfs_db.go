@@ -52,7 +52,7 @@ func NewBtrfsInstanceDb(fs *Btrfs) *BtrfsInstanceDb {
 
 func (d *BtrfsInstanceDb) getName(ctx context.Context, instanceId int64) (string, error) {
 	instanceDir := fmt.Sprintf("%s/%d", d.fs.rootPath, instanceId)
-	
+
 	if d.fs.uid == 0 {
 		// Direct xattr access when running as root
 		buf := make([]byte, 256)
@@ -62,7 +62,7 @@ func (d *BtrfsInstanceDb) getName(ctx context.Context, instanceId int64) (string
 		}
 		return string(buf[:sz]), nil
 	}
-	
+
 	// Use getfattr with sudo when not root
 	output, err := d.fs.runCommandGetOutput(ctx, "getfattr", "-n", xattrNameKey, "--only-values", instanceDir)
 	if err != nil {
@@ -73,7 +73,7 @@ func (d *BtrfsInstanceDb) getName(ctx context.Context, instanceId int64) (string
 
 func (d *BtrfsInstanceDb) setName(ctx context.Context, name string, instanceId int64) error {
 	instanceDir := fmt.Sprintf("%s/%d", d.fs.rootPath, instanceId)
-	
+
 	if d.fs.uid == 0 {
 		// Direct xattr access when running as root
 		err := unix.Setxattr(instanceDir, xattrNameKey, []byte(name), 0)
@@ -82,7 +82,7 @@ func (d *BtrfsInstanceDb) setName(ctx context.Context, name string, instanceId i
 		}
 		return nil
 	}
-	
+
 	// Use setfattr with sudo when not root
 	err := d.fs.runCommand(ctx, "setfattr", "-n", xattrNameKey, "-v", name, instanceDir)
 	if err != nil {
@@ -109,38 +109,38 @@ func (d *BtrfsInstanceDb) Init() error {
 	if err != nil {
 		return fmt.Errorf("failed to list directories: %w", err)
 	}
-	
+
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == d.fs.rootPath {
 			continue
 		}
-		
+
 		// Extract the directory name from the full path
 		parts := strings.Split(line, "/")
 		if len(parts) == 0 {
 			continue
 		}
 		dirName := parts[len(parts)-1]
-		
+
 		// Check if this is a numeric instance ID (not images, image_archive, etc.)
 		id, err := strconv.ParseInt(dirName, 10, 64)
 		if err != nil {
 			continue
 		}
-		
+
 		if id >= d.nextInstanceId {
 			d.nextInstanceId = id + 1
 		}
-		
+
 		// Try to get the name from xattr
 		name, err := d.getName(ctx, id)
 		if err != nil {
 			// Skip instances without a name
 			continue
 		}
-		
+
 		d.instances[name] = id
 	}
 	return nil
@@ -269,7 +269,4 @@ func (d *BtrfsInstanceDb) DeleteInstance(ctx context.Context, in *proto.DeleteIn
 		Id:           in.InstanceId,
 		InstanceName: name,
 	}, nil
-}
-
-func (d *BtrfsInstanceDb) RunMaintenances(ctx context.Context) {
 }

@@ -240,6 +240,3 @@ func (d *ZfsInstanceDb) DeleteInstance(ctx context.Context, in *proto.DeleteInst
 		InstanceName: name,
 	}, nil
 }
-
-func (d *ZfsInstanceDb) RunMaintenances(ctx context.Context) {
-}
