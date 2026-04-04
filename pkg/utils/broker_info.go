@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,7 +25,7 @@ import (
 	configpb "velda.io/velda/pkg/proto/config"
 )
 
-func getPublicIp(ctx context.Context) (net.IP, error) {
+func GetPublicIp(ctx context.Context) (net.IP, error) {
 	// Get the interface with the default route
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -72,7 +72,7 @@ func GetDefaultBrokerInfo(ctx context.Context, config *configpb.Config) (*agentp
 		}, nil
 	}
 	// Guess a public IP address
-	endpoint, err := getPublicIp(ctx)
+	endpoint, err := GetPublicIp(ctx)
 
 	// Extract port from GrpcAddress
 	addrParts := strings.Split(config.Server.GrpcAddress, ":")

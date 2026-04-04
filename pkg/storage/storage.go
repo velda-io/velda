@@ -66,8 +66,7 @@ type LocalDiskProvider interface {
 type StorageAuth interface {
 	// GrantAccess exports instance and snapshot paths via NFS for agentHost,
 	// and patches req.AgentSessionInfo with the resulting NFS mount details.
-	// nfsServer is the IP address of the NFS server (the broker host).
-	GrantAccess(ctx context.Context, req *proto.SessionRequest, agentHost, nfsServer string) error
+	GrantAccess(ctx context.Context, req *proto.SessionRequest, agentHost string) error
 
 	// RevokeAccess removes the NFS export that was created for the given
 	// instance and session.

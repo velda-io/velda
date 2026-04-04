@@ -28,24 +28,25 @@ import (
 // storage backends (btrfs, zfs, mini).  It uses the Linux exportfs(8) tool to
 // manage NFS exports under /etc/exports.d/.
 type LocalNfsAuth struct {
-	disk LocalDiskProvider
+	disk      LocalDiskProvider
+	nfsServer string
 }
 
 // NewLocalNfsAuth creates a LocalNfsAuth backed by the given LocalDiskProvider.
 // It ensures that /etc/exports.d exists, creating it if necessary.
-func NewLocalNfsAuth(disk LocalDiskProvider) (*LocalNfsAuth, error) {
+func NewLocalNfsAuth(disk LocalDiskProvider, nfsServer string) (*LocalNfsAuth, error) {
 	if _, err := os.Stat("/etc/exports.d"); os.IsNotExist(err) {
 		cmd := runAsRootCommand("mkdir", "-p", "/etc/exports.d")
 		if err := cmd.Run(); err != nil {
 			return nil, fmt.Errorf("failed to create exports directory: %w", err)
 		}
 	}
-	return &LocalNfsAuth{disk: disk}, nil
+	return &LocalNfsAuth{disk: disk, nfsServer: nfsServer}, nil
 }
 
 // GrantAccess exports the instance (and optional snapshot) path via NFS for
 // agentHost, then patches req.AgentSessionInfo with the resulting mount details.
-func (n *LocalNfsAuth) GrantAccess(ctx context.Context, req *proto.SessionRequest, agentHost, nfsServer string) error {
+func (n *LocalNfsAuth) GrantAccess(ctx context.Context, req *proto.SessionRequest, agentHost string) error {
 	instanceID := req.InstanceId
 	exportPath := n.disk.GetRoot(instanceID)
 	paths := []string{exportPath}
@@ -63,7 +64,7 @@ func (n *LocalNfsAuth) GrantAccess(ctx context.Context, req *proto.SessionReques
 	req.AgentSessionInfo = &proto.AgentSessionInfo{
 		FileMount: &proto.AgentSessionInfo_NfsMount_{
 			NfsMount: &proto.AgentSessionInfo_NfsMount{
-				NfsServer:       nfsServer,
+				NfsServer:       n.nfsServer,
 				NfsPath:         exportPath,
 				NfsSnapshotPath: snapshotPath,
 			},
