@@ -253,9 +253,24 @@ func ProvideTaskService(ctx context.Context, grpcServer *grpc.Server, mux *runti
 	return s
 }
 
+type ServerIP string
+
+func ProvideNfsServer(config *configpb.Config) (ServerIP, error) {
+	ip, err := utils.GetPublicIp(context.Background())
+	if err != nil {
+		return "", err
+	}
+	return ServerIP(ip.String()), nil
+}
+
+func ProvideLocalNfsAuth(disk storage.LocalDiskProvider, nfsServer ServerIP) (*storage.LocalNfsAuth, error) {
+	return storage.NewLocalNfsAuth(disk, string(nfsServer))
+}
+
 var ProvideNfsAuth = wire.NewSet(
 	NewBrokerAuth,
-	storage.NewLocalNfsAuth,
+	ProvideNfsServer,
+	ProvideLocalNfsAuth,
 	wire.Bind(new(broker.AuthHelper), new(*BrokerAuth)),
 	wire.Bind(new(storage.StorageAuth), new(*storage.LocalNfsAuth)),
 )

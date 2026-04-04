@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/pflag"
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/proto"
-	"velda.io/velda/pkg/storage"
 )
 
 import (
@@ -49,11 +48,11 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	sessionHelper := ProvideSessionHelper(sessionCompletionWatcher, watcher, quotaChecker)
 	sessionDatabase := broker.NewSessionDatabase(sessionHelper)
 	permissions := ProvidePermission()
-	storageStorage, err := ProvideStorage(config)
+	storage, err := ProvideStorage(config)
 	if err != nil {
 		return nil, err
 	}
-	apiserverDatabase, err := ProvideDb(storageStorage, context)
+	apiserverDatabase, err := ProvideDb(storage, context)
 	if err != nil {
 		return nil, err
 	}
@@ -62,19 +61,23 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		return nil, err
 	}
 	regionId := ProvideRegionId()
-	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase, provisionRunner, watcher, regionId, storageStorage)
-	localDiskProvider := ProvideLocalDiskStorage(storageStorage)
-	localNfsAuth, err := storage.NewLocalNfsAuth(localDiskProvider)
+	taskTracker := ProvideTaskTracker(config, context, schedulerSet, sessionDatabase, apiserverDatabase, provisionRunner, watcher, regionId, storage)
+	localDiskProvider := ProvideLocalDiskStorage(storage)
+	serverIP, err := ProvideNfsServer(config)
+	if err != nil {
+		return nil, err
+	}
+	localNfsAuth, err := ProvideLocalNfsAuth(localDiskProvider, serverIP)
 	if err != nil {
 		return nil, err
 	}
 	brokerAuth := NewBrokerAuth(localNfsAuth)
-	storageManager := ProvideStorageManager(storageStorage)
+	storageManager := ProvideStorageManager(storage)
 	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, brokerAuth, apiserverDatabase, storageManager)
-	taskLogDb := ProvideTaskLogDb(config, storageStorage)
+	taskLogDb := ProvideTaskLogDb(config, storage)
 	taskServiceServer := ProvideTaskService(context, server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
 	poolManagerServiceServer := ProvidePoolService(server, runtimeServeMux, schedulerSet)
-	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storageStorage, permissions, brokerServiceServer)
+	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storage, permissions, brokerServiceServer)
 	taskLogServiceServer := ProvideTaskLogService(server, config)
 	registry := _wireRegistryValue
 	metricRegistryRunner := ProvideMetrics(registry, serverMetrics)
