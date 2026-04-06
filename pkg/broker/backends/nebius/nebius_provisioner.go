@@ -68,6 +68,7 @@ func (p *NebiusAutoPoolProvisioner) run(ctx context.Context) error {
 			AgentVersionOverride: p.cfg.AgentVersionOverride,
 			MaxDiskPoolSize:      p.cfg.MaxDiskPoolSize,
 			Filesystems:          p.cfg.Filesystems,
+			ServiceAccountId:     p.cfg.ServiceAccountId,
 			AgentConfig:          &agentpb.AgentConfig{},
 		}
 

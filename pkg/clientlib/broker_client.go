@@ -104,22 +104,19 @@ func GetApiConnection() (*grpc.ClientConn, error) {
 				return
 			}
 			tlsConfig.RootCAs = systemRoots
-			if agentConfig != nil && agentConfig.GetBroker() != nil {
-				brokerCfg := agentConfig.GetBroker()
-				clientCertPath := brokerCfg.GetMtlsClientCertPath()
-				clientKeyPath := brokerCfg.GetMtlsClientKeyPath()
-				if clientCertPath != "" || clientKeyPath != "" {
-					if clientCertPath == "" || clientKeyPath == "" {
-						connErr = errors.New("both broker mTLS client cert and key must be set")
-						return
-					}
-					clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
-					if err != nil {
-						connErr = fmt.Errorf("failed to load broker mTLS client cert/key: %w", err)
-						return
-					}
-					tlsConfig.Certificates = []tls.Certificate{clientCert}
+			clientCertPath := agentConfig.GetDaemonConfig().GetMtlsClientCertPath()
+			clientKeyPath := agentConfig.GetDaemonConfig().GetMtlsClientKeyPath()
+			if clientCertPath != "" || clientKeyPath != "" {
+				if clientCertPath == "" || clientKeyPath == "" {
+					connErr = errors.New("both broker mTLS client cert and key must be set")
+					return
 				}
+				clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
+				if err != nil {
+					connErr = fmt.Errorf("failed to load broker mTLS client cert/key: %w", err)
+					return
+				}
+				tlsConfig.Certificates = []tls.Certificate{clientCert}
 			}
 			credential = credentials.NewTLS(tlsConfig)
 		} else {

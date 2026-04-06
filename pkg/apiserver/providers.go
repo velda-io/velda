@@ -454,7 +454,7 @@ var ServiceProviders = wire.NewSet(
 	ProvideHttpHandler,
 	ProvideGrpcMux,
 	ProvideGrpcMetrics,
-	ProvideMTLSMethodCNMap,
+	ProvideMTLSMethodSPIFFEMap,
 	ProvideMTLSVerifier,
 	ProvideMTLSUnaryInterceptor,
 	ProvideMTLSStreamInterceptor,

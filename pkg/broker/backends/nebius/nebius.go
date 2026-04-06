@@ -160,6 +160,7 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		bootcmds = append(bootcmds, fmt.Sprintf("mount -t virtiofs fs-%d %s", i, fs.GetMountPath()))
 	}
 
+	runcmds = append(runcmds, n.cfg.GetAdditionalRuncmds()...)
 	runcmds = append(runcmds,
 		"curl -fsSL https://releases.velda.io/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh",
 		fmt.Sprintf("[ \"$(/bin/velda version || true)\" != \"%s\" ] && curl -fsSL https://releases.velda.io/velda-%s-linux-amd64 -o /tmp/velda && chmod +x /tmp/velda && mv /tmp/velda /bin/velda || true", version, version),
@@ -257,6 +258,7 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 	}
 
 	instanceSpec := &compute.InstanceSpec{
+		ServiceAccountId: n.cfg.GetServiceAccountId(),
 		Resources: &compute.ResourcesSpec{
 			Platform: n.cfg.GetPlatform(),
 			Size: &compute.ResourcesSpec_Preset{

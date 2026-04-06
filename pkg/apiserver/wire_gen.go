@@ -26,8 +26,8 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	if err != nil {
 		return nil, err
 	}
-	mtlsMethodCNMap := ProvideMTLSMethodCNMap(config)
-	apiserverMtlsVerifier := ProvideMTLSVerifier(mtlsMethodCNMap)
+	mtlsMethodSPIFFEMap := ProvideMTLSMethodSPIFFEMap(config)
+	apiserverMtlsVerifier := ProvideMTLSVerifier(mtlsMethodSPIFFEMap)
 	serverMtlsUnaryInterceptor := ProvideMTLSUnaryInterceptor(apiserverMtlsVerifier)
 	serverMtlsStreamInterceptor := ProvideMTLSStreamInterceptor(apiserverMtlsVerifier)
 	serverAuthUnaryInterceptor := _wireServerAuthUnaryInterceptorValue
