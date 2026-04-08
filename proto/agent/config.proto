@@ -26,12 +26,13 @@ message HostMount {
 }
 
 message CasConfig {
-  string cas_cache_dir = 1; // The directory to use for CAS cache.
+  string cas_cache_dir = 1;     // The directory to use for CAS cache.
   bool use_direct_protocol = 2; // Whether to use the direct protocol for CAS.
-  repeated string flags = 3; // Additional flags for CAS configuration.
+  repeated string flags = 3;    // Additional flags for CAS configuration.
 
   // Additional cache sources for sandboxfs (e.g., HTTP URLs, NFS paths).
-  // Files will be fetched from these sources using size/hash as key before falling back to fileserver.
+  // Files will be fetched from these sources using size/hash as key before
+  // falling back to fileserver.
   repeated string cache_sources = 4;
 }
 
@@ -42,7 +43,7 @@ message AgentDiskSource {
   }
   message NfsMountSource {
     // Server & location will be provided by the broker.
-    string mount_options = 1; // Additional mount options.
+    string mount_options = 1;          // Additional mount options.
     string snapshot_mount_options = 2; // Mount options for snapshot mounts.
   }
   oneof source {
@@ -112,17 +113,17 @@ message DaemonConfig {
 
   // The network device name for detecting the IP address and NFS connection.
   string primary_network_device_name = 4;
-}
-
-message BrokerInfo {
-// The URL of the broker.
-  string address = 1;
-  string public_address = 2;
 
   // Optional mTLS files used by the agent when connecting to the broker.
   // When set, these are interpreted as file paths on the agent host.
-  string mtls_client_cert_path = 3;
-  string mtls_client_key_path = 4;
+  string mtls_client_cert_path = 5;
+  string mtls_client_key_path = 6;
+}
+
+message BrokerInfo {
+  // The URL of the broker.
+  string address = 1;
+  string public_address = 2;
 }
 
 message AgentConfig {

@@ -3,9 +3,10 @@ package apiserver
 import (
 	"context"
 	"errors"
-	"regexp"
 	"strings"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -16,38 +17,38 @@ import (
 
 const agentUpdateFullMethod = "/velda.BrokerService/AgentUpdate"
 
-type MTLSMethodCNMap map[string]string
+type MTLSMethodSPIFFEMap map[string]string
 
 type mtlsVerifier struct {
-	methodCN      map[string]string
-	methodMatcher map[string]*regexp.Regexp
+	methodSPIFFE map[string]spiffeid.ID
 }
 
-func ProvideMTLSMethodCNMap(cfg *configpb.Config) MTLSMethodCNMap {
-	result := MTLSMethodCNMap{}
+func ProvideMTLSMethodSPIFFEMap(cfg *configpb.Config) MTLSMethodSPIFFEMap {
+	result := MTLSMethodSPIFFEMap{}
 	if cfg == nil || cfg.GetServer() == nil {
 		return result
 	}
-	cn := strings.TrimSpace(cfg.GetServer().GetCertCn())
-	if cn != "" {
-		result[agentUpdateFullMethod] = cn
+	spiffeID := strings.TrimSpace(cfg.GetServer().GetCertSpiffeId())
+	if spiffeID != "" {
+		result[agentUpdateFullMethod] = spiffeID
 	}
 	return result
 }
 
-func ProvideMTLSVerifier(methodCN MTLSMethodCNMap) *mtlsVerifier {
+func ProvideMTLSVerifier(methodSPIFFE MTLSMethodSPIFFEMap) *mtlsVerifier {
 	v := &mtlsVerifier{
-		methodCN:      map[string]string{},
-		methodMatcher: map[string]*regexp.Regexp{},
+		methodSPIFFE: map[string]spiffeid.ID{},
 	}
-	for method, cn := range methodCN {
-		trimmedCN := strings.TrimSpace(cn)
-		if method == "" || trimmedCN == "" {
+	for method, id := range methodSPIFFE {
+		trimmed := strings.TrimSpace(id)
+		if method == "" || trimmed == "" {
 			continue
 		}
-		v.methodCN[method] = trimmedCN
-		pattern := `(^|[^[:alnum:]_])` + regexp.QuoteMeta(trimmedCN) + `([^[:alnum:]_]|$)`
-		v.methodMatcher[method] = regexp.MustCompile(pattern)
+		parsed, err := spiffeid.FromString(trimmed)
+		if err != nil {
+			continue
+		}
+		v.methodSPIFFE[method] = parsed
 	}
 	return v
 }
@@ -79,8 +80,8 @@ func (v *mtlsVerifier) StreamInterceptor() grpc.StreamServerInterceptor {
 }
 
 func (v *mtlsVerifier) verifyMethod(ctx context.Context, method string) error {
-	requiredCN, ok := v.methodCN[method]
-	if !ok || requiredCN == "" {
+	requiredID, ok := v.methodSPIFFE[method]
+	if !ok {
 		return nil
 	}
 	md, ok := metadata.FromIncomingContext(ctx)
@@ -91,44 +92,34 @@ func (v *mtlsVerifier) verifyMethod(ctx context.Context, method string) error {
 	if len(xfcc) == 0 || strings.TrimSpace(xfcc[0]) == "" {
 		return errors.New("x-forwarded-client-cert is required")
 	}
-	cn := extractCNFromForwardedClientCert(xfcc[0])
-	if cn == "" {
-		return errors.New("x-forwarded-client-cert Subject CN is required")
+	actualID, err := extractSPIFFEFromForwardedClientCert(xfcc[0])
+	if err != nil {
+		return err
 	}
-	matcher := v.methodMatcher[method]
-	if matcher == nil || !matcher.MatchString(cn) {
-		return errors.New("x-forwarded-client-cert Subject CN does not match required CN")
+	if err := tlsconfig.AuthorizeID(requiredID)(actualID, nil); err != nil {
+		return errors.New("x-forwarded-client-cert SPIFFE ID does not match required SPIFFE ID")
 	}
 	return nil
 }
 
-func extractCNFromForwardedClientCert(xfcc string) string {
-	var subject string
+func extractSPIFFEFromForwardedClientCert(xfcc string) (spiffeid.ID, error) {
+	var uriValue string
 	for _, part := range strings.Split(xfcc, ";") {
 		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
 		if len(kv) != 2 {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(kv[0]), "subject") {
-			subject = strings.TrimSpace(strings.Trim(kv[1], `"`))
+		if strings.EqualFold(strings.TrimSpace(kv[0]), "uri") {
+			uriValue = strings.TrimSpace(strings.Trim(kv[1], `"`))
 			break
 		}
 	}
-	if subject == "" {
-		return ""
+	if uriValue == "" {
+		return spiffeid.ID{}, errors.New("x-forwarded-client-cert URI is required")
 	}
-	for _, attr := range strings.Split(subject, ",") {
-		kv := strings.SplitN(strings.TrimSpace(attr), "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(kv[0]), "CN") {
-			return strings.TrimSpace(strings.Trim(kv[1], `"`))
-		}
+	id, err := spiffeid.FromString(uriValue)
+	if err != nil {
+		return spiffeid.ID{}, errors.New("x-forwarded-client-cert URI is not a valid SPIFFE ID")
 	}
-	match := regexp.MustCompile(`(?:^|/)CN=([^/,]+)`).FindStringSubmatch(subject)
-	if len(match) == 2 {
-		return strings.TrimSpace(strings.Trim(match[1], `"`))
-	}
-	return ""
+	return id, nil
 }
