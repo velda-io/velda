@@ -70,6 +70,41 @@ message TailscaleConfig {
   string pre_auth_key = 2;
 }
 
+message SSHConnectorConfig {
+  // SSH port used for connection (default: 22).
+  int32 ssh_port = 1;
+
+  // Default SSH login user for provisioned instances.
+  string ssh_user = 2;
+
+  // SSH private key used by the controller to connect and bootstrap nodes.
+  string ssh_private_key_path = 3;
+
+  // Path to local mTLS root CA cert copied to the target node.
+  string local_mtls_cert_path = 4;
+
+  // Remote path where the mTLS cert is uploaded.
+  string remote_mtls_cert_path = 5;
+
+  // Remote path where agent config YAML is written.
+  string remote_agent_config_path = 6;
+
+  // Local directory for per-bootstrap log files.
+  string local_output_log_dir = 7;
+
+  // Timeout for establishing SSH connection.
+  google.protobuf.Duration connect_timeout = 8;
+
+  // Max wait duration for SSH readiness before bootstrap fails.
+  google.protobuf.Duration ready_timeout = 9;
+
+  // Poll interval while waiting for SSH readiness.
+  google.protobuf.Duration ready_poll_interval = 10;
+
+  // Optional tailscale setup shared by SSH-bootstrap-enabled provisioners.
+  TailscaleConfig tailscale_config = 11;
+}
+
 message AgentPool {
   string name = 1;
 
@@ -501,6 +536,10 @@ message AutoscalerBackendMithrilSpotBid {
 
   // Optional: amount of memory in GB to request for the instance
   int32 memory_gb = 15;
+
+  // Base prefix for bid names managed by this backend.
+  // The runtime version prefix hash is appended after this base prefix.
+  string instance_name_prefix = 16;
 }
 
 message AutoscalerBackendDigitalOceanDroplet {
@@ -747,6 +786,9 @@ message Config {
 
   // Configuration for OSS file-content server.
   FileContentServer file_content_server = 13;
+
+  // Default SSH bootstrap connector config used by supported provisioners.
+  SSHConnectorConfig ssh_connector = 14;
 
   reserved 2, 3, 7, 8, 10;
   reserved 50 to 59;
