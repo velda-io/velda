@@ -242,6 +242,7 @@ func (c *Connector) waitForSSHClient(ctx context.Context, ip, sshUser string) (*
 			}
 			return nil, fmt.Errorf("ssh not ready for %s: %w", ip, timeoutCtx.Err())
 		case <-ticker.C:
+			log.Printf("SSH not ready for %s: %v, retrying...", ip, lastErr)
 		}
 	}
 }
@@ -292,7 +293,7 @@ func (c *Connector) dial(ip, sshUser string) (*ssh.Client, error) {
 	}
 	client, err := ssh.Dial("tcp", addr, sshCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to SSH dial %s: %w", addr, err)
+		return nil, fmt.Errorf("failed to SSH dial %s@%s: %w", sshUser, addr, err)
 	}
 	return client, nil
 }

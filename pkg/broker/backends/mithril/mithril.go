@@ -319,14 +319,15 @@ func (m *mithrilPoolBackend) bootstrapBid(ctx context.Context, bid *spotBid) err
 
 	var lastErr error
 	for {
-		instances, err := m.getInstancesByBidFID(bootstrapCtx, bid.FID)
+		reqCtx, reqCancel := context.WithTimeout(ctx, 120*time.Second)
+		instances, err := m.getInstancesByBidFID(reqCtx, bid.FID)
 		if err != nil {
 			lastErr = err
 		} else {
 			for _, inst := range instances {
 				host := strings.TrimSpace(inst.SshDestination)
 				workerName := bid.Name + "-1"
-				if err := m.sshConnector.Bootstrap(bootstrapCtx, host, workerName, m.sshUser); err != nil {
+				if err := m.sshConnector.Bootstrap(reqCtx, host, workerName, m.sshUser); err != nil {
 					lastErr = err
 					continue
 				}
@@ -339,6 +340,7 @@ func (m *mithrilPoolBackend) bootstrapBid(ctx context.Context, bid *spotBid) err
 				lastErr = fmt.Errorf("no SSH host candidates found for bid %s", bid.FID)
 			}
 		}
+		reqCancel()
 
 		select {
 		case <-bootstrapCtx.Done():
