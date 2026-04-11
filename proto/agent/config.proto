@@ -118,6 +118,10 @@ message DaemonConfig {
   // When set, these are interpreted as file paths on the agent host.
   string mtls_client_cert_path = 5;
   string mtls_client_key_path = 6;
+
+  // Optional explicit agent name used as the reported agent ID.
+  // If not set, agentd falls back to AGENT_NAME env var and hostname.
+  string agent_name = 7;
 }
 
 message BrokerInfo {

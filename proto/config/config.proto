@@ -492,11 +492,8 @@ message AutoscalerBackendMithrilSpotBid {
   // The spot bid will be allocated when spot price is below this limit
   double limit_price = 3;
 
-  // Structured version of the agent config.
-  // If both agent_config and agent_config_content are set,
-  // agent_config will be used.
+  // Agent config to initialize.
   // Pool & broker info will be automatically set.
-  string agent_config_content = 4;
   velda.agent.AgentConfig agent_config = 5;
 
   // Additional labels/tags to add to the instance.
@@ -599,6 +596,48 @@ message AutoscalerBackendDigitalOceanDroplet {
 
   TailscaleConfig tailscale_config = 17;
 }
+
+message AutoscalerBackendPrimeIntellectInstance {
+  // API key for authentication.
+  // Should be set via environment variable PRIMEINTELLECT_API_KEY
+  string api_key = 1;
+
+  // Optional API endpoint override.
+  // Default: https://api.primeintellect.ai/api/v1
+  string api_endpoint = 2;
+
+  // Base prefix for instance names managed by this backend.
+  string instance_name_prefix = 3;
+
+  // Agent config to initialize.
+  // Pool & broker info will be automatically set.
+  velda.agent.AgentConfig agent_config = 5;
+
+  // If set, will override the agent version to install.
+  // Default to the current version of controller.
+  string agent_version_override = 6;
+
+  // Search criteria passed to provider search endpoint.
+  // Example keys: gpu_type, regions, gpu_count
+  map<string, string> search_criteria = 7;
+
+  // Minimum vCPUs required. Offers whose max vCPU cannot meet this are excluded.
+  int32 min_vcpus = 8;
+
+  // Minimum memory in GB required. Offers whose max memory cannot meet this are excluded.
+  int32 min_memory_gb = 9;
+
+  // Minimum disk in GB required. Offers whose max disk cannot meet this are excluded.
+  int32 min_disk_gb = 10;
+
+  // Whether spot instances are allowed. Defaults to false (spot excluded).
+  bool spot_allowed = 11;
+
+  // The ID of the SSH key configured in PrimeIntellect to use for the instance.
+  // Must match the SSH key used by the controller for bootstrapping.
+  string ssh_key_id = 12;
+}
+
 
 message MithrilAutoProvisioner {
   // Common configuration shared across all pools
@@ -740,6 +779,7 @@ message AutoscalerBackend {
     AutoscalerBackendMithrilSpotBid mithril_spot_bid = 6;
     AutoscalerBackendDigitalOceanDroplet digitalocean_droplet = 7;
     AutoscalerBackendAzureVMSS azure_vmss = 8;
+    AutoscalerBackendPrimeIntellectInstance primeintellect_instance = 9;
     AutoscalerBackendKubernetes kubernetes = 2;
     AutoscalerBackendCommand command = 3;
   }

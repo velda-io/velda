@@ -17,4 +17,5 @@ package registry
 import (
 	_ "velda.io/velda/pkg/broker/backends/digitalocean"
 	_ "velda.io/velda/pkg/broker/backends/mithril"
+	_ "velda.io/velda/pkg/broker/backends/primeintellect"
 )

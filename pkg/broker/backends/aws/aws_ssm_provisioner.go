@@ -64,7 +64,7 @@ func (p *AwsSmmPoolProvisioner) Run(ctx context.Context) {
 			})
 			if err != nil {
 				log.Printf("Failed to query SSM parameters: %v", err)
-				break
+				return
 			}
 
 			for _, param := range output.Parameters {
