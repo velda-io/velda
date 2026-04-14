@@ -139,7 +139,7 @@ func NewMithrilPoolBackend(cfg *proto.AutoscalerBackendMithrilSpotBid) broker.Re
 	}
 
 	connector, defaults, err := sshconnector.NewDefault(
-		cfg.GetAgentConfigContent(),
+		cfg.GetAgentConfig(),
 		cfg.GetAgentVersionOverride(),
 	)
 	if err != nil {
@@ -636,11 +636,6 @@ func (f *mithrilSpotBidPoolFactory) NewBackend(pool *proto.AgentPool, brokerInfo
 				return nil, fmt.Errorf("no default broker info provided for pool %s", pool.GetName())
 			}
 			mithrilTemplate.AgentConfig.Broker = brokerInfo
-		}
-		var err error
-		mithrilTemplate.AgentConfigContent, err = utils.ProtoToYaml(mithrilTemplate.AgentConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal agent config: %w", err)
 		}
 	}
 

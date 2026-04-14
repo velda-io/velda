@@ -28,9 +28,12 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"google.golang.org/protobuf/encoding/protojson"
 	pb "google.golang.org/protobuf/proto"
+	"gopkg.in/yaml.v3"
 
 	"velda.io/velda"
+	agentpb "velda.io/velda/pkg/proto/agent"
 	configpb "velda.io/velda/pkg/proto/config"
 )
 
@@ -57,6 +60,9 @@ type Config struct {
 	LocalMTLSCertPath  string
 	RemoteMTLSCertPath string
 
+	// AgentConfig is the preferred way to supply the remote agent configuration.
+	AgentConfig *agentpb.AgentConfig
+	// Deprecated: set AgentConfig instead.
 	AgentConfigContent    string
 	RemoteAgentConfigPath string
 	AgentVersionOverride  string
@@ -139,7 +145,8 @@ func ConfigureDefaultsFromProto(cfg *configpb.Config) {
 	}
 }
 
-func NewDefault(agentConfigContent, agentVersionOverride string) (*Connector, Defaults, error) {
+// NewDefault creates a Connector using the pre-populated AgentConfig proto.
+func NewDefault(agentConfig *agentpb.AgentConfig, agentVersionOverride string) (*Connector, Defaults, error) {
 	d := connectorDefaults
 
 	c, err := New(Config{
@@ -150,7 +157,7 @@ func NewDefault(agentConfigContent, agentVersionOverride string) (*Connector, De
 		ReadyPollInterval:     d.ReadyPollInterval,
 		LocalMTLSCertPath:     d.LocalMTLSCertPath,
 		RemoteMTLSCertPath:    d.RemoteMTLSCertPath,
-		AgentConfigContent:    agentConfigContent,
+		AgentConfig:           agentConfig,
 		RemoteAgentConfigPath: d.RemoteAgentConfigPath,
 		AgentVersionOverride:  agentVersionOverride,
 		TailscaleConfig:       d.TailscaleConfig,
@@ -205,10 +212,6 @@ func New(cfg Config) (*Connector, error) {
 	signer, err := ssh.ParsePrivateKey(keyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
-	}
-
-	if cfg.LocalMTLSCertPath == "" {
-		return nil, fmt.Errorf("local mTLS cert path is required")
 	}
 
 	return &Connector{cfg: cfg, signer: signer}, nil
@@ -270,11 +273,16 @@ func (c *Connector) Bootstrap(ctx context.Context, ip, hostname, sshUser string)
 	}
 	defer client.Close()
 
-	if err := c.uploadFileSCP(ctx, client, c.cfg.LocalMTLSCertPath, "/tmp/mtls-cert.pem"); err != nil {
-		return fmt.Errorf("failed to upload mTLS cert via SCP: %w", err)
+	if c.cfg.LocalMTLSCertPath != "" {
+		if err := c.uploadFileSCP(ctx, client, c.cfg.LocalMTLSCertPath, "/tmp/mtls-cert.pem"); err != nil {
+			return fmt.Errorf("failed to upload mTLS cert via SCP: %w", err)
+		}
 	}
 
-	script := c.buildBootstrapScript()
+	script, err := c.buildBootstrapScript(hostname)
+	if err != nil {
+		return err
+	}
 	err = c.runRemoteScript(ctx, client, script, localLogPath, ip, hostname)
 	if err != nil {
 		return err
@@ -471,30 +479,42 @@ func (c *Connector) runRemoteScript(ctx context.Context, client *ssh.Client, scr
 	return nil
 }
 
-func (c *Connector) buildBootstrapScript() string {
+func (c *Connector) buildBootstrapScript(hostname string) (string, error) {
 	version := c.cfg.AgentVersionOverride
 	if version == "" {
 		version = velda.Version
+	}
+	var agentConfigContent string
+	var err error
+	if c.cfg.AgentConfig != nil {
+		agentConfigContent, err = serializeAgentConfig(c.cfg.AgentConfig, hostname)
+	}
+	if err != nil {
+		return "", err
 	}
 
 	b := &strings.Builder{}
 	fmt.Fprintf(b, "#!/bin/bash\n")
 	fmt.Fprintf(b, "set -euo pipefail\n")
 	fmt.Fprintf(b, "[[ -e /etc/velda/init.done ]] && echo 'Bootstrap already completed, exiting.' && exit 0\n")
-	fmt.Fprintf(b, "mkdir -p %s\n", shellSingleQuote(path.Dir(c.cfg.RemoteMTLSCertPath)))
-	fmt.Fprintf(b, "mv /tmp/mtls-cert.pem %s\n", shellSingleQuote(c.cfg.RemoteMTLSCertPath))
+	if c.cfg.LocalMTLSCertPath != "" {
+		fmt.Fprintf(b, "mkdir -p %s\n", shellSingleQuote(path.Dir(c.cfg.RemoteMTLSCertPath)))
+		fmt.Fprintf(b, "mv /tmp/mtls-cert.pem %s\n", shellSingleQuote(c.cfg.RemoteMTLSCertPath))
+	}
 
 	fmt.Fprintf(b, "if ! command -v curl >/dev/null 2>&1; then apt-get update && apt-get install -y curl; fi\n")
 	fmt.Fprintf(b, "if ! dpkg -s nfs-common >/dev/null 2>&1; then apt-get update && apt-get install -y nfs-common; fi\n")
 
-	if c.cfg.AgentConfigContent != "" {
+	if agentConfigContent != "" {
 		fmt.Fprintf(b, "mkdir -p %s\n", shellSingleQuote(path.Dir(c.cfg.RemoteAgentConfigPath)))
 		fmt.Fprintf(b, "cat << 'VELDA_CONFIG_EOF' > %s\n", shellSingleQuote(c.cfg.RemoteAgentConfigPath))
-		fmt.Fprintf(b, "%s\n", c.cfg.AgentConfigContent)
+		fmt.Fprintf(b, "%s\n", agentConfigContent)
 		fmt.Fprintf(b, "VELDA_CONFIG_EOF\n")
 	}
 
-	fmt.Fprintf(b, "chmod 0644 %s\n", shellSingleQuote(c.cfg.RemoteMTLSCertPath))
+	if c.cfg.LocalMTLSCertPath != "" {
+		fmt.Fprintf(b, "chmod 0644 %s\n", shellSingleQuote(c.cfg.RemoteMTLSCertPath))
+	}
 	fmt.Fprintf(b, "nvidia-smi || true\n")
 	fmt.Fprintf(b, "curl -fsSL https://releases.velda.io/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh || true\n")
 
@@ -540,7 +560,31 @@ func (c *Connector) buildBootstrapScript() string {
 
 	fmt.Fprintf(b, "touch /etc/velda/init.done\n")
 
-	return b.String()
+	return b.String(), nil
+}
+
+// serializeAgentConfig clones the proto, injects agent_name from hostname, and serializes to YAML.
+func serializeAgentConfig(agentConfig *agentpb.AgentConfig, hostname string) (string, error) {
+	cloned := pb.Clone(agentConfig).(*agentpb.AgentConfig)
+	if hostname != "" {
+		if cloned.DaemonConfig == nil {
+			cloned.DaemonConfig = &agentpb.DaemonConfig{}
+		}
+		cloned.DaemonConfig.AgentName = hostname
+	}
+	jsonBytes, err := protojson.Marshal(cloned)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal agent config proto: %w", err)
+	}
+	var obj interface{}
+	if err := yaml.Unmarshal(jsonBytes, &obj); err != nil {
+		return "", fmt.Errorf("failed to convert agent config to yaml: %w", err)
+	}
+	rendered, err := yaml.Marshal(obj)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal agent config yaml: %w", err)
+	}
+	return string(rendered), nil
 }
 
 func shellSingleQuote(s string) string {
