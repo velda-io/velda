@@ -22,8 +22,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	pb "google.golang.org/protobuf/proto"
@@ -31,6 +33,7 @@ import (
 	"velda.io/velda"
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
+	"velda.io/velda/pkg/broker/backends/sshconnector"
 	agentpb "velda.io/velda/pkg/proto/agent"
 	proto "velda.io/velda/pkg/proto/config"
 	"velda.io/velda/pkg/utils"
@@ -45,7 +48,15 @@ type mithrilPoolBackend struct {
 	cfg        *proto.AutoscalerBackendMithrilSpotBid
 	httpClient *http.Client
 	apiBaseURL string
-	bidPrefix  string // prefix for bid names based on config hash
+	basePrefix string // stable prefix configured by user
+	bidPrefix  string // current version prefix under basePrefix
+
+	sshConnector    *sshconnector.Connector
+	sshUser         string
+	sshReadyTimeout time.Duration
+	sshPollInterval time.Duration
+
+	initialReconnectMu sync.Once
 }
 
 type spotBid struct {
@@ -92,20 +103,61 @@ type listBidsResponse struct {
 	NextCursor *string   `json:"next_cursor"`
 }
 
+type instanceModel struct {
+	FID            string `json:"fid"`
+	Name           string `json:"name"`
+	Bid            string `json:"bid"`
+	SshDestination string `json:"ssh_destination"`
+	PrivateIP      string `json:"private_ip"`
+	Status         string `json:"status"`
+}
+
+type listInstancesResponse struct {
+	Data       []instanceModel `json:"data"`
+	NextCursor *string         `json:"next_cursor"`
+}
+
 func NewMithrilPoolBackend(cfg *proto.AutoscalerBackendMithrilSpotBid) broker.ResourcePoolBackend {
 	apiEndpoint := cfg.GetApiEndpoint()
 	if apiEndpoint == "" {
 		apiEndpoint = defaultAPIEndpoint
 	}
 
-	// Calculate prefix hash from configuration parameters
-	prefix := calculateBidPrefix(cfg)
+	basePrefix := cfg.GetInstanceNamePrefix()
+	if basePrefix == "" {
+		basePrefix = "velda"
+	}
+	versionPrefix := calculateVersionPrefix(cfg)
+	prefix := fmt.Sprintf("%s-%s", basePrefix, versionPrefix)
 
 	backend := &mithrilPoolBackend{
 		cfg:        cfg,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 		apiBaseURL: fmt.Sprintf("%s/%s", apiEndpoint, apiVersion),
+		basePrefix: basePrefix,
 		bidPrefix:  prefix,
+	}
+
+	connector, defaults, err := sshconnector.NewDefault(
+		cfg.GetAgentConfigContent(),
+		cfg.GetAgentVersionOverride(),
+	)
+	if err != nil {
+		log.Printf("Mithril SSH connector disabled due to invalid config: %v", err)
+	} else if connector != nil {
+		backend.sshConnector = connector
+		backend.sshUser = defaults.SSHUser
+		if backend.sshUser == "" {
+			backend.sshUser = "ubuntu"
+		}
+		backend.sshReadyTimeout = defaults.ReadyTimeout
+		if backend.sshReadyTimeout <= 0 {
+			backend.sshReadyTimeout = 5 * time.Minute
+		}
+		backend.sshPollInterval = defaults.ReadyPollInterval
+		if backend.sshPollInterval <= 0 {
+			backend.sshPollInterval = 5 * time.Second
+		}
 	}
 
 	// Use AsyncManager's suspend/resume if MaxSuspendedBids is configured
@@ -121,26 +173,37 @@ func (m *mithrilPoolBackend) GenerateWorkerName() string {
 	return bidName + "-1"
 }
 
-// calculateBidPrefix generates a hash-based prefix from bid configuration
-func calculateBidPrefix(cfg *proto.AutoscalerBackendMithrilSpotBid) string {
-	// Hash parameters that define bid compatibility
+// calculateVersionPrefix generates a hash-based version suffix from bid configuration.
+func calculateVersionPrefix(cfg *proto.AutoscalerBackendMithrilSpotBid) string {
+	cloned := pb.Clone(cfg).(*proto.AutoscalerBackendMithrilSpotBid)
+	cloned.ApiToken = ""
+	cloned.MaxSuspendedBids = 0
+	cloned.AgentVersionOverride = ""
+
+	options := pb.MarshalOptions{Deterministic: true}
+	data, err := options.Marshal(cloned)
+	if err != nil {
+		panic(err)
+	}
+
+	version := cfg.GetAgentVersionOverride()
+	if version == "" {
+		version = velda.Version
+	}
+
 	h := sha256.New()
-	h.Write([]byte(cfg.GetInstanceType()))
-	h.Write([]byte(cfg.GetRegion()))
-	h.Write([]byte(cfg.GetProjectId()))
-	h.Write([]byte(fmt.Sprintf("%.2f", cfg.GetLimitPrice())))
+	h.Write(data)
+	h.Write([]byte(version))
+	hash := hex.EncodeToString(h.Sum(nil)[:16])
+	return hash[:8]
+}
 
-	// Include SSH keys and agent version in hash
-	for _, key := range cfg.GetSshKeyIds() {
-		h.Write([]byte(key))
-	}
-	if cfg.GetAgentVersionOverride() != "" {
-		h.Write([]byte(cfg.GetAgentVersionOverride()))
-	}
+func (m *mithrilPoolBackend) isManagedByBasePrefix(bidName string) bool {
+	return strings.HasPrefix(bidName, m.basePrefix+"-")
+}
 
-	hash := hex.EncodeToString(h.Sum(nil))
-	// Use first 8 characters of hash as prefix
-	return "velda-" + hash[:8]
+func (m *mithrilPoolBackend) isCurrentVersionPrefix(bidName string) bool {
+	return strings.HasPrefix(bidName, m.bidPrefix+"-")
 }
 
 func (m *mithrilPoolBackend) makeRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
@@ -184,68 +247,6 @@ func (m *mithrilPoolBackend) CreateWorker(ctx context.Context, name string) (bac
 }
 
 func (m *mithrilPoolBackend) createSpotBid(ctx context.Context, bidName string) (*spotBid, error) {
-	// Prepare bash startup script
-	agentConfig := m.cfg.AgentConfigContent
-	version := m.cfg.AgentVersionOverride
-	if version == "" {
-		version = velda.Version
-	}
-
-	// Create bash script for instance initialization
-	startupScriptParts := []string{`#!/bin/bash
-set -e
-
-apt update && apt install -y curl nfs-common
-
-# Create velda config directory and write agent config
-mkdir -p /etc/velda
-cat << 'VELDA_CONFIG_EOF' > /etc/velda/agent.yaml
-` + agentConfig + `
-VELDA_CONFIG_EOF
-
-# Initialize nvidia device handles
-nvidia-smi || true
-
-# Download and run nvidia collection script
-curl -fsSL https://releases.velda.io/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh || true
-`}
-
-	// Add Tailscale setup if Tailscale config is provided
-	if tc := m.cfg.GetTailscaleConfig(); tc != nil && tc.GetPreAuthKey() != "" {
-		tailscaleSetup := fmt.Sprintf(`
-# Install and configure Tailscale
-if ! command -v tailscale &> /dev/null; then
-	curl -fsSL https://tailscale.com/install.sh | sh
-fi
-
-# Authenticate with Tailscale
-
-tailscale up --login-server=%s --authkey=%s --accept-routes
-`, tc.GetServer(), tc.GetPreAuthKey())
-		startupScriptParts = append(startupScriptParts, tailscaleSetup)
-	}
-
-	// Add Velda agent installation
-	veldaSetup := fmt.Sprintf(`
-# Install velda agent if not present or version mismatch
-if [ "$(/bin/velda version 2>/dev/null || true)" != "%s" ]; then
-    curl -fsSL https://releases.velda.io/velda-%s-linux-amd64 -o /tmp/velda
-    chmod +x /tmp/velda
-    mv /tmp/velda /bin/velda
-fi
-
-# Setup and start velda agent service
-if [ ! -e /usr/lib/systemd/system/velda-agent.service ]; then
-    curl -fsSL https://releases.velda.io/velda-agent.service -o /usr/lib/systemd/system/velda-agent.service
-    systemctl daemon-reload
-    systemctl enable velda-agent.service
-    systemctl start velda-agent.service &
-fi
-`, version, version)
-	startupScriptParts = append(startupScriptParts, veldaSetup)
-
-	startupScript := strings.Join(startupScriptParts, "")
-
 	// Create the spot bid request
 	reqBody := createBidRequest{
 		Project:          m.cfg.GetProjectId(),
@@ -255,10 +256,9 @@ fi
 		InstanceQuantity: 1, // Create one instance at a time
 		Name:             bidName,
 		LaunchSpecification: &launchSpecification{
-			Volumes:       []string{},
-			SSHKeys:       m.cfg.GetSshKeyIds(),
-			StartupScript: startupScript,
-			MemoryGB:      int(m.cfg.GetMemoryGb()),
+			Volumes:  []string{},
+			SSHKeys:  m.cfg.GetSshKeyIds(),
+			MemoryGB: int(m.cfg.GetMemoryGb()),
 		},
 	}
 
@@ -294,7 +294,95 @@ fi
 		Name:   bidName,
 		Status: createResp.Status,
 	}
+
+	if err := m.bootstrapBid(ctx, bid); err != nil {
+		log.Printf("Mithril bootstrap failed for bid %s (%s), terminating bid", bid.Name, bid.FID)
+		_ = m.terminateBid(ctx, bid.Name+"-1", backends.WorkerInfo{Data: bid})
+		return nil, err
+	}
 	return bid, nil
+}
+
+func (m *mithrilPoolBackend) bootstrapBid(ctx context.Context, bid *spotBid) error {
+	if m.sshConnector == nil {
+		return nil
+	}
+	if bid == nil || bid.FID == "" {
+		return fmt.Errorf("invalid bid for bootstrap")
+	}
+
+	bootstrapCtx, cancel := context.WithTimeout(ctx, m.sshReadyTimeout)
+	defer cancel()
+
+	ticker := time.NewTicker(m.sshPollInterval)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		instances, err := m.getInstancesByBidFID(bootstrapCtx, bid.FID)
+		if err != nil {
+			lastErr = err
+		} else {
+			for _, inst := range instances {
+				host := strings.TrimSpace(inst.SshDestination)
+				workerName := bid.Name + "-1"
+				if err := m.sshConnector.Bootstrap(bootstrapCtx, host, workerName, m.sshUser); err != nil {
+					lastErr = err
+					continue
+				}
+				log.Printf("Bootstrapped Mithril worker %s via SSH host %s", workerName, host)
+				return nil
+			}
+			if len(instances) == 0 {
+				lastErr = fmt.Errorf("waiting for instance allocation for bid %s", bid.FID)
+			} else if lastErr == nil {
+				lastErr = fmt.Errorf("no SSH host candidates found for bid %s", bid.FID)
+			}
+		}
+
+		select {
+		case <-bootstrapCtx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("timed out waiting for SSH bootstrap of bid %s: %w", bid.FID, lastErr)
+			}
+			return fmt.Errorf("timed out waiting for SSH bootstrap of bid %s: %w", bid.FID, bootstrapCtx.Err())
+		case <-ticker.C:
+			log.Printf("Still waiting for SSH bootstrap of bid %s: %v", bid.FID, lastErr)
+		}
+	}
+}
+
+func (m *mithrilPoolBackend) getInstancesByBidFID(ctx context.Context, bidFID string) ([]instanceModel, error) {
+	params := url.Values{}
+	params.Set("project", m.cfg.GetProjectId())
+	params.Set("bid_fid_in", bidFID)
+
+	path := "/instances?" + params.Encode()
+	resp, err := m.makeRequest(ctx, "GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to list instances while waiting for bootstrap: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var listResp listInstancesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		return nil, fmt.Errorf("failed to decode instances list: %w", err)
+	}
+
+	instances := make([]instanceModel, 0, len(listResp.Data))
+	for _, inst := range listResp.Data {
+		if inst.Status != "STATUS_RUNNING" {
+			return nil, fmt.Errorf("instance %s for bid %s is not running yet (status: %s)", inst.FID, bidFID, inst.Status)
+		}
+		instances = append(instances, inst)
+	}
+
+	return instances, nil
 }
 
 // DeleteWorker implements SyncBackend interface
@@ -364,6 +452,9 @@ func (m *mithrilPoolBackend) ResumeWorker(ctx context.Context, name string, susp
 	log.Printf("Resuming suspended Mithril bid: %s (fid: %s)", bid.Name, bid.FID)
 	if err := m.resumeBid(ctx, bid); err != nil {
 		return fmt.Errorf("failed to resume bid %s: %w", bid.FID, err)
+	}
+	if err := m.bootstrapBid(ctx, bid); err != nil {
+		return fmt.Errorf("failed to rerun bootstrap after resume for bid %s: %w", bid.FID, err)
 	}
 
 	return nil
@@ -442,21 +533,28 @@ func (m *mithrilPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]
 	}
 
 	workers := make(map[string]backends.WorkerInfo)
+	activeBids := make([]*spotBid, 0)
+	stalePausedBids := make([]*spotBid, 0)
 	for i := range listResp.Data {
 		bid := &listResp.Data[i]
-
-		// Filter by prefix - only process bids that match our configuration
-		if !strings.HasPrefix(bid.Name, m.bidPrefix) {
-			continue
-		}
 
 		// Skip terminated bids
 		if bid.Status == "Terminated" {
 			continue
 		}
+		// Manage all bids under the same base prefix. Bids not matching the
+		// current version prefix are considered stale and are only deleted once suspended.
+		if !m.isManagedByBasePrefix(bid.Name) {
+			continue
+		}
+		isStale := !m.isCurrentVersionPrefix(bid.Name)
 
 		// Add paused bids as suspended workers
 		if bid.Status == "Paused" {
+			if isStale {
+				stalePausedBids = append(stalePausedBids, bid)
+				continue
+			}
 			workers[bid.Name+"-1"] = backends.WorkerInfo{
 				State: backends.WorkerStateSuspended,
 				Data:  bid,
@@ -470,10 +568,49 @@ func (m *mithrilPoolBackend) ListRemoteWorkers(ctx context.Context) (map[string]
 				State: backends.WorkerStateActive,
 				Data:  bid,
 			}
+			activeBids = append(activeBids, bid)
 		}
 	}
 
+	if len(stalePausedBids) > 0 {
+		go func(stale []*spotBid) {
+			cleanupCtx := context.WithoutCancel(ctx)
+			for _, bid := range stale {
+				if bid == nil || bid.FID == "" {
+					continue
+				}
+				log.Printf("Deleting stale suspended Mithril bid %s (%s)", bid.Name, bid.FID)
+				if err := m.terminateBid(cleanupCtx, bid.Name+"-1", backends.WorkerInfo{Data: bid}); err != nil {
+					log.Printf("Failed to delete stale suspended Mithril bid %s (%s): %v", bid.Name, bid.FID, err)
+				}
+			}
+		}(stalePausedBids)
+	}
+
+	m.bootstrapActiveWorkersOnFirstReconnect(ctx, activeBids)
+
 	return workers, nil
+}
+
+func (m *mithrilPoolBackend) bootstrapActiveWorkersOnFirstReconnect(ctx context.Context, activeBids []*spotBid) {
+	m.initialReconnectMu.Do(func() {
+		if m.sshConnector == nil {
+			return
+		}
+
+		for _, bid := range activeBids {
+			if bid == nil || bid.FID == "" {
+				continue
+			}
+			log.Printf("Re-running bootstrap for active Mithril worker on first reconnect: %s (%s)", bid.Name, bid.FID)
+			go func(bid *spotBid) {
+				if err := m.bootstrapBid(ctx, bid); err != nil {
+					log.Printf("Failed bootstrap rerun on first reconnect for bid %s: %v", bid.FID, err)
+				}
+			}(bid)
+		}
+	})
+
 }
 
 type mithrilSpotBidPoolFactory struct{}

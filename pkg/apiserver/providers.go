@@ -37,6 +37,7 @@ import (
 
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/broker/backends"
+	"velda.io/velda/pkg/broker/backends/sshconnector"
 	"velda.io/velda/pkg/instances"
 	"velda.io/velda/pkg/proto"
 	agentpb "velda.io/velda/pkg/proto/agent"
@@ -169,6 +170,8 @@ func ProvideBrokerInfo(ctx context.Context, cfg *configpb.Config) *agentpb.Broke
 }
 
 func ProvideSchedulers(ctx context.Context, cfg *configpb.Config, brokerInfo *agentpb.BrokerInfo) (*broker.SchedulerSet, error) {
+	sshconnector.ConfigureDefaultsFromProto(cfg)
+
 	pools := cfg.AgentPools
 	scheduler := broker.NewSchedulerSet(ctx)
 	for _, poolConfig := range pools {
