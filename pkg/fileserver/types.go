@@ -27,6 +27,19 @@ const (
 	OpReadDir  = 0x4
 	OpReadlink = 0x5
 
+	// Write operations (read-write mode)
+	OpCreate  = 0x10
+	OpWrite   = 0x11
+	OpMkdir   = 0x12
+	OpUnlink  = 0x13
+	OpRmdir   = 0x14
+	OpRename  = 0x15
+	OpSetattr = 0x16
+	OpSymlink = 0x17
+	OpLink    = 0x18
+	OpFlush   = 0x19
+	OpGetattr = 0x1a
+
 	OpDirDataNotification = 0x101
 )
 
@@ -173,4 +186,156 @@ type ReadlinkRequest struct {
 // ReadlinkResponse represents a readlink response
 type ReadlinkResponse struct {
 	Target string // Symlink target path
+}
+
+// --- Write operation types ---
+
+// MountFlagReadWrite indicates the client wants read-write access
+const MountFlagReadWrite = 1 << 1
+
+// CreateRequest creates a new file in a directory
+type CreateRequest struct {
+	ParentFh unix.FileHandle
+	Name     string
+	Flags    uint32 // O_WRONLY, O_RDWR, etc.
+	Mode     uint32 // File permission bits
+}
+
+// CreateResponse returns the new file's handle and attributes
+type CreateResponse struct {
+	Fh   unix.FileHandle
+	Attr FileAttr
+}
+
+// WriteRequest writes data to a file at a given offset
+type WriteRequest struct {
+	Fh     unix.FileHandle
+	Offset uint64
+	Data   []byte
+}
+
+// WriteResponse returns the number of bytes written
+type WriteResponse struct {
+	Size uint32
+}
+
+// MkdirRequest creates a new directory
+type MkdirRequest struct {
+	ParentFh unix.FileHandle
+	Name     string
+	Mode     uint32
+}
+
+// MkdirResponse returns the new directory's handle and attributes
+type MkdirResponse struct {
+	Fh   unix.FileHandle
+	Attr FileAttr
+}
+
+// UnlinkRequest removes a file from a directory
+type UnlinkRequest struct {
+	ParentFh unix.FileHandle
+	Name     string
+}
+
+// UnlinkResponse is an empty success response
+type UnlinkResponse struct{}
+
+// RmdirRequest removes a directory
+type RmdirRequest struct {
+	ParentFh unix.FileHandle
+	Name     string
+}
+
+// RmdirResponse is an empty success response
+type RmdirResponse struct{}
+
+// RenameRequest renames/moves a file or directory
+type RenameRequest struct {
+	OldParentFh unix.FileHandle
+	OldName     string
+	NewParentFh unix.FileHandle
+	NewName     string
+}
+
+// RenameResponse is an empty success response
+type RenameResponse struct{}
+
+// SetattrRequest changes file attributes
+type SetattrRequest struct {
+	Fh    unix.FileHandle
+	Valid uint32 // Bitmask of which fields to set
+	Mode  uint32
+	Uid   uint32
+	Gid   uint32
+	Size  int64 // For truncation
+	Mtime int64 // Modification time seconds
+	Atime int64 // Access time seconds
+}
+
+// Bitmask constants for SetattrRequest.Valid
+const (
+	SetattrMode  = 1 << 0
+	SetattrUid   = 1 << 1
+	SetattrGid   = 1 << 2
+	SetattrSize  = 1 << 3
+	SetattrMtime = 1 << 4
+	SetattrAtime = 1 << 5
+)
+
+// SetattrResponse returns updated attributes
+type SetattrResponse struct {
+	Attr FileAttr
+}
+
+// SymlinkRequest creates a symbolic link
+type SymlinkRequest struct {
+	ParentFh unix.FileHandle
+	Name     string
+	Target   string
+}
+
+// SymlinkResponse returns the symlink's handle and attributes
+type SymlinkResponse struct {
+	Fh   unix.FileHandle
+	Attr FileAttr
+}
+
+// LinkRequest creates a hard link
+type LinkRequest struct {
+	ParentFh unix.FileHandle
+	Name     string
+	TargetFh unix.FileHandle
+}
+
+// LinkResponse returns the new link's attributes
+type LinkResponse struct {
+	Fh   unix.FileHandle
+	Attr FileAttr
+}
+
+// FlushRequest flushes pending writes for a file and returns updated attributes
+type FlushRequest struct {
+	Fh unix.FileHandle
+	// Client-side write queue barrier identifier.
+	LastWriteReqID uint64
+	// HasSha256 indicates whether Sha256 is valid.
+	HasSha256 uint8
+	// Optional client-computed SHA256 for sequential write path.
+	Sha256 [32]byte
+}
+
+// FlushResponse returns updated attributes after flush (with SHA256 if available)
+type FlushResponse struct {
+	Attr FileAttr
+}
+
+// GetattrRequest fetches current attributes for a file handle
+type GetattrRequest struct {
+	Fh unix.FileHandle
+}
+
+// GetattrResponse returns current file attributes
+type GetattrResponse struct {
+	Attr FileAttr
 }

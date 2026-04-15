@@ -556,3 +556,547 @@ func (r *ReadlinkResponse) Deserialize(reader io.Reader) error {
 	r.Target = target
 	return nil
 }
+
+// --- Write operation serialization ---
+
+// Serialize writes CreateRequest to io.Writer
+func (r *CreateRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.ParentFh)); err != nil {
+		return fmt.Errorf("failed to write parent fh: %w", err)
+	}
+	if err := writeString(w, r.Name); err != nil {
+		return fmt.Errorf("failed to write name: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Flags); err != nil {
+		return fmt.Errorf("failed to write flags: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Mode); err != nil {
+		return fmt.Errorf("failed to write mode: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads CreateRequest from io.Reader
+func (r *CreateRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.ParentFh = fh
+	name, err := readString(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read name: %w", err)
+	}
+	r.Name = name
+	if err := binary.Read(reader, binary.LittleEndian, &r.Flags); err != nil {
+		return fmt.Errorf("failed to read flags: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Mode); err != nil {
+		return fmt.Errorf("failed to read mode: %w", err)
+	}
+	return nil
+}
+
+// Serialize writes CreateResponse to io.Writer
+func (r *CreateResponse) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
+		return fmt.Errorf("failed to write fh: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to write attr: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads CreateResponse from io.Reader
+func (r *CreateResponse) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.Fh = fh
+	if err := binary.Read(reader, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to read attr: %w", err)
+	}
+	return nil
+}
+
+// Serialize writes WriteRequest to io.Writer
+func (r *WriteRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
+		return fmt.Errorf("failed to write fh: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Offset); err != nil {
+		return fmt.Errorf("failed to write offset: %w", err)
+	}
+	if err := writeVarint(w, uint64(len(r.Data))); err != nil {
+		return fmt.Errorf("failed to write data length: %w", err)
+	}
+	if len(r.Data) > 0 {
+		if _, err := w.Write(r.Data); err != nil {
+			return fmt.Errorf("failed to write data: %w", err)
+		}
+	}
+	return nil
+}
+
+// Deserialize reads WriteRequest from io.Reader
+func (r *WriteRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.Fh = fh
+	if err := binary.Read(reader, binary.LittleEndian, &r.Offset); err != nil {
+		return fmt.Errorf("failed to read offset: %w", err)
+	}
+	count, err := readVarint(reader, MaxPacketSize)
+	if err != nil {
+		return fmt.Errorf("failed to read data length: %w", err)
+	}
+	if count > 0 {
+		r.Data = make([]byte, count)
+		if _, err := io.ReadFull(reader, r.Data); err != nil {
+			return fmt.Errorf("failed to read data: %w", err)
+		}
+	}
+	return nil
+}
+
+// Serialize writes WriteResponse to io.Writer
+func (r *WriteResponse) Serialize(w io.Writer) error {
+	return binary.Write(w, binary.LittleEndian, r.Size)
+}
+
+// Deserialize reads WriteResponse from io.Reader
+func (r *WriteResponse) Deserialize(reader io.Reader) error {
+	return binary.Read(reader, binary.LittleEndian, &r.Size)
+}
+
+// Serialize writes MkdirRequest to io.Writer
+func (r *MkdirRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.ParentFh)); err != nil {
+		return fmt.Errorf("failed to write parent fh: %w", err)
+	}
+	if err := writeString(w, r.Name); err != nil {
+		return fmt.Errorf("failed to write name: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Mode); err != nil {
+		return fmt.Errorf("failed to write mode: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads MkdirRequest from io.Reader
+func (r *MkdirRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.ParentFh = fh
+	name, err := readString(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read name: %w", err)
+	}
+	r.Name = name
+	if err := binary.Read(reader, binary.LittleEndian, &r.Mode); err != nil {
+		return fmt.Errorf("failed to read mode: %w", err)
+	}
+	return nil
+}
+
+// Serialize writes MkdirResponse to io.Writer
+func (r *MkdirResponse) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
+		return fmt.Errorf("failed to write fh: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to write attr: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads MkdirResponse from io.Reader
+func (r *MkdirResponse) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.Fh = fh
+	if err := binary.Read(reader, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to read attr: %w", err)
+	}
+	return nil
+}
+
+// Serialize writes UnlinkRequest to io.Writer
+func (r *UnlinkRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.ParentFh)); err != nil {
+		return fmt.Errorf("failed to write parent fh: %w", err)
+	}
+	if err := writeString(w, r.Name); err != nil {
+		return fmt.Errorf("failed to write name: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads UnlinkRequest from io.Reader
+func (r *UnlinkRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.ParentFh = fh
+	name, err := readString(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read name: %w", err)
+	}
+	r.Name = name
+	return nil
+}
+
+// Serialize writes UnlinkResponse to io.Writer
+func (r *UnlinkResponse) Serialize(w io.Writer) error { return nil }
+
+// Deserialize reads UnlinkResponse from io.Reader
+func (r *UnlinkResponse) Deserialize(reader io.Reader) error { return nil }
+
+// Serialize writes RmdirRequest to io.Writer
+func (r *RmdirRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.ParentFh)); err != nil {
+		return fmt.Errorf("failed to write parent fh: %w", err)
+	}
+	if err := writeString(w, r.Name); err != nil {
+		return fmt.Errorf("failed to write name: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads RmdirRequest from io.Reader
+func (r *RmdirRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.ParentFh = fh
+	name, err := readString(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read name: %w", err)
+	}
+	r.Name = name
+	return nil
+}
+
+// Serialize writes RmdirResponse to io.Writer
+func (r *RmdirResponse) Serialize(w io.Writer) error { return nil }
+
+// Deserialize reads RmdirResponse from io.Reader
+func (r *RmdirResponse) Deserialize(reader io.Reader) error { return nil }
+
+// Serialize writes RenameRequest to io.Writer
+func (r *RenameRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.OldParentFh)); err != nil {
+		return fmt.Errorf("failed to write old parent fh: %w", err)
+	}
+	if err := writeString(w, r.OldName); err != nil {
+		return fmt.Errorf("failed to write old name: %w", err)
+	}
+	if _, err := w.Write(encodeFileHandle(r.NewParentFh)); err != nil {
+		return fmt.Errorf("failed to write new parent fh: %w", err)
+	}
+	if err := writeString(w, r.NewName); err != nil {
+		return fmt.Errorf("failed to write new name: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads RenameRequest from io.Reader
+func (r *RenameRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.OldParentFh = fh
+	name, err := readString(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read old name: %w", err)
+	}
+	r.OldName = name
+	fh2, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.NewParentFh = fh2
+	name2, err := readString(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read new name: %w", err)
+	}
+	r.NewName = name2
+	return nil
+}
+
+// Serialize writes RenameResponse to io.Writer
+func (r *RenameResponse) Serialize(w io.Writer) error { return nil }
+
+// Deserialize reads RenameResponse from io.Reader
+func (r *RenameResponse) Deserialize(reader io.Reader) error { return nil }
+
+// Serialize writes SetattrRequest to io.Writer
+func (r *SetattrRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
+		return fmt.Errorf("failed to write fh: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Valid); err != nil {
+		return fmt.Errorf("failed to write valid: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Mode); err != nil {
+		return fmt.Errorf("failed to write mode: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Uid); err != nil {
+		return fmt.Errorf("failed to write uid: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Gid); err != nil {
+		return fmt.Errorf("failed to write gid: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Size); err != nil {
+		return fmt.Errorf("failed to write size: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Mtime); err != nil {
+		return fmt.Errorf("failed to write mtime: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Atime); err != nil {
+		return fmt.Errorf("failed to write atime: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads SetattrRequest from io.Reader
+func (r *SetattrRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.Fh = fh
+	if err := binary.Read(reader, binary.LittleEndian, &r.Valid); err != nil {
+		return fmt.Errorf("failed to read valid: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Mode); err != nil {
+		return fmt.Errorf("failed to read mode: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Uid); err != nil {
+		return fmt.Errorf("failed to read uid: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Gid); err != nil {
+		return fmt.Errorf("failed to read gid: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Size); err != nil {
+		return fmt.Errorf("failed to read size: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Mtime); err != nil {
+		return fmt.Errorf("failed to read mtime: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Atime); err != nil {
+		return fmt.Errorf("failed to read atime: %w", err)
+	}
+	return nil
+}
+
+// Serialize writes SetattrResponse to io.Writer
+func (r *SetattrResponse) Serialize(w io.Writer) error {
+	return binary.Write(w, binary.LittleEndian, &r.Attr)
+}
+
+// Deserialize reads SetattrResponse from io.Reader
+func (r *SetattrResponse) Deserialize(reader io.Reader) error {
+	return binary.Read(reader, binary.LittleEndian, &r.Attr)
+}
+
+// Serialize writes SymlinkRequest to io.Writer
+func (r *SymlinkRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.ParentFh)); err != nil {
+		return fmt.Errorf("failed to write parent fh: %w", err)
+	}
+	if err := writeString(w, r.Name); err != nil {
+		return fmt.Errorf("failed to write name: %w", err)
+	}
+	if err := writeString(w, r.Target); err != nil {
+		return fmt.Errorf("failed to write target: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads SymlinkRequest from io.Reader
+func (r *SymlinkRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.ParentFh = fh
+	name, err := readString(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read name: %w", err)
+	}
+	r.Name = name
+	target, err := readString(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read target: %w", err)
+	}
+	r.Target = target
+	return nil
+}
+
+// Serialize writes SymlinkResponse to io.Writer
+func (r *SymlinkResponse) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
+		return fmt.Errorf("failed to write fh: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to write attr: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads SymlinkResponse from io.Reader
+func (r *SymlinkResponse) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.Fh = fh
+	if err := binary.Read(reader, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to read attr: %w", err)
+	}
+	return nil
+}
+
+// Serialize writes LinkRequest to io.Writer
+func (r *LinkRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.ParentFh)); err != nil {
+		return fmt.Errorf("failed to write parent fh: %w", err)
+	}
+	if err := writeString(w, r.Name); err != nil {
+		return fmt.Errorf("failed to write name: %w", err)
+	}
+	if _, err := w.Write(encodeFileHandle(r.TargetFh)); err != nil {
+		return fmt.Errorf("failed to write target fh: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads LinkRequest from io.Reader
+func (r *LinkRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.ParentFh = fh
+	name, err := readString(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read name: %w", err)
+	}
+	r.Name = name
+	tfh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.TargetFh = tfh
+	return nil
+}
+
+// Serialize writes LinkResponse to io.Writer
+func (r *LinkResponse) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
+		return fmt.Errorf("failed to write fh: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to write attr: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads LinkResponse from io.Reader
+func (r *LinkResponse) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.Fh = fh
+	if err := binary.Read(reader, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to read attr: %w", err)
+	}
+	return nil
+}
+
+// Serialize writes FlushRequest to io.Writer
+func (r *FlushRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
+		return fmt.Errorf("failed to write fh: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.LastWriteReqID); err != nil {
+		return fmt.Errorf("failed to write last_write_req_id: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.HasSha256); err != nil {
+		return fmt.Errorf("failed to write has_sha256: %w", err)
+	}
+	if _, err := w.Write(r.Sha256[:]); err != nil {
+		return fmt.Errorf("failed to write sha256: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads FlushRequest from io.Reader
+func (r *FlushRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.Fh = fh
+	if err := binary.Read(reader, binary.LittleEndian, &r.LastWriteReqID); err != nil {
+		return fmt.Errorf("failed to read last_write_req_id: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.HasSha256); err != nil {
+		return fmt.Errorf("failed to read has_sha256: %w", err)
+	}
+	if _, err := io.ReadFull(reader, r.Sha256[:]); err != nil {
+		return fmt.Errorf("failed to read sha256: %w", err)
+	}
+	return nil
+}
+
+// Serialize writes FlushResponse to io.Writer
+func (r *FlushResponse) Serialize(w io.Writer) error {
+	return binary.Write(w, binary.LittleEndian, &r.Attr)
+}
+
+// Deserialize reads FlushResponse from io.Reader
+func (r *FlushResponse) Deserialize(reader io.Reader) error {
+	return binary.Read(reader, binary.LittleEndian, &r.Attr)
+}
+
+// Serialize writes GetattrRequest to io.Writer
+func (r *GetattrRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
+		return fmt.Errorf("failed to write fh: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads GetattrRequest from io.Reader
+func (r *GetattrRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.Fh = fh
+	return nil
+}
+
+// Serialize writes GetattrResponse to io.Writer
+func (r *GetattrResponse) Serialize(w io.Writer) error {
+	return binary.Write(w, binary.LittleEndian, &r.Attr)
+}
+
+// Deserialize reads GetattrResponse from io.Reader
+func (r *GetattrResponse) Deserialize(reader io.Reader) error {
+	return binary.Read(reader, binary.LittleEndian, &r.Attr)
+}

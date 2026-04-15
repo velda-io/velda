@@ -62,18 +62,35 @@ func WithNoCacheMode() MountOptions {
 	}
 }
 
-// WithDirectFSMode enables DirectFS mode for remote snapshot serving.
+// WithDirectFSSnapshotMode enables DirectFS mode for remote snapshot serving.
 // In DirectFS mode:
 // - Connects to a remote fileserver using custom protocol
 // - Uses Linux file handles for efficient access
 // - All data cached using content-addressable storage
 // - Kernel-level caching with persistent inodes
 // - Optimized for serving filesystem snapshots over network
-func WithDirectFSMode() MountOptions {
+func WithDirectFSSnapshotMode() MountOptions {
 	return func(opts *VeldaMountOptions) {
 		opts.DirectFSMode = true
 		opts.FuseOptions.EnableSymlinkCaching = true
 		opts.FuseOptions.ExplicitDataCacheControl = true
+	}
+}
+
+// WithDirectFSMode enables DirectFS mode for remote snapshot serving.
+// In DirectFS mode:
+// - Connects to a remote fileserver using custom protocol
+// - Uses Linux file handles for efficient access
+// - All data cached using content-addressable storage
+// - Kernel-level caching with persistent inodes
+func WithDirectFSMode() MountOptions {
+	return func(opts *VeldaMountOptions) {
+		opts.DirectFSMode = true
+		attrTimeout := 1 * time.Minute
+		negTimeout := 10 * time.Second
+		opts.FuseOptions.AttrTimeout = &attrTimeout
+		opts.FuseOptions.EntryTimeout = &attrTimeout
+		opts.FuseOptions.NegativeTimeout = &negTimeout
 	}
 }
 
@@ -176,9 +193,15 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to DirectFS server: %w", err)
 		}
-		directRoot := &SnapshotNode{client: directClient, fh: fh, attr: attr}
-		directClient.registerInodeHandler(attr.Ino, directRoot)
-		rootNode = directRoot
+		if veldaOpts.SnapshotMode {
+			directRoot := &SnapshotNode{client: directClient, fh: fh, attr: attr}
+			directClient.registerInodeHandler(attr.Ino, directRoot)
+			rootNode = directRoot
+		} else {
+			directRoot := &RWNode{client: directClient, fh: fh, attr: &attr}
+			directClient.registerInodeHandler(attr.Ino, directRoot)
+			rootNode = directRoot
+		}
 	} else {
 		// Create cached loopback root
 		rootNode, err = NewCachedLoopbackRoot(baseDir, cache, veldaOpts.SnapshotMode, veldaOpts.NoCacheMode)

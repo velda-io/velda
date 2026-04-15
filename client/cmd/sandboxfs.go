@@ -66,12 +66,11 @@ var sandboxfsCmd = &cobra.Command{
 		case "nocache":
 			mountOpts = append(mountOpts, sandboxfs.WithNoCacheMode())
 		case "directfs-snapshot":
+			mountOpts = append(mountOpts, sandboxfs.WithDirectFSSnapshotMode())
+		case "directfs":
 			mountOpts = append(mountOpts, sandboxfs.WithDirectFSMode())
 		case "standard":
 			// No additional options
-		case "directfs":
-			// Not implemented yet
-			fallthrough
 		default:
 			cobra.CheckErr(fmt.Errorf("invalid mode: %s", mode))
 		}

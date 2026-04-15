@@ -37,6 +37,14 @@ import (
 const (
 	// Number of background workers for prefetching
 	prefetchWorkers = 20
+	// Shared worker count for RW eager fetch of small/medium files
+	rwEagerFetchWorkers = 8
+	// Shared worker count for RW eager fetch of large files
+	rwEagerFetchLargeWorkers = 2
+	// Shared write workers for protocol write queue
+	writeQueueWorkers = 1
+	// Maximum total bytes buffered in global write queue
+	globalWriteQueueMaxBytes = 256 * 1024 * 1024 // 256MB
 	// Files larger than this (bytes) are considered "large" for eagerfetch concurrency limits
 	largeFileThreshold = 100 * 1024 * 1024 // 100 MB
 )
@@ -55,6 +63,28 @@ type dirDataNotificationHandler interface {
 	HandleDirDataNotification(notification *fileserver.DirDataNotification)
 }
 
+// sendRequestOp represents a request to be sent by the send-request-worker
+type sendRequestOp struct {
+	opCode     uint32                  // Operation code (OpWrite, OpRead, etc.)
+	flags      uint32                  // Protocol flags (FlagQosLow, etc.)
+	req        fileserver.Serializable // Request object
+	responseOp responseOp
+}
+
+type responseOp struct {
+	resCh    chan Response
+	callback func(Response)
+}
+
+func (r responseOp) complete(resp Response) {
+	if r.resCh != nil {
+		r.resCh <- resp
+	}
+	if r.callback != nil {
+		r.callback(resp)
+	}
+}
+
 // DirectFSClient manages a FUSE filesystem that connects to a remote fileserver
 // using the fileserver protocol and uses sandboxfs cache manager
 type DirectFSClient struct {
@@ -64,7 +94,7 @@ type DirectFSClient struct {
 	// Connection state
 	mu             sync.Mutex
 	seq            uint32
-	pending        map[uint32]chan Response
+	pending        map[uint32]responseOp
 	partialPackets map[uint32]*partialMessage // Buffer for assembling partial packets
 	rootFh         unix.FileHandle
 	rootAttr       fileserver.FileAttr
@@ -90,6 +120,21 @@ type DirectFSClient struct {
 	// Semaphore to limit concurrent large-file prefetches (per client)
 	largeFetchSem chan struct{}
 
+	// Shared eager-fetch worker queues for RW reads
+	rwEagerFetchQueue      chan *rwEagerFetchTask
+	rwEagerFetchLargeQueue chan *rwEagerFetchTask
+
+	// Shared request send workers
+	normalReqQueue chan *sendRequestOp // Higher priority for non-write operations
+	writeReqQueue  chan *sendRequestOp // Lower priority for write operations (QOS)
+	sendReqWg      sync.WaitGroup
+
+	// Write backpressure and request tracking
+	writeMu          sync.Mutex
+	writeBufCond     *sync.Cond
+	queuedWriteBytes int64
+	writeReqID       uint64
+
 	// FUSE state
 	fuseServer *fuse.Server
 	ctx        context.Context
@@ -107,30 +152,52 @@ type prefetchJob struct {
 	path   string
 }
 
+type rwEagerFetchTask struct {
+	file *RWFile
+}
+
 // NewDirectFSClient creates a new direct filesystem client
 func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager, cacheSources []string, verbose bool) *DirectFSClient {
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &DirectFSClient{
-		serverAddr:         serverAddr,
-		pending:            make(map[uint32]chan Response),
-		partialPackets:     make(map[uint32]*partialMessage),
-		inodes:             make(map[uint64]dirDataNotificationHandler),
-		cache:              cache,
-		debug:              NewDebugTracker(),
-		cacheSources:       cacheSources,
-		cacheSourceClients: initializeCacheSources(cacheSources),
-		prefetchQueue:      make(chan *prefetchJob, 1000),
-		largeFetchSem:      make(chan struct{}, 1),
-		ctx:                ctx,
-		cancel:             cancel,
-		verbose:            verbose,
+		serverAddr:             serverAddr,
+		pending:                make(map[uint32]responseOp),
+		partialPackets:         make(map[uint32]*partialMessage),
+		inodes:                 make(map[uint64]dirDataNotificationHandler),
+		cache:                  cache,
+		debug:                  NewDebugTracker(),
+		cacheSources:           cacheSources,
+		cacheSourceClients:     initializeCacheSources(cacheSources),
+		prefetchQueue:          make(chan *prefetchJob, 1000),
+		largeFetchSem:          make(chan struct{}, 1),
+		rwEagerFetchQueue:      make(chan *rwEagerFetchTask, 256),
+		rwEagerFetchLargeQueue: make(chan *rwEagerFetchTask, 64),
+		normalReqQueue:         make(chan *sendRequestOp, 256),  // Higher priority
+		writeReqQueue:          make(chan *sendRequestOp, 1024), // Lower priority (QOS)
+		ctx:                    ctx,
+		cancel:                 cancel,
+		verbose:                verbose,
 	}
+	client.writeBufCond = sync.NewCond(&client.writeMu)
 
 	// Start prefetch workers
 	for i := 0; i < prefetchWorkers; i++ {
 		client.workersWg.Add(1)
 		go client.prefetchWorker()
 	}
+
+	for i := 0; i < rwEagerFetchWorkers; i++ {
+		client.workersWg.Add(1)
+		go client.rwEagerFetchWorker(client.rwEagerFetchQueue)
+	}
+	for i := 0; i < rwEagerFetchLargeWorkers; i++ {
+		client.workersWg.Add(1)
+		go client.rwEagerFetchWorker(client.rwEagerFetchLargeQueue)
+	}
+
+	// Start send-request workers (1 worker for both queues with priority)
+	client.sendReqWg.Add(1)
+	go client.sendRequestWorker()
 
 	return client
 }
@@ -160,6 +227,11 @@ func (sc *DirectFSClient) Unmount() error {
 // Stop stops the client
 func (sc *DirectFSClient) Stop() {
 	sc.cancel()
+	//close(sc.prefetchQueue)
+	close(sc.rwEagerFetchQueue)
+	close(sc.rwEagerFetchLargeQueue)
+	close(sc.normalReqQueue)
+	close(sc.writeReqQueue)
 	func() {
 		sc.mu.Lock()
 		defer sc.mu.Unlock()
@@ -169,6 +241,7 @@ func (sc *DirectFSClient) Stop() {
 		}
 	}()
 	sc.workersWg.Wait()
+	sc.sendReqWg.Wait()
 	sc.wg.Wait()
 }
 
@@ -217,7 +290,7 @@ func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
 
 	// Start new response reader
 	sc.wg.Add(1)
-	sc.pending = make(map[uint32]chan Response)
+	sc.pending = make(map[uint32]responseOp)
 	sc.partialPackets = make(map[uint32]*partialMessage) // Clear partial packets on reconnect
 	go sc.readResponses(conn, sc.pending)
 
@@ -236,7 +309,9 @@ func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
 	}
 	// Create response channel
 	respChan := make(chan Response, 1)
-	sc.pending[seq] = respChan
+	sc.pending[seq] = responseOp{
+		resCh: respChan,
+	}
 
 	// Send request with connection failure detection
 	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
@@ -303,6 +378,185 @@ func (sc *DirectFSClient) prefetchWorker() {
 			}
 			sc.processPrefetchJob(job)
 		}
+	}
+}
+
+func (sc *DirectFSClient) rwEagerFetchWorker(queue <-chan *rwEagerFetchTask) {
+	defer sc.workersWg.Done()
+	for {
+		select {
+		case <-sc.ctx.Done():
+			return
+		case task, ok := <-queue:
+			if !ok {
+				return
+			}
+			if task == nil || task.file == nil {
+				continue
+			}
+			task.file.performEagerFetch()
+		}
+	}
+}
+
+// sendRequestWorker processes both normal and write requests with priority scheduling.
+// It gives higher priority to normal operations and lower priority to write operations (QOS).
+func (sc *DirectFSClient) sendRequestWorker() {
+	defer sc.sendReqWg.Done()
+
+	for {
+		select {
+		case <-sc.ctx.Done():
+			return
+		case op, ok := <-sc.normalReqQueue:
+			if !ok && ok {
+				// normalReqQueue closed but check writeReqQueue
+				continue
+			}
+			if op != nil {
+				sc.executeRequestOp(op)
+			}
+		default:
+			// No normal request available, check write queue with lower priority
+			select {
+			case <-sc.ctx.Done():
+				return
+			case op, ok := <-sc.writeReqQueue:
+				if !ok && ok {
+					return
+				}
+				if op != nil {
+					sc.executeRequestOp(op)
+				}
+			case op, ok := <-sc.normalReqQueue:
+				if !ok && ok {
+					return
+				}
+				if op != nil {
+					sc.executeRequestOp(op)
+				}
+			}
+		}
+	}
+}
+
+// executeRequestOp executes a single request operation
+func (sc *DirectFSClient) executeRequestOp(op *sendRequestOp) {
+	resp := Response{errno: 0, data: nil}
+	seq := sc.nextSeq()
+	data, err := fileserver.SerializeWithHeader(op.opCode, seq, op.flags, op.req)
+	if err != nil {
+		resp.errno = syscall.EIO
+		op.responseOp.complete(resp)
+		return
+	}
+
+	// Create response channel and register it
+	sc.mu.Lock()
+	conn := sc.conn
+	for conn == nil {
+		if err := sc.reconnect(); err != nil {
+			sc.mu.Unlock()
+			resp.errno = syscall.ECONNREFUSED
+			op.responseOp.complete(resp)
+			return
+		}
+		conn = sc.conn
+	}
+	sc.pending[seq] = op.responseOp
+	sc.mu.Unlock()
+
+	// Send request
+	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	_, err = conn.Write(data)
+	if err != nil {
+		sc.mu.Lock()
+		if sc.conn == conn {
+			sc.conn.Close()
+			sc.conn = nil
+		}
+		delete(sc.pending, seq)
+		sc.mu.Unlock()
+		resp.errno = syscall.EIO
+		op.responseOp.complete(resp)
+		return
+	}
+}
+
+// enqueueGlobalWriteOp enqueues a write operation with backpressure handling.
+// The operation is queued as a low-priority request and returns a request ID.
+// The callback will be invoked asynchronously when the operation completes.
+func (sc *DirectFSClient) enqueueAsyncOp(size int64, req fileserver.Serializable, res fileserver.Serializable, callback func(error)) uint64 {
+	if size < 0 {
+		size = 0
+	}
+
+	id := atomic.AddUint64(&sc.writeReqID, 1)
+
+	sc.writeMu.Lock()
+	for sc.queuedWriteBytes+size > globalWriteQueueMaxBytes {
+		sc.writeBufCond.Wait()
+		select {
+		case <-sc.ctx.Done():
+			sc.writeMu.Unlock()
+			if callback != nil {
+				callback(fmt.Errorf("client stopped"))
+			}
+			return id
+		default:
+		}
+	}
+	sc.queuedWriteBytes += size
+	sc.writeMu.Unlock()
+	newCallback := func(resp Response) {
+		// Update bytes and broadcast after completion
+		sc.writeMu.Lock()
+		sc.queuedWriteBytes -= size
+		sc.writeBufCond.Broadcast()
+		sc.writeMu.Unlock()
+		var err error
+		err = resp.errno
+		if err != nil {
+			reader := bytes.NewReader(resp.data)
+			err = res.Deserialize(reader)
+		}
+		if callback != nil {
+			callback(err)
+		}
+	}
+	opCode, err := reqToOpCode(req)
+	if err != nil {
+		if callback != nil {
+			callback(fmt.Errorf("unknown request type: %w", err))
+		}
+		return id
+	}
+	sc.writeReqQueue <- &sendRequestOp{
+		opCode: opCode,
+		flags:  fileserver.FlagQosLow,
+		req:    req,
+		responseOp: responseOp{
+			callback: newCallback,
+		},
+	}
+	return id
+}
+
+func (sc *DirectFSClient) submitRWEagerFetch(file *RWFile) {
+	if file == nil {
+		return
+	}
+	task := &rwEagerFetchTask{file: file}
+	if file.attr.Size > int64(largeFileThreshold) {
+		select {
+		case sc.rwEagerFetchLargeQueue <- task:
+		default:
+		}
+		return
+	}
+	select {
+	case sc.rwEagerFetchQueue <- task:
+	default:
 	}
 }
 
@@ -376,38 +630,16 @@ func (sc *DirectFSClient) nextSeq() uint32 {
 
 // sendRequestWithData sends pre-serialized data and waits for response
 func (sc *DirectFSClient) sendRequestWithData(opCode uint32, flags uint32, req fileserver.Serializable, res fileserver.Serializable) error {
-	seq := sc.nextSeq()
-	data, err := fileserver.SerializeWithHeader(opCode, seq, flags, req)
-	if err != nil {
-		return fmt.Errorf("failed to serialize request: %w", err)
-	}
 	// Create response channel
 	respChan := make(chan Response, 1)
-	sc.mu.Lock()
-	conn := sc.conn
-	for conn == nil {
-		if err := sc.reconnect(); err != nil {
-			sc.mu.Unlock()
-			return fmt.Errorf("failed to reconnect: %w", err)
-		}
-		conn = sc.conn
-	}
-	sc.pending[seq] = respChan
-	sc.mu.Unlock()
-
-	// Send request with connection failure detection
-	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-	_, err = conn.Write(data)
-	if err != nil {
-		// Mark the connection as down and trigger reconnection at next request
-		sc.mu.Lock()
-		if sc.conn == conn {
-			sc.conn.Close()
-			sc.conn = nil
-		}
-		delete(sc.pending, seq)
-		sc.mu.Unlock()
-		return fmt.Errorf("write failed: %w", err)
+	sc.normalReqQueue <- &sendRequestOp{
+		opCode: opCode,
+		flags:  flags,
+		req:    req,
+		responseOp: responseOp{
+			resCh:    respChan,
+			callback: nil,
+		},
 	}
 
 	// Wait for response with timeout
@@ -431,17 +663,7 @@ func (sc *DirectFSClient) SendRequest(req fileserver.Serializable, res fileserve
 	return sc.SendRequestWithFlags(req, res, fileserver.FlagNone)
 }
 
-// SendRequestWithFlags sends a request with specified flags and waits for response
-func (sc *DirectFSClient) SendRequestWithFlags(req fileserver.Serializable, res fileserver.Serializable, flags uint32) error {
-	// Don't retry mount requests - they're part of reconnection
-	_, isMountReq := req.(*fileserver.MountRequest)
-
-	maxAttempts := 1
-	if !isMountReq {
-		maxAttempts = 2 // One attempt + one retry after reconnect
-	}
-
-	var lastErr error
+func reqToOpCode(req fileserver.Serializable) (uint32, error) {
 	var opCode uint32
 	switch req.(type) {
 	case *fileserver.MountRequest:
@@ -454,10 +676,49 @@ func (sc *DirectFSClient) SendRequestWithFlags(req fileserver.Serializable, res 
 		opCode = fileserver.OpReadDir
 	case *fileserver.ReadlinkRequest:
 		opCode = fileserver.OpReadlink
+	case *fileserver.CreateRequest:
+		opCode = fileserver.OpCreate
+	case *fileserver.WriteRequest:
+		opCode = fileserver.OpWrite
+	case *fileserver.MkdirRequest:
+		opCode = fileserver.OpMkdir
+	case *fileserver.UnlinkRequest:
+		opCode = fileserver.OpUnlink
+	case *fileserver.RmdirRequest:
+		opCode = fileserver.OpRmdir
+	case *fileserver.RenameRequest:
+		opCode = fileserver.OpRename
+	case *fileserver.SetattrRequest:
+		opCode = fileserver.OpSetattr
+	case *fileserver.SymlinkRequest:
+		opCode = fileserver.OpSymlink
+	case *fileserver.LinkRequest:
+		opCode = fileserver.OpLink
+	case *fileserver.FlushRequest:
+		opCode = fileserver.OpFlush
+	case *fileserver.GetattrRequest:
+		opCode = fileserver.OpGetattr
 	default:
-		return fmt.Errorf("unknown request type")
+		return 0, fmt.Errorf("unknown request type")
+	}
+	return opCode, nil
+}
+
+// SendRequestWithFlags sends a request with specified flags and waits for response
+func (sc *DirectFSClient) SendRequestWithFlags(req fileserver.Serializable, res fileserver.Serializable, flags uint32) error {
+	// Don't retry mount requests - they're part of reconnection
+	_, isMountReq := req.(*fileserver.MountRequest)
+
+	opCode, err := reqToOpCode(req)
+	if err != nil {
+		return err
+	}
+	maxAttempts := 1
+	if !isMountReq {
+		maxAttempts = 2 // One attempt + one retry after reconnect
 	}
 
+	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err := sc.sendRequestWithData(opCode, flags, req, res)
 		if err == nil {
@@ -494,14 +755,14 @@ func isRetriableError(err error) bool {
 }
 
 // readResponses reads responses from the connection
-func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]chan Response) {
+func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]responseOp) {
 	defer sc.wg.Done()
 	defer func() {
 		// Mark connection as down when reader exits
 		log.Printf("Response reader exited, connection marked as down")
 		sc.mu.Lock()
-		for _, ch := range pendingList {
-			ch <- Response{errno: syscall.ECONNRESET, data: nil}
+		for _, op := range pendingList {
+			op.complete(Response{errno: syscall.ECONNRESET, data: nil})
 		}
 		sc.mu.Unlock()
 	}()
@@ -596,6 +857,7 @@ func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]ch
 			decoder.Close()
 			if err != nil {
 				log.Printf("Failed to decompress data: %v", err)
+				log.Printf("header flags: %d, seq: %d, opcode: %d, compressed size: %d", header.Flags, header.Seq, header.Opcode, len(data))
 				return
 			}
 			data = decompressed
@@ -615,7 +877,7 @@ func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]ch
 		sc.mu.Unlock()
 
 		if ok {
-			respChan <- Response{errno: syscall.Errno(header.Opcode), data: data}
+			respChan.complete(Response{errno: syscall.Errno(header.Opcode), data: data})
 		}
 	}
 }
