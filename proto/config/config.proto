@@ -783,6 +783,8 @@ message AutoscalerBackend {
     AutoscalerBackendKubernetes kubernetes = 2;
     AutoscalerBackendCommand command = 3;
   }
+
+  reserved 64 to 127;
 }
 
 message LogStorage {

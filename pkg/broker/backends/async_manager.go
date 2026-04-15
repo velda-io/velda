@@ -15,6 +15,7 @@ package backends
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -401,6 +402,17 @@ func (m *asyncBackendManager) emitCreationErrorEvent(workerName string, err erro
 	default:
 		log.Printf("Dropping pool event for worker %s: event channel is full", workerName)
 	}
+}
+
+type PricingBackend interface {
+	CheckPrice(ctx context.Context) (float64, error)
+}
+
+func (m *asyncBackendManager) CheckPrice(ctx context.Context) (float64, error) {
+	if p, ok := m.backend.(PricingBackend); ok {
+		return p.CheckPrice(ctx)
+	}
+	return 0, fmt.Errorf("backend does not support pricing")
 }
 
 func isResourceExhaustedError(err error) bool {
