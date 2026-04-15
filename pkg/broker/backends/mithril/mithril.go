@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -115,6 +116,10 @@ type instanceModel struct {
 type listInstancesResponse struct {
 	Data       []instanceModel `json:"data"`
 	NextCursor *string         `json:"next_cursor"`
+}
+
+type currentPricingResponse struct {
+	SpotPriceCents *int64 `json:"spot_price_cents"`
 }
 
 func NewMithrilPoolBackend(cfg *proto.AutoscalerBackendMithrilSpotBid) broker.ResourcePoolBackend {
@@ -613,6 +618,52 @@ func (m *mithrilPoolBackend) bootstrapActiveWorkersOnFirstReconnect(ctx context.
 		}
 	})
 
+}
+
+// CheckPrice implements PricingBackend interface
+// Returns the current hourly spot price in USD for this backend configuration.
+func (m *mithrilPoolBackend) CheckPrice(ctx context.Context) (float64, error) {
+	instanceType := strings.TrimSpace(m.cfg.GetInstanceType())
+	if instanceType == "" {
+		return 0, fmt.Errorf("instance_type is required for Mithril pricing")
+	}
+
+	params := url.Values{}
+	params.Set("instance_type", instanceType)
+	if region := strings.TrimSpace(m.cfg.GetRegion()); region != "" {
+		params.Set("region", region)
+	}
+	params.Set("instance_quantity", "1")
+
+	path := "/pricing/current?" + params.Encode()
+	resp, err := m.makeRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch Mithril pricing: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to fetch Mithril pricing: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var pricing currentPricingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&pricing); err != nil {
+		return 0, fmt.Errorf("failed to decode Mithril pricing response: %w", err)
+	}
+	if pricing.SpotPriceCents == nil {
+		return 0, fmt.Errorf("Mithril pricing response missing spot_price_cents")
+	}
+	if *pricing.SpotPriceCents < 0 {
+		return 0, fmt.Errorf("invalid Mithril spot_price_cents: %d", *pricing.SpotPriceCents)
+	}
+
+	// If a limit price is configured and the current spot price exceeds it, return infinity to indicate
+	// we should not use this backend.
+	if m.cfg.GetLimitPrice() > 0 && float64(*pricing.SpotPriceCents)/100.0 >= m.cfg.GetLimitPrice() {
+		return math.MaxFloat64, nil
+	}
+	return float64(*pricing.SpotPriceCents) / 100.0, nil
 }
 
 type mithrilSpotBidPoolFactory struct{}

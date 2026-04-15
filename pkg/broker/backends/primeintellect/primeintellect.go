@@ -652,6 +652,16 @@ func parseSSHConnection(sshConn string) (string, string) {
 	return "", first
 }
 
+// CheckPrice implements PricingBackend interface
+// Returns the estimated hourly price in USD for the cheapest available offer
+func (p *primeIntellectPoolBackend) CheckPrice(ctx context.Context) (float64, error) {
+	offer, err := p.searchCheapestOffer(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get price from PrimeIntellect: %w", err)
+	}
+	return offer.TotalPrice, nil
+}
+
 type primeIntellectInstancePoolFactory struct{}
 
 func (f *primeIntellectInstancePoolFactory) CanHandle(pb *proto.AutoscalerBackend) bool {
