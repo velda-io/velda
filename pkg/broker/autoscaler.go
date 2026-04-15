@@ -682,7 +682,7 @@ func (p *AutoScaledPool) deleteOneWorkerLocked() bool {
 			break
 		}
 		p.logPrintf("Deleting pending worker %s", name)
-		p.setWorkerStatusLocked(name, WorkerStatusDeleting, 0)
+		p.setWorkerStatusLocked(name, WorkerStatusDisconnected, 0)
 		if err := p.backend.RequestDelete(p.ctx, name); err != nil {
 			p.logPrintf("Failed to delete pending worker %s: %v", name, err)
 		}

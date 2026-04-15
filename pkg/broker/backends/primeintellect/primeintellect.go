@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	pb "google.golang.org/protobuf/proto"
@@ -143,6 +144,8 @@ type primeIntellectPoolBackend struct {
 
 	sshConnector *sshconnector.Connector
 	sshUser      string
+
+	initialListMu sync.Once
 }
 
 type providerOffer struct {
@@ -189,11 +192,11 @@ func NewPrimeIntellectPoolBackend(cfg *proto.AutoscalerBackendPrimeIntellectInst
 	}
 
 	connector, defaults, err := sshconnector.NewDefault(
-		cfg.GetAgentConfigContent(),
+		cfg.GetAgentConfig(),
 		cfg.GetAgentVersionOverride(),
 	)
 	if err != nil {
-		log.Printf("PrimeIntellect SSH connector disabled due to invalid config: %v", err)
+		panic(err)
 	} else if connector != nil {
 		backend.sshConnector = connector
 		backend.sshUser = defaults.SSHUser
@@ -219,11 +222,9 @@ func (p *primeIntellectPoolBackend) CreateWorker(ctx context.Context, name strin
 		return backends.WorkerInfo{}, err
 	}
 
-	if p.sshConnector != nil {
-		if err := p.bootstrapInstance(ctx, instance); err != nil {
-			_ = p.deleteInstance(ctx, instance.ID)
-			return backends.WorkerInfo{}, err
-		}
+	if err := p.bootstrapInstance(ctx, instance); err != nil {
+		_ = p.deleteInstance(ctx, instance.ID)
+		return backends.WorkerInfo{}, err
 	}
 
 	return backends.WorkerInfo{State: backends.WorkerStateActive, Data: instance.ID}, nil
@@ -254,6 +255,7 @@ func (p *primeIntellectPoolBackend) ListRemoteWorkers(ctx context.Context) (map[
 	}
 
 	workers := make(map[string]backends.WorkerInfo)
+	activeInstances := make([]*instanceInfo, 0, len(listResp.Data))
 	for _, pod := range listResp.Data {
 		if pod.ID == "" || pod.Name == "" {
 			continue
@@ -266,8 +268,31 @@ func (p *primeIntellectPoolBackend) ListRemoteWorkers(ctx context.Context) (map[
 			continue
 		}
 		workers[pod.Name] = backends.WorkerInfo{State: backends.WorkerStateActive, Data: pod.ID}
+		activeInstances = append(activeInstances, &instanceInfo{ID: pod.ID, Name: pod.Name, Status: pod.Status})
 	}
+	p.bootstrapActiveWorkersOnFirstList(ctx, activeInstances)
 	return workers, nil
+}
+
+func (p *primeIntellectPoolBackend) bootstrapActiveWorkersOnFirstList(ctx context.Context, activeInstances []*instanceInfo) {
+	p.initialListMu.Do(func() {
+		if p.sshConnector == nil {
+			return
+		}
+
+		bootstrapCtx := context.WithoutCancel(ctx)
+		for _, instance := range activeInstances {
+			if instance == nil || instance.ID == "" {
+				continue
+			}
+			log.Printf("Re-running bootstrap for active PrimeIntellect worker on first list: %s (%s)", instance.Name, instance.ID)
+			go func(instance *instanceInfo) {
+				if err := p.bootstrapInstance(bootstrapCtx, instance); err != nil {
+					log.Printf("Failed bootstrap rerun on first list for PrimeIntellect instance %s: %v", instance.ID, err)
+				}
+			}(instance)
+		}
+	})
 }
 
 func (p *primeIntellectPoolBackend) searchCheapestOffer(ctx context.Context) (*providerOffer, error) {
@@ -311,6 +336,10 @@ func (p *primeIntellectPoolBackend) searchCheapestOffer(ctx context.Context) (*p
 	bestPrice := math.MaxFloat64
 	for _, item := range availResp.Items {
 		if item.CloudID == "" || item.Provider == "" {
+			continue
+		}
+		if item.Provider == "runpod" {
+			// RunPod only offers container based solution, which is not compatible.
 			continue
 		}
 		// Exclude spot instances unless explicitly allowed.
@@ -644,11 +673,6 @@ func (f *primeIntellectInstancePoolFactory) NewBackend(pool *proto.AgentPool, br
 				return nil, fmt.Errorf("no default broker info provided for pool %s", pool.GetName())
 			}
 			cfg.AgentConfig.Broker = brokerInfo
-		}
-		var err error
-		cfg.AgentConfigContent, err = utils.ProtoToYaml(cfg.AgentConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal agent config: %w", err)
 		}
 	}
 

@@ -492,11 +492,8 @@ message AutoscalerBackendMithrilSpotBid {
   // The spot bid will be allocated when spot price is below this limit
   double limit_price = 3;
 
-  // Structured version of the agent config.
-  // If both agent_config and agent_config_content are set,
-  // agent_config will be used.
+  // Agent config to initialize.
   // Pool & broker info will be automatically set.
-  string agent_config_content = 4;
   velda.agent.AgentConfig agent_config = 5;
 
   // Additional labels/tags to add to the instance.
@@ -612,11 +609,8 @@ message AutoscalerBackendPrimeIntellectInstance {
   // Base prefix for instance names managed by this backend.
   string instance_name_prefix = 3;
 
-  // Structured version of the agent config.
-  // If both agent_config and agent_config_content are set,
-  // agent_config will be used.
+  // Agent config to initialize.
   // Pool & broker info will be automatically set.
-  string agent_config_content = 4;
   velda.agent.AgentConfig agent_config = 5;
 
   // If set, will override the agent version to install.

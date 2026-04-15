@@ -17,22 +17,29 @@ import (
 	"strings"
 	"testing"
 
+	agentpb "velda.io/velda/pkg/proto/agent"
 	configpb "velda.io/velda/pkg/proto/config"
 )
 
 func TestBuildBootstrapScriptIncludesCoreSteps(t *testing.T) {
 	c := &Connector{cfg: Config{
+		LocalMTLSCertPath:     "/local/root-ca.pem",
 		RemoteMTLSCertPath:    "/run/velda/root-ca.pem",
 		RemoteAgentConfigPath: "/run/velda/velda.yaml",
-		AgentConfigContent:    "pool: p1\n",
-		AgentVersionOverride:  "v9.9.9",
+		AgentConfig: &agentpb.AgentConfig{
+			Pool: "p1",
+		},
+		AgentVersionOverride: "v9.9.9",
 		TailscaleConfig: &configpb.TailscaleConfig{
 			Server:     "https://ts.example",
 			PreAuthKey: "ts-key",
 		},
 	}}
 
-	script := c.buildBootstrapScript()
+	script, err := c.buildBootstrapScript("worker-1")
+	if err != nil {
+		t.Fatalf("unexpected build error: %v", err)
+	}
 
 	checks := []string{
 		"dpkg -s nfs-common",
@@ -40,13 +47,33 @@ func TestBuildBootstrapScriptIncludesCoreSteps(t *testing.T) {
 		"curl -fsSL https://releases.velda.io/velda-v9.9.9-linux-amd64 -o /tmp/velda",
 		"systemctl restart velda-agent.service",
 		"cat << 'VELDA_CONFIG_EOF' > '/run/velda/velda.yaml'",
+		"agentName: worker-1",
 		"chmod 0644 '/run/velda/root-ca.pem'",
 	}
 
 	for _, check := range checks {
 		if !strings.Contains(script, check) {
-			t.Fatalf("expected script to contain %q", check)
+			t.Fatalf("expected script to contain %q, got:\n%s", check, script)
 		}
+	}
+}
+
+func TestBuildBootstrapScriptNoMTLS(t *testing.T) {
+	c := &Connector{cfg: Config{
+		// LocalMTLSCertPath intentionally empty — mTLS is optional
+		RemoteMTLSCertPath:    "/run/velda/root-ca.pem",
+		RemoteAgentConfigPath: "/run/velda/velda.yaml",
+	}}
+
+	script, err := c.buildBootstrapScript("worker-1")
+	if err != nil {
+		t.Fatalf("unexpected build error: %v", err)
+	}
+	if strings.Contains(script, "mtls-cert.pem") {
+		t.Fatalf("expected no mTLS cert steps when LocalMTLSCertPath is empty")
+	}
+	if strings.Contains(script, "chmod 0644") {
+		t.Fatalf("expected no chmod for mTLS cert when LocalMTLSCertPath is empty")
 	}
 }
 
@@ -55,7 +82,10 @@ func TestBuildBootstrapScriptWithoutTailscale(t *testing.T) {
 		RemoteMTLSCertPath: "/run/velda/root-ca.pem",
 	}}
 
-	script := c.buildBootstrapScript()
+	script, err := c.buildBootstrapScript("worker-1")
+	if err != nil {
+		t.Fatalf("unexpected build error: %v", err)
+	}
 	if strings.Contains(script, "tailscale up") {
 		t.Fatalf("did not expect tailscale setup without tailscale config")
 	}

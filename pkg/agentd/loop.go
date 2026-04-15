@@ -53,7 +53,10 @@ func NewAgent(brokerClient proto.BrokerServiceClient,
 	if daemonConfig == nil {
 		daemonConfig = &agentpb.DaemonConfig{}
 	}
-	agentId := os.Getenv("AGENT_NAME")
+	agentId := daemonConfig.GetAgentName()
+	if agentId == "" {
+		agentId = os.Getenv("AGENT_NAME")
+	}
 	if agentId == "" {
 		hostname, err := os.Hostname()
 
