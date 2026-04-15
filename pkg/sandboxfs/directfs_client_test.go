@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -35,6 +37,42 @@ import (
 )
 
 var cacheKey = xattrCacheName
+
+func mountDirectFSClientForTest(client *DirectFSClient, mountPoint string) (*VeldaServer, error) {
+	fh, attr, err := client.Connect()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+
+	root := &SnapshotNode{client: client, fh: fh, attr: attr}
+	client.registerInodeHandler(attr.Ino, root)
+
+	timeout := 1 * time.Hour
+	opts := &fs.Options{
+		EntryTimeout: &timeout,
+		AttrTimeout:  &timeout,
+		MountOptions: fuse.MountOptions{
+			AllowOther:  true,
+			DirectMount: true,
+			Name:        "veldafs-snapshot",
+			FsName:      "snapshot",
+			Options:     []string{"default_permissions"},
+		},
+	}
+
+	server, err := fs.Mount(mountPoint, root, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mount: %w", err)
+	}
+
+	client.fuseServer = server
+
+	return &VeldaServer{
+		Server: server,
+		Cache:  client.cache,
+		debug:  client.debug,
+	}, nil
+}
 
 // checkCapSysAdmin checks if the current process has CAP_SYS_ADMIN capability
 func checkCapSysAdmin(t *testing.T) {
@@ -62,7 +100,7 @@ func setupTestServerClient(t *testing.T, srcDir, cacheDir, mountDir string, work
 
 	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
 
-	veldaServer, err := client.Mount(mountDir)
+	veldaServer, err := mountDirectFSClientForTest(client, mountDir)
 	require.NoError(t, err)
 	require.NoError(t, veldaServer.WaitMount())
 	// Give mount time to stabilize
@@ -86,7 +124,7 @@ func setupTestServerClientWithCache(t *testing.T, srcDir string, cache *Director
 
 	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
 
-	veldaServer, err := client.Mount(mountDir)
+	veldaServer, err := mountDirectFSClientForTest(client, mountDir)
 	require.NoError(t, err)
 	require.NoError(t, veldaServer.WaitMount())
 	time.Sleep(200 * time.Millisecond)
@@ -374,7 +412,7 @@ func TestSnapshotClientTimestamps(t *testing.T) {
 
 	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
 
-	veldaServer, err := client.Mount(mountDir)
+	veldaServer, err := mountDirectFSClientForTest(client, mountDir)
 	defer client.Stop()
 	require.NoError(t, err)
 	defer client.Unmount()
@@ -526,7 +564,7 @@ func TestSnapshotClientDirPrefetchWithNotification(t *testing.T) {
 	require.NoError(t, err)
 
 	client := NewDirectFSClient(server.Addr().String(), cache, nil, false)
-	veldaServer, err := client.Mount(mountDir)
+	veldaServer, err := mountDirectFSClientForTest(client, mountDir)
 	require.NoError(t, err)
 	require.NoError(t, veldaServer.WaitMount())
 	defer func() {

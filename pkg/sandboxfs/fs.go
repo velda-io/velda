@@ -172,10 +172,13 @@ func MountWorkDir(baseDir, workspaceDir, cacheDir string, options ...MountOption
 	// Handle DirectFS mode
 	if veldaOpts.DirectFSMode {
 		directClient = NewDirectFSClient(baseDir, cache, veldaOpts.CacheSources, veldaOpts.VerboseLog)
-		rootNode, err = directClient.Connect()
+		fh, attr, err := directClient.Connect()
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to DirectFS server: %w", err)
 		}
+		directRoot := &SnapshotNode{client: directClient, fh: fh, attr: attr}
+		directClient.registerInodeHandler(attr.Ino, directRoot)
+		rootNode = directRoot
 	} else {
 		// Create cached loopback root
 		rootNode, err = NewCachedLoopbackRoot(baseDir, cache, veldaOpts.SnapshotMode, veldaOpts.NoCacheMode)
