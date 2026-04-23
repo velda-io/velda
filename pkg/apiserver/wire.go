@@ -74,6 +74,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 		ProvideNfsAuth,
 		ProvidePoolService,
 		ServiceProviders,
+		ProvideGrpcMux,
 	)
 	return CompletionError(nil), nil
 }
