@@ -327,14 +327,16 @@ func ProvideGrpcMux(httpHandler *http.ServeMux) *runtime.ServeMux {
 
 type MetricRegistryRunner Runner
 
-func ProvideMetrics(r *prometheus.Registry, grpcMetrics *prometheus_grpc.ServerMetrics) MetricRegistryRunner {
+func ProvideMetrics(r *prometheus.Registry, grpcMetrics *prometheus_grpc.ServerMetrics, schedulers *broker.SchedulerSet) MetricRegistryRunner {
 	r.MustRegister(grpcMetrics)
+	r.MustRegister(schedulers)
 	goCollector := collectors.NewGoCollector()
 	r.MustRegister(goCollector)
 	processCollector := collectors.NewProcessCollector(collectors.ProcessCollectorOpts{})
 	r.MustRegister(processCollector)
 	return func(_ context.Context) {
 		r.Unregister(grpcMetrics)
+		r.Unregister(schedulers)
 		r.Unregister(goCollector)
 		r.Unregister(processCollector)
 	}

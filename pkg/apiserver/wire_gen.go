@@ -80,7 +80,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storage, permissions, brokerServiceServer)
 	taskLogServiceServer := ProvideTaskLogService(server, config)
 	registry := _wireRegistryValue
-	metricRegistryRunner := ProvideMetrics(registry, serverMetrics)
+	metricRegistryRunner := ProvideMetrics(registry, serverMetrics, schedulerSet)
 	grpcRunner, err := ProvideGrpcRunner(serviceCtx, config, server)
 	if err != nil {
 		return nil, err

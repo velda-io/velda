@@ -43,10 +43,10 @@ const (
 	schedulingStateRunning
 	schedulingStateCancelling
 	schedulingStateCancellingAgent
-	schedulingStateCancelled
 	// Lost connection. Wait for termination or reconnect.
 	// If terminated, it will be rescheduled if requested.
 	schedulingStateStale
+	schedulingStateStaleCancelled
 	schedulingStateReconnected
 	schedulingStateStaleTimerExpired
 	schedulingStateTerminated
@@ -345,7 +345,7 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 
 			select {
 			case <-s.cancelSignal:
-				nextState = schedulingStateCancelling
+				nextState = schedulingStateStaleCancelled
 				s.schedulingErr = status.Error(codes.Canceled, "session cancelled by kill command")
 			case <-ctxDone:
 				// Reevaluate ctx.
@@ -353,7 +353,7 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 			case <-serverCtx.Done():
 				// Server is shutting down, cancel the session.
 				s.schedulingErr = status.Error(codes.Unavailable, "session cancelled due to server shutdown, please retry.")
-				s.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_CANCELLED)
+				s.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_WORKER_LOST)
 				return
 			case <-staleConnectionRequest:
 				// Reevaluate ctx
@@ -365,6 +365,52 @@ func (s *Session) scheduleLoop(startingState schedulingState) {
 			}
 		case schedulingStateReconnected:
 			return
+		case schedulingStateStaleCancelled:
+
+			var staleConnectionRequest chan struct{}
+			var ctxDone <-chan struct{}
+			var staleCompletion *time.Timer
+			var staleReconnect chan struct{}
+			// Need to retrieve stale related signals with lock, in the event of
+			// reconnection become stale.
+			func() {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				if ctx == nil || ctx.Err() != nil {
+					ctx = s.popCtxLocked()
+				}
+				if ctx == nil {
+					staleConnectionRequest = s.staleConnectionRequest
+				} else {
+					ctxDone = ctx.Done()
+				}
+				staleCompletion = s.staleCompletion
+				staleReconnect = s.staleReconnect
+			}()
+
+			select {
+			case <-s.cancelSignal:
+				continue
+			case <-ctxDone:
+				// Reevaluate ctx.
+				continue
+			case <-serverCtx.Done():
+				// Server is shutting down, cancel the session.
+				s.schedulingErr = status.Error(codes.Unavailable, "session cancelled due to server shutdown, please retry.")
+				s.Complete(proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_WORKER_LOST)
+				return
+			case <-staleConnectionRequest:
+				// Reevaluate ctx
+				continue
+			case <-staleCompletion.C:
+				nextState = schedulingStateStaleTimerExpired
+			case <-staleReconnect:
+				// Reconnected, send the kill request now.
+				killCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				s.agent.RequestKill(killCtx, s.Request.InstanceId, s.Request.SessionId, false)
+				nextState = schedulingStateReconnected
+			}
 		case schedulingStateStaleTimerExpired:
 			func() {
 				s.mu.Lock()
@@ -421,6 +467,7 @@ func (s *Session) MarkStale(lastActiveTime time.Time) {
 		s.staleReconnect = make(chan struct{})
 		s.scheduleCompletion = make(chan struct{})
 		s.cancelSignal = make(chan struct{}, 1)
+		s.lastActiveTime = lastActiveTime
 		if s.Request.TaskId != "" {
 			s.scheduleCtx = append(s.scheduleCtx, s.scheduler.ctx)
 		}
@@ -440,9 +487,10 @@ func (s *Session) MarkStale(lastActiveTime time.Time) {
 	s.notifyChangeLocked()
 }
 
-func (s *Session) Reconnect() {
+func (s *Session) Reconnect(agent *Agent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.agent = agent
 	switch s.status.Status {
 	case proto.ExecutionStatus_STATUS_STALE:
 		s.staleCompletion.Stop()
@@ -562,6 +610,10 @@ func (s *Session) recordExecution(finalState proto.SessionExecutionFinalState) e
 		SessionId:   s.Request.SessionId,
 		BatchTaskId: s.Request.TaskId,
 		FinalState:  finalState,
+	}
+	if finalState == proto.SessionExecutionFinalState_SESSION_EXECUTION_FINAL_STATE_WORKER_LOST && !s.lastActiveTime.IsZero() {
+		// If worker is lost, we consider the session ended at the time it becomes stale.
+		data.EndTime = timestamppb.New(s.lastActiveTime)
 	}
 	if !s.startTime.IsZero() {
 		data.StartTime = timestamppb.New(s.startTime)
