@@ -263,7 +263,7 @@ func TestSessionSchedule(t *testing.T) {
 			close(done)
 		}()
 		time.Sleep(100 * time.Millisecond)
-		session.Reconnect()
+		session.Reconnect(nil)
 		<-done
 	})
 

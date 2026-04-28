@@ -80,8 +80,10 @@ func (s WorkerStatusCode) String() string {
 		return "Unknown"
 	case WorkerStatusDisconnected:
 		return "Disconnected"
+	case WorkerStatusNeedsRestart:
+		return "NeedsRestart"
 	default:
-		return "Invalid"
+		return fmt.Sprintf("UnknownStatus(%d)", s)
 	}
 }
 
@@ -206,6 +208,8 @@ type AutoScaledPool struct {
 	lastScaleUpAttemptAt      time.Time
 	lastAllocationError       string
 	lastAllocationErrorAt     time.Time
+	lastResourceExhaustedAt   time.Time
+	lastStartupFailureAt      time.Time
 
 	Metadata atomic.Pointer[proto.PoolMetadata]
 }
@@ -824,6 +828,13 @@ func (p *AutoScaledPool) GetAllocationStatus() PoolAllocationStatus {
 func (p *AutoScaledPool) handleResourcePoolEvent(event ResourcePoolEvent) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	now := time.Now()
+	switch event.EventType {
+	case ResourcePoolEventTypeResourceExhausted:
+		p.lastResourceExhaustedAt = now
+	case ResourcePoolEventTypeStartupFailure:
+		p.lastStartupFailureAt = now
+	}
 	p.markAllocationErrorLocked(event.Detail)
 	if _, ok := p.workerStatus[event.WorkerName]; ok {
 		p.removeWorkerLocked(event.WorkerName)

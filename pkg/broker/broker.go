@@ -114,7 +114,7 @@ func (s *server) AgentUpdate(stream proto.BrokerService_AgentUpdateServer) error
 				}
 				sess.user = user
 			}
-			sess.Reconnect()
+			sess.Reconnect(agent)
 			if request.TaskId != "" {
 				err := s.taskTracker.ReconnectTask(stream.Context(), sess)
 				if err != nil {
