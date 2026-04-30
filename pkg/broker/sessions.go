@@ -565,7 +565,10 @@ func (s *Session) completeLocked(finalStatus proto.SessionExecutionFinalState) {
 func (s *Session) updateFromAgentResponseLocked(response AgentSessionResponse) {
 	s.status.Status = proto.ExecutionStatus_STATUS_RUNNING
 	s.status.SshConnection = response.ExecutionStatus.SshConnection
-	s.startTime = time.Now()
+	if s.startTime.IsZero() {
+		s.startTime = time.Now()
+	}
+	s.status.StartedAt = timestamppb.New(s.startTime)
 }
 
 func (s *Session) String() string {
