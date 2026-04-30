@@ -193,6 +193,9 @@ func (s *TaskServiceServer) WatchTask(in *proto.GetTaskRequest, stream proto.Tas
 			switch status.Status {
 			case proto.ExecutionStatus_STATUS_RUNNING:
 				task.Status = proto.TaskStatus_TASK_STATUS_RUNNING
+				if status.StartedAt != nil {
+					task.StartedAt = status.StartedAt
+				}
 				err := stream.Send(task)
 				if err != nil {
 					sendErr <- err
@@ -360,8 +363,13 @@ func (s *TaskServiceServer) patchTaskStatus(ctx context.Context, tasks ...*proto
 				task.Status = newtask.Status
 				continue
 			}
-			if status != nil && status.Status == proto.ExecutionStatus_STATUS_RUNNING {
-				task.Status = proto.TaskStatus_TASK_STATUS_RUNNING
+			if status != nil {
+				if status.Status == proto.ExecutionStatus_STATUS_RUNNING {
+					task.Status = proto.TaskStatus_TASK_STATUS_RUNNING
+				}
+				if status.StartedAt != nil {
+					task.StartedAt = status.StartedAt
+				}
 			}
 		}
 	}

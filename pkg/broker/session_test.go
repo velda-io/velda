@@ -148,14 +148,14 @@ func TestSessionSchedule(t *testing.T) {
 		go func() {
 			resp, err := session.Schedule(ctx)
 			assert.Nil(t, err)
-			assert.Equal(t, "", cmp.Diff(status, resp, protocmp.Transform()))
+			assert.Equal(t, "", cmp.Diff(status, resp, protocmp.Transform(), protocmp.IgnoreFields(new(proto.ExecutionStatus), "started_at")))
 			wg.Done()
 		}()
 
 		go func() {
 			resp, err := session.Schedule(ctx)
 			assert.Nil(t, err)
-			assert.Equal(t, "", cmp.Diff(status, resp, protocmp.Transform()))
+			assert.Equal(t, "", cmp.Diff(status, resp, protocmp.Transform(), protocmp.IgnoreFields(new(proto.ExecutionStatus), "started_at")))
 			wg.Done()
 		}()
 
@@ -201,7 +201,7 @@ func TestSessionSchedule(t *testing.T) {
 		go func() {
 			resp, err := session.Schedule(ctx)
 			assert.Nil(t, err)
-			assert.Equal(t, "", cmp.Diff(status, resp, protocmp.Transform()))
+			assert.Equal(t, "", cmp.Diff(status, resp, protocmp.Transform(), protocmp.IgnoreFields(new(proto.ExecutionStatus), "started_at")))
 			wg.Done()
 		}()
 
@@ -259,7 +259,7 @@ func TestSessionSchedule(t *testing.T) {
 			// Request to reconnect
 			resp, err := session.Schedule(ctx)
 			assert.Nil(t, err)
-			assert.Equal(t, "", cmp.Diff(status, resp, protocmp.Transform()))
+			assert.Equal(t, "", cmp.Diff(status, resp, protocmp.Transform(), protocmp.IgnoreFields(new(proto.ExecutionStatus), "started_at")))
 			close(done)
 		}()
 		time.Sleep(100 * time.Millisecond)
@@ -304,7 +304,7 @@ func TestSessionSchedule(t *testing.T) {
 		// Reconnect to new agent.
 		resp, err := session.Schedule(ctx)
 		assert.Nil(t, err)
-		assert.Equal(t, "", cmp.Diff(expectedStatus, resp, protocmp.Transform()))
+		assert.Equal(t, "", cmp.Diff(expectedStatus, resp, protocmp.Transform(), protocmp.IgnoreFields(new(proto.ExecutionStatus), "started_at")))
 	})
 
 	t.Run("ScheduleWithPriority", func(t *testing.T) {

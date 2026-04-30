@@ -260,6 +260,9 @@ message ExecutionStatus {
     bytes jump_host_key = 5;
   }
   SshConnection ssh_connection = 5;
+
+  // The time when the session/execution starts running on an agent.
+  google.protobuf.Timestamp started_at = 6;
 }
 
 message ListSessionsRequest {
