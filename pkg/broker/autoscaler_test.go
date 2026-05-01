@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type FakeBackend struct {
@@ -597,7 +599,7 @@ func TestPoolStatusRetryDelayAndReset(t *testing.T) {
 	require.NoError(t, pool.RequestWorker())
 	require.Equal(t, 1, backend.ScaleUpCallCount())
 	status1 := pool.GetAllocationStatus()
-	require.NotEmpty(t, status1.LastAllocationError)
+	require.Error(t, status1.LastAllocationError)
 
 	for i := 0; i < 3; i++ {
 		require.NoError(t, pool.RequestWorker())
@@ -617,7 +619,7 @@ func TestPoolStatusRetryDelayAndReset(t *testing.T) {
 
 	time.Sleep(140 * time.Millisecond)
 	status2 := pool.GetAllocationStatus()
-	require.Empty(t, status2.LastAllocationError, "status should reset after no scale-up attempts period")
+	require.NoError(t, status2.LastAllocationError, "status should reset after no scale-up attempts period")
 }
 
 func TestPoolStatusResetOnNotifyAgentAvailable(t *testing.T) {
@@ -637,10 +639,10 @@ func TestPoolStatusResetOnNotifyAgentAvailable(t *testing.T) {
 	})
 
 	pool.ReadyForIdleMaintenance()
-	require.NotEmpty(t, pool.GetAllocationStatus().LastAllocationError)
+	require.Error(t, pool.GetAllocationStatus().LastAllocationError)
 
 	require.NoError(t, pool.NotifyAgentAvailable("worker-1", false, make(chan AgentStatusRequest, 1), 1))
-	require.Empty(t, pool.GetAllocationStatus().LastAllocationError)
+	require.NoError(t, pool.GetAllocationStatus().LastAllocationError)
 }
 
 func TestAllocationErrorEventWithUnknownWorkerName(t *testing.T) {
@@ -668,13 +670,13 @@ func TestAllocationErrorEventWithUnknownWorkerName(t *testing.T) {
 	backend.EmitEvent(ResourcePoolEvent{
 		WorkerName: backend.GetPending(t),
 		EventType:  ResourcePoolEventTypeStartupFailure,
-		Detail:     "startup failed",
+		Err:        fmt.Errorf("startup failed"),
 	})
 
 	require.Eventually(t, func() bool {
 		return backend.ScaleUpCallCount() >= 2
 	}, time.Second, 10*time.Millisecond)
-	require.NotEmpty(t, pool.GetAllocationStatus().LastAllocationError)
+	require.Error(t, pool.GetAllocationStatus().LastAllocationError)
 }
 
 func TestScaleUpRetriesAfterCooldownWithoutRequestWorker(t *testing.T) {
@@ -734,7 +736,7 @@ func TestScaleUpSuccessThenStartupFailureEventRetriesUntilRecovered(t *testing.T
 	event := ResourcePoolEvent{
 		WorkerName: backend.GetPending(t),
 		EventType:  ResourcePoolEventTypeResourceExhausted,
-		Detail:     "resource exhausted",
+		Err:        status.Error(codes.ResourceExhausted, "resource exhausted"),
 	}
 	t1 := time.Now()
 	backend.EmitEvent(event)
@@ -743,7 +745,7 @@ func TestScaleUpSuccessThenStartupFailureEventRetriesUntilRecovered(t *testing.T
 		return backend.ScaleUpCallCount() >= 2
 	}, 600*time.Millisecond, 10*time.Millisecond)
 
-	require.NotEmpty(t, pool.GetAllocationStatus().LastAllocationError)
+	require.Error(t, pool.GetAllocationStatus().LastAllocationError)
 	assert.Greater(t, time.Since(t1), 80*time.Millisecond, "should wait for cooldown before retrying")
 
 	t2 := time.Now()
@@ -751,7 +753,7 @@ func TestScaleUpSuccessThenStartupFailureEventRetriesUntilRecovered(t *testing.T
 	backend.EmitEvent(ResourcePoolEvent{
 		WorkerName: backend.GetPending(t),
 		EventType:  ResourcePoolEventTypeResourceExhausted,
-		Detail:     "Resource exhausted 2",
+		Err:        status.Error(codes.ResourceExhausted, "Resource exhausted 2"),
 	})
 
 	require.Eventually(t, func() bool {

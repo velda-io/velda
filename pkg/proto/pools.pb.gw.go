@@ -117,6 +117,40 @@ func local_request_PoolManagerService_GetPool_0(ctx context.Context, marshaler r
 	return msg, metadata, err
 }
 
+var filter_PoolManagerService_WatchPoolStatus_0 = &utilities.DoubleArray{Encoding: map[string]int{"pool": 0}, Base: []int{1, 1, 0}, Check: []int{0, 1, 2}}
+
+func request_PoolManagerService_WatchPoolStatus_0(ctx context.Context, marshaler runtime.Marshaler, client PoolManagerServiceClient, req *http.Request, pathParams map[string]string) (PoolManagerService_WatchPoolStatusClient, runtime.ServerMetadata, error) {
+	var (
+		protoReq WatchPoolStatusRequest
+		metadata runtime.ServerMetadata
+		err      error
+	)
+	val, ok := pathParams["pool"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "pool")
+	}
+	protoReq.Pool, err = runtime.String(val)
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "pool", err)
+	}
+	if err := req.ParseForm(); err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_PoolManagerService_WatchPoolStatus_0); err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+	stream, err := client.WatchPoolStatus(ctx, &protoReq)
+	if err != nil {
+		return nil, metadata, err
+	}
+	header, err := stream.Header()
+	if err != nil {
+		return nil, metadata, err
+	}
+	metadata.HeaderMD = header
+	return stream, metadata, nil
+}
+
 // RegisterPoolManagerServiceHandlerServer registers the http handlers for service PoolManagerService to "mux".
 // UnaryRPC     :call PoolManagerServiceServer directly.
 // StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
@@ -162,6 +196,13 @@ func RegisterPoolManagerServiceHandlerServer(ctx context.Context, mux *runtime.S
 			return
 		}
 		forward_PoolManagerService_GetPool_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+	})
+
+	mux.Handle(http.MethodGet, pattern_PoolManagerService_WatchPoolStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		err := status.Error(codes.Unimplemented, "streaming calls are not yet supported in the in-process transport")
+		_, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+		return
 	})
 
 	return nil
@@ -237,15 +278,34 @@ func RegisterPoolManagerServiceHandlerClient(ctx context.Context, mux *runtime.S
 		}
 		forward_PoolManagerService_GetPool_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
+	mux.Handle(http.MethodGet, pattern_PoolManagerService_WatchPoolStatus_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/WatchPoolStatus", runtime.WithHTTPPathPattern("/rest/velda/pool/{pool}/watch"))
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_PoolManagerService_WatchPoolStatus_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
+		if err != nil {
+			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		forward_PoolManagerService_WatchPoolStatus_0(annotatedContext, mux, outboundMarshaler, w, req, func() (proto.Message, error) { return resp.Recv() }, mux.GetForwardResponseOptions()...)
+	})
 	return nil
 }
 
 var (
-	pattern_PoolManagerService_ListPools_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"rest", "velda", "pool"}, ""))
-	pattern_PoolManagerService_GetPool_0   = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 2}, []string{"rest", "velda", "pool"}, ""))
+	pattern_PoolManagerService_ListPools_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"rest", "velda", "pool"}, ""))
+	pattern_PoolManagerService_GetPool_0         = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 2}, []string{"rest", "velda", "pool"}, ""))
+	pattern_PoolManagerService_WatchPoolStatus_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 2, 2, 3}, []string{"rest", "velda", "pool", "watch"}, ""))
 )
 
 var (
-	forward_PoolManagerService_ListPools_0 = runtime.ForwardResponseMessage
-	forward_PoolManagerService_GetPool_0   = runtime.ForwardResponseMessage
+	forward_PoolManagerService_ListPools_0       = runtime.ForwardResponseMessage
+	forward_PoolManagerService_GetPool_0         = runtime.ForwardResponseMessage
+	forward_PoolManagerService_WatchPoolStatus_0 = runtime.ForwardResponseStream
 )

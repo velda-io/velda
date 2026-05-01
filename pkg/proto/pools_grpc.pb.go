@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PoolManagerService_ListPools_FullMethodName = "/velda.PoolManagerService/ListPools"
-	PoolManagerService_GetPool_FullMethodName   = "/velda.PoolManagerService/GetPool"
+	PoolManagerService_ListPools_FullMethodName       = "/velda.PoolManagerService/ListPools"
+	PoolManagerService_GetPool_FullMethodName         = "/velda.PoolManagerService/GetPool"
+	PoolManagerService_WatchPoolStatus_FullMethodName = "/velda.PoolManagerService/WatchPoolStatus"
 )
 
 // PoolManagerServiceClient is the client API for PoolManagerService service.
@@ -29,6 +30,7 @@ const (
 type PoolManagerServiceClient interface {
 	ListPools(ctx context.Context, in *ListPoolsRequest, opts ...grpc.CallOption) (*ListPoolsResponse, error)
 	GetPool(ctx context.Context, in *GetPoolRequest, opts ...grpc.CallOption) (*GetPoolResponse, error)
+	WatchPoolStatus(ctx context.Context, in *WatchPoolStatusRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PoolStatusNotification], error)
 }
 
 type poolManagerServiceClient struct {
@@ -59,12 +61,32 @@ func (c *poolManagerServiceClient) GetPool(ctx context.Context, in *GetPoolReque
 	return out, nil
 }
 
+func (c *poolManagerServiceClient) WatchPoolStatus(ctx context.Context, in *WatchPoolStatusRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PoolStatusNotification], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &PoolManagerService_ServiceDesc.Streams[0], PoolManagerService_WatchPoolStatus_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchPoolStatusRequest, PoolStatusNotification]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type PoolManagerService_WatchPoolStatusClient = grpc.ServerStreamingClient[PoolStatusNotification]
+
 // PoolManagerServiceServer is the server API for PoolManagerService service.
 // All implementations must embed UnimplementedPoolManagerServiceServer
 // for forward compatibility.
 type PoolManagerServiceServer interface {
 	ListPools(context.Context, *ListPoolsRequest) (*ListPoolsResponse, error)
 	GetPool(context.Context, *GetPoolRequest) (*GetPoolResponse, error)
+	WatchPoolStatus(*WatchPoolStatusRequest, grpc.ServerStreamingServer[PoolStatusNotification]) error
 	mustEmbedUnimplementedPoolManagerServiceServer()
 }
 
@@ -80,6 +102,9 @@ func (UnimplementedPoolManagerServiceServer) ListPools(context.Context, *ListPoo
 }
 func (UnimplementedPoolManagerServiceServer) GetPool(context.Context, *GetPoolRequest) (*GetPoolResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPool not implemented")
+}
+func (UnimplementedPoolManagerServiceServer) WatchPoolStatus(*WatchPoolStatusRequest, grpc.ServerStreamingServer[PoolStatusNotification]) error {
+	return status.Errorf(codes.Unimplemented, "method WatchPoolStatus not implemented")
 }
 func (UnimplementedPoolManagerServiceServer) mustEmbedUnimplementedPoolManagerServiceServer() {}
 func (UnimplementedPoolManagerServiceServer) testEmbeddedByValue()                            {}
@@ -138,6 +163,17 @@ func _PoolManagerService_GetPool_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PoolManagerService_WatchPoolStatus_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchPoolStatusRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(PoolManagerServiceServer).WatchPoolStatus(m, &grpc.GenericServerStream[WatchPoolStatusRequest, PoolStatusNotification]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type PoolManagerService_WatchPoolStatusServer = grpc.ServerStreamingServer[PoolStatusNotification]
+
 // PoolManagerService_ServiceDesc is the grpc.ServiceDesc for PoolManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -154,6 +190,12 @@ var PoolManagerService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _PoolManagerService_GetPool_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchPoolStatus",
+			Handler:       _PoolManagerService_WatchPoolStatus_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "pools.proto",
 }

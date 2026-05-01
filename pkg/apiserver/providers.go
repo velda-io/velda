@@ -278,8 +278,8 @@ var ProvideNfsAuth = wire.NewSet(
 	wire.Bind(new(storage.StorageAuth), new(*storage.LocalNfsAuth)),
 )
 
-func ProvidePoolService(grpcServer *grpc.Server, mux *runtime.ServeMux, schedulers *broker.SchedulerSet) proto.PoolManagerServiceServer {
-	s := NewPoolManagerServiceServer(schedulers)
+func ProvidePoolService(ctx context.Context, grpcServer *grpc.Server, mux *runtime.ServeMux, schedulers *broker.SchedulerSet) proto.PoolManagerServiceServer {
+	s := NewPoolManagerServiceServer(ctx, schedulers)
 	proto.RegisterPoolManagerServiceServer(grpcServer, s)
 	proto.RegisterPoolManagerServiceHandlerServer(context.Background(), mux, s)
 	return s

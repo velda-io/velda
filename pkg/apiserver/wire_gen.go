@@ -10,10 +10,9 @@ import (
 	"github.com/spf13/pflag"
 	"velda.io/velda/pkg/broker"
 	"velda.io/velda/pkg/proto"
-)
 
-import (
 	_ "net/http/pprof"
+
 	_ "velda.io/velda/pkg/broker/backends/registry"
 )
 
@@ -76,7 +75,7 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, brokerAuth, apiserverDatabase, storageManager)
 	taskLogDb := ProvideTaskLogDb(config, storage)
 	taskServiceServer := ProvideTaskService(context, server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
-	poolManagerServiceServer := ProvidePoolService(server, runtimeServeMux, schedulerSet)
+	poolManagerServiceServer := ProvidePoolService(context, server, runtimeServeMux, schedulerSet)
 	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storage, permissions, brokerServiceServer)
 	taskLogServiceServer := ProvideTaskLogService(server, config)
 	registry := _wireRegistryValue

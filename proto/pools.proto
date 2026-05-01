@@ -17,6 +17,12 @@ message GetPoolRequest {
   reserved 33 to 64;
 }
 
+message WatchPoolStatusRequest {
+  string pool = 1;
+  int32 region_id = 2;
+  reserved 33 to 64;
+}
+
 message PoolAutoscalerStatus {
   string last_allocation_error = 1;
   google.protobuf.Timestamp last_allocation_error_time = 2;
@@ -24,6 +30,11 @@ message PoolAutoscalerStatus {
 
 message GetPoolResponse {
   Pool pool = 1;
+}
+
+message PoolStatusNotification {
+  string pool = 1;
+  PoolAutoscalerStatus autoscaler_status = 2;
 }
 
 message Pool {
@@ -46,6 +57,11 @@ service PoolManagerService {
   rpc GetPool(GetPoolRequest) returns (GetPoolResponse) {
     option (google.api.http) = {
       get : "/rest/velda/pool/{pool}"
+    };
+  };
+  rpc WatchPoolStatus(WatchPoolStatusRequest) returns (stream PoolStatusNotification) {
+    option (google.api.http) = {
+      get : "/rest/velda/pool/{pool}/watch"
     };
   };
 }
