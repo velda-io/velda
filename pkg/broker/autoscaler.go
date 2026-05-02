@@ -22,6 +22,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	proto "velda.io/velda/pkg/proto/config"
 )
 
@@ -110,7 +113,7 @@ type ResourcePoolBackend interface {
 type ResourcePoolEvent struct {
 	WorkerName string
 	EventType  ResourcePoolEventType
-	Detail     string
+	Err        error
 }
 
 type ResourcePoolEventType int
@@ -149,7 +152,7 @@ const defaultSyncInterval = 1 * time.Minute
 const defaultScaleUpErrorRetryDelay = 1 * time.Minute
 
 type PoolAllocationStatus struct {
-	LastAllocationError   string
+	LastAllocationError   error
 	LastAllocationErrorAt time.Time
 }
 
@@ -159,19 +162,20 @@ type workerDetail struct {
 }
 
 type AutoScaledPool struct {
-	name                 string
-	ctx                  context.Context
-	backend              ResourcePoolBackend
-	minIdle              int
-	maxIdle              int
-	minSize              int
-	idleDecay            time.Duration
-	syncLoopInterval     time.Duration
-	killUnknownAfter     time.Duration
-	maxSize              int
-	defaultSlotsPerAgent int
-	syncLoopTimer        *time.Ticker
-	syncNow              chan struct{}
+	name                     string
+	ctx                      context.Context
+	backend                  ResourcePoolBackend
+	onAllocationStatusChange func(pool string, status PoolAllocationStatus)
+	minIdle                  int
+	maxIdle                  int
+	minSize                  int
+	idleDecay                time.Duration
+	syncLoopInterval         time.Duration
+	killUnknownAfter         time.Duration
+	maxSize                  int
+	defaultSlotsPerAgent     int
+	syncLoopTimer            *time.Ticker
+	syncNow                  chan struct{}
 
 	currentSyncVersion atomic.Int32
 	batch              bool
@@ -206,7 +210,7 @@ type AutoScaledPool struct {
 	allocationErrorResetAfter time.Duration
 	nextScaleUpAllowedAt      time.Time
 	lastScaleUpAttemptAt      time.Time
-	lastAllocationError       string
+	lastAllocationError       error
 	lastAllocationErrorAt     time.Time
 	lastResourceExhaustedAt   time.Time
 	lastStartupFailureAt      time.Time
@@ -217,6 +221,7 @@ type AutoScaledPool struct {
 type AutoScaledPoolConfig struct {
 	Context                   context.Context
 	Backend                   ResourcePoolBackend
+	OnAllocationStatusChange  func(pool string, status PoolAllocationStatus)
 	MinIdle                   int
 	MaxIdle                   int
 	IdleDecay                 time.Duration
@@ -563,6 +568,9 @@ func (p *AutoScaledPool) UpdateConfig(config *AutoScaledPoolConfig) {
 	if p.scaleUpErrorRetryDelay <= 0 {
 		p.scaleUpErrorRetryDelay = defaultScaleUpErrorRetryDelay
 	}
+	if config.OnAllocationStatusChange != nil {
+		p.onAllocationStatusChange = config.OnAllocationStatusChange
+	}
 	p.allocationErrorResetAfter = config.AllocationErrorResetAfter
 	if p.allocationErrorResetAfter <= 0 {
 		p.allocationErrorResetAfter = 30*time.Second + p.scaleUpErrorRetryDelay
@@ -615,7 +623,7 @@ func (p *AutoScaledPool) maintainIdleWorkers() {
 		p.lastScaleUpAttemptAt = now
 		name, err := p.backend.RequestScaleUp(p.ctx)
 		if err != nil {
-			p.markAllocationErrorLocked(err.Error())
+			p.markAllocationErrorLocked(err)
 			p.logPrintf("Failed to scale up: %v", err)
 			break
 		}
@@ -835,7 +843,7 @@ func (p *AutoScaledPool) handleResourcePoolEvent(event ResourcePoolEvent) {
 	case ResourcePoolEventTypeStartupFailure:
 		p.lastStartupFailureAt = now
 	}
-	p.markAllocationErrorLocked(event.Detail)
+	p.markAllocationErrorLocked(event.Err)
 	if _, ok := p.workerStatus[event.WorkerName]; ok {
 		p.removeWorkerLocked(event.WorkerName)
 	} else if p.pendingUnknownWorkers > 0 {
@@ -849,24 +857,57 @@ func (p *AutoScaledPool) handleResourcePoolEvent(event ResourcePoolEvent) {
 
 }
 
-func (p *AutoScaledPool) markAllocationErrorLocked(detail string) {
-	if detail == "" {
-		detail = "allocation failed"
+func (p *AutoScaledPool) markAllocationErrorLocked(err error) {
+	if err == nil {
+		err = status.Error(codes.Internal, "allocation failed")
 	}
 	now := time.Now()
-	p.lastAllocationError = detail
+	p.lastAllocationError = err
 	p.lastAllocationErrorAt = now
 	p.nextScaleUpAllowedAt = now.Add(p.scaleUpErrorRetryDelay)
 	p.scheduleScaleUpRetryLocked()
+	if p.onAllocationStatusChange != nil {
+		status := PoolAllocationStatus{
+			LastAllocationError:   p.lastAllocationError,
+			LastAllocationErrorAt: p.lastAllocationErrorAt,
+		}
+		p.onAllocationStatusChange(p.name, status)
+	}
 }
 
 func (p *AutoScaledPool) clearAllocationErrorLocked() {
-	p.lastAllocationError = ""
+	p.lastAllocationError = nil
 	p.lastAllocationErrorAt = time.Time{}
 	p.nextScaleUpAllowedAt = time.Time{}
 	if p.scaleUpRetryTimer != nil {
 		p.scaleUpRetryTimer.Stop()
 	}
+}
+
+// NormalizePoolAllocationError ensures pool allocation errors have safe, stable gRPC status semantics.
+// Known status codes are preserved; unknown/non-status errors are internalized.
+func NormalizePoolAllocationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if st, ok := status.FromError(err); ok {
+		if code := st.Code(); code != codes.Unknown && code != codes.Internal {
+			return status.Error(code, st.Message())
+		}
+	}
+	return status.Error(codes.Internal, "Internal server error")
+}
+
+// PoolAllocationErrorToClientString converts an internal allocation error into a client-facing message.
+func PoolAllocationErrorToClientString(err error) string {
+	if err == nil {
+		return ""
+	}
+	st, ok := status.FromError(NormalizePoolAllocationError(err))
+	if !ok {
+		return "Internal server error"
+	}
+	return st.Message()
 }
 
 func (p *AutoScaledPool) maybeResetAllocationErrorLocked(now time.Time) {

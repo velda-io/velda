@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"velda.io/velda/pkg/broker"
@@ -180,141 +182,89 @@ func TestMakeAsync(t *testing.T) {
 	backend := newMockSyncBackend()
 	manager := MakeAsync(backend)
 
-	if manager == nil {
-		t.Fatal("MakeAsync returned nil")
-	}
-
-	// Verify it implements the interface
+	require.NotNil(t, manager)
 	var _ broker.ResourcePoolBackend = manager
 }
 
 func TestRequestScaleUp(t *testing.T) {
 	backend := newMockSyncBackend()
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
-	// Request scale up
 	name, err := manager.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp failed: %v", err)
-	}
+	require.NoError(t, err)
+	assert.NotEmpty(t, name)
+	assert.True(t, len(name) >= 7 && name[:6] == "worker", "expected name to start with 'worker', got: %s", name)
 
-	if name == "" {
-		t.Fatal("RequestScaleUp returned empty name")
-	}
-
-	// Name should start with prefix
-	if len(name) < 8 || name[:6] != "worker" {
-		t.Errorf("Expected name to start with 'worker', got: %s", name)
-	}
-
-	// Wait for creation to complete
 	time.Sleep(100 * time.Millisecond)
 
 	mgr := manager.(*asyncBackendManager)
 	mgr.mu.RLock()
-	if backend.createCallCount != 1 {
-		t.Errorf("Expected 1 create call, got %d", backend.createCallCount)
-	}
+	assert.Equal(t, 1, backend.createCallCount)
 	mgr.mu.RUnlock()
-
-	if backend.getWorkerCount() != 1 {
-		t.Errorf("Expected 1 worker, got %d", backend.getWorkerCount())
-	}
+	assert.Equal(t, 1, backend.getWorkerCount())
 }
 
 func TestRequestScaleUpMultiple(t *testing.T) {
 	backend := newMockSyncBackend()
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
-	// Request multiple scale ups
 	names := make([]string, 5)
 	for i := 0; i < 5; i++ {
 		name, err := manager.RequestScaleUp(ctx)
-		if err != nil {
-			t.Fatalf("RequestScaleUp %d failed: %v", i, err)
-		}
+		require.NoErrorf(t, err, "RequestScaleUp %d failed", i)
 		names[i] = name
 	}
 
-	// Wait for all creations to complete
 	time.Sleep(200 * time.Millisecond)
 
-	// Check all names are unique
 	nameSet := make(map[string]bool)
 	for _, name := range names {
-		if nameSet[name] {
-			t.Errorf("Duplicate name generated: %s", name)
-		}
+		assert.False(t, nameSet[name], "duplicate name generated: %s", name)
 		nameSet[name] = true
 	}
 
 	mgr := manager.(*asyncBackendManager)
 	mgr.mu.RLock()
-	if backend.createCallCount != 5 {
-		t.Errorf("Expected 5 create calls, got %d", backend.createCallCount)
-	}
+	assert.Equal(t, 5, backend.createCallCount)
 	mgr.mu.RUnlock()
-
-	if backend.getWorkerCount() != 5 {
-		t.Errorf("Expected 5 workers, got %d", backend.getWorkerCount())
-	}
+	assert.Equal(t, 5, backend.getWorkerCount())
 }
 
 func TestRequestScaleUpWithError(t *testing.T) {
 	backend := newMockSyncBackend()
 	backend.createErr = fmt.Errorf("create error")
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
 	name, err := manager.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp should not fail synchronously: %v", err)
-	}
+	require.NoError(t, err, "RequestScaleUp should not fail synchronously")
+	assert.NotEmpty(t, name)
 
-	// Name should still be returned even though creation will fail async
-	if name == "" {
-		t.Fatal("RequestScaleUp returned empty name")
-	}
-
-	// Wait for async operation
 	time.Sleep(100 * time.Millisecond)
 
-	// Worker should not be created due to error
-	if backend.getWorkerCount() != 0 {
-		t.Errorf("Expected 0 workers due to error, got %d", backend.getWorkerCount())
-	}
+	assert.Equal(t, 0, backend.getWorkerCount())
 }
 
 func TestRequestScaleUpWithErrorEmitsEvent(t *testing.T) {
 	backend := newMockSyncBackend()
 	backend.createErr = status.Error(codes.ResourceExhausted, "resource exhausted")
 	mgr := MakeAsync(backend).(*asyncBackendManager)
-
 	ctx := context.Background()
+
 	name, err := mgr.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp should not fail synchronously: %v", err)
-	}
-	if name == "" {
-		t.Fatal("RequestScaleUp returned empty name")
-	}
+	require.NoError(t, err, "RequestScaleUp should not fail synchronously")
+	require.NotEmpty(t, name)
 
 	select {
 	case event := <-mgr.Events():
-		if event.WorkerName != name {
-			t.Fatalf("expected event worker %s, got %s", name, event.WorkerName)
-		}
-		if event.EventType != broker.ResourcePoolEventTypeResourceExhausted {
-			t.Fatalf("expected resource exhausted event type, got %v", event.EventType)
-		}
-		if event.Detail == "" {
-			t.Fatal("expected non-empty event detail")
-		}
+		assert.Equal(t, name, event.WorkerName)
+		assert.Equal(t, broker.ResourcePoolEventTypeResourceExhausted, event.EventType)
+		require.NotNil(t, event.Err)
+		st, ok := status.FromError(event.Err)
+		require.True(t, ok, "expected grpc status error, got %T", event.Err)
+		assert.Equal(t, codes.ResourceExhausted, st.Code())
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for creation error event")
 	}
@@ -330,24 +280,14 @@ func TestResumeWorkerErrorEmitsEvent(t *testing.T) {
 	mgr.suspendedWorkers["worker-suspended"] = WorkerInfo{State: WorkerStateSuspended, Data: "id"}
 
 	name, err := mgr.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp failed: %v", err)
-	}
-	if name != "worker-suspended" {
-		t.Fatalf("expected worker-suspended, got %s", name)
-	}
+	require.NoError(t, err, "RequestScaleUp should not fail synchronously")
+	assert.Equal(t, "worker-suspended", name)
 
 	select {
 	case event := <-mgr.Events():
-		if event.WorkerName != "worker-suspended" {
-			t.Fatalf("expected event worker worker-suspended, got %s", event.WorkerName)
-		}
-		if event.EventType != broker.ResourcePoolEventTypeStartupFailure {
-			t.Fatalf("expected startup failure event type, got %v", event.EventType)
-		}
-		if event.Detail == "" {
-			t.Fatal("expected non-empty event detail")
-		}
+		assert.Equal(t, "worker-suspended", event.WorkerName)
+		assert.Equal(t, broker.ResourcePoolEventTypeStartupFailure, event.EventType)
+		assert.ErrorIs(t, event.Err, backend.resumeErr)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for resume error event")
 	}
@@ -357,71 +297,43 @@ func TestRequestDelete(t *testing.T) {
 	backend := newMockSyncBackend()
 	backend.workers["worker-test1"] = WorkerInfo{State: WorkerStateActive, Data: "worker-test1-id"}
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
-	// Call ListWorkers to populate activeWorkers cache
 	_, _ = manager.ListWorkers(ctx)
 
 	err := manager.RequestDelete(ctx, "worker-test1")
-	if err != nil {
-		t.Fatalf("RequestDelete failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// Wait for deletion to complete
 	time.Sleep(100 * time.Millisecond)
 
 	mgr := manager.(*asyncBackendManager)
 	mgr.mu.RLock()
-	if backend.deleteCallCount != 1 {
-		t.Errorf("Expected 1 delete call, got %d", backend.deleteCallCount)
-	}
+	assert.Equal(t, 1, backend.deleteCallCount)
 	mgr.mu.RUnlock()
-
-	if backend.getWorkerCount() != 0 {
-		t.Errorf("Expected 0 workers after delete, got %d", backend.getWorkerCount())
-	}
+	assert.Equal(t, 0, backend.getWorkerCount())
 }
 
 func TestRequestDeleteWaitsForCreation(t *testing.T) {
 	backend := newMockSyncBackend()
 	backend.createDelay = 200 * time.Millisecond
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
-	// Start creation
 	name, err := manager.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// Immediately request deletion
 	time.Sleep(10 * time.Millisecond)
 	err = manager.RequestDelete(ctx, name)
-	if err != nil {
-		t.Fatalf("RequestDelete failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// Wait for both operations to complete
 	time.Sleep(400 * time.Millisecond)
 
-	// Creation should complete before deletion
 	mgr := manager.(*asyncBackendManager)
 	mgr.mu.RLock()
-	if backend.createCallCount != 1 {
-		t.Errorf("Expected 1 create call, got %d", backend.createCallCount)
-	}
-
-	if backend.deleteCallCount != 1 {
-		t.Errorf("Expected 1 delete call, got %d", backend.deleteCallCount)
-	}
+	assert.Equal(t, 1, backend.createCallCount)
+	assert.Equal(t, 1, backend.deleteCallCount)
 	mgr.mu.RUnlock()
-
-	// Final state should have no workers
-	if backend.getWorkerCount() != 0 {
-		t.Errorf("Expected 0 workers, got %d", backend.getWorkerCount())
-	}
+	assert.Equal(t, 0, backend.getWorkerCount())
 }
 
 func TestListWorkers(t *testing.T) {
@@ -429,50 +341,32 @@ func TestListWorkers(t *testing.T) {
 	backend.workers["worker-1"] = WorkerInfo{State: WorkerStateActive, Data: "id-1"}
 	backend.workers["worker-2"] = WorkerInfo{State: WorkerStateActive, Data: "id-2"}
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
 	workers, err := manager.ListWorkers(ctx)
-	if err != nil {
-		t.Fatalf("ListWorkers failed: %v", err)
-	}
+	require.NoError(t, err)
+	require.Len(t, workers, 2)
 
-	if len(workers) != 2 {
-		t.Errorf("Expected 2 workers, got %d", len(workers))
-	}
-
-	// Check worker names
 	names := make(map[string]bool)
 	for _, w := range workers {
 		names[w.Name] = true
 	}
-
-	if !names["worker-1"] || !names["worker-2"] {
-		t.Errorf("Missing expected workers. Got: %v", names)
-	}
+	assert.True(t, names["worker-1"] && names["worker-2"], "missing expected workers, got: %v", names)
 }
 
 func TestListWorkersIncludesCreating(t *testing.T) {
 	backend := newMockSyncBackend()
 	backend.createDelay = 200 * time.Millisecond
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
-	// Start creation (will be slow)
 	name, err := manager.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// List workers while creation is in progress
 	time.Sleep(50 * time.Millisecond)
 	workers, err := manager.ListWorkers(ctx)
-	if err != nil {
-		t.Fatalf("ListWorkers failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// Should include the creating worker
 	found := false
 	for _, w := range workers {
 		if w.Name == name {
@@ -480,10 +374,7 @@ func TestListWorkersIncludesCreating(t *testing.T) {
 			break
 		}
 	}
-
-	if !found {
-		t.Errorf("Creating worker %s not found in list", name)
-	}
+	assert.True(t, found, "creating worker %s not found in list", name)
 }
 
 func TestListWorkersExcludesTerminating(t *testing.T) {
@@ -491,30 +382,19 @@ func TestListWorkersExcludesTerminating(t *testing.T) {
 	backend.workers["worker-1"] = WorkerInfo{State: WorkerStateActive, Data: "id-1"}
 	backend.deleteDelay = 200 * time.Millisecond
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
-	// Call ListWorkers first to populate activeWorkers cache
 	_, _ = manager.ListWorkers(ctx)
 
-	// Start deletion (will be slow)
 	err := manager.RequestDelete(ctx, "worker-1")
-	if err != nil {
-		t.Fatalf("RequestDelete failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// List workers while deletion is in progress
 	time.Sleep(50 * time.Millisecond)
 	workers, err := manager.ListWorkers(ctx)
-	if err != nil {
-		t.Fatalf("ListWorkers failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// Should not include the terminating worker
 	for _, w := range workers {
-		if w.Name == "worker-1" {
-			t.Errorf("Terminating worker should not be in list")
-		}
+		assert.NotEqual(t, "worker-1", w.Name, "terminating worker should not be in list")
 	}
 }
 
@@ -522,131 +402,82 @@ func TestListWorkersWithError(t *testing.T) {
 	backend := newMockSyncBackend()
 	backend.listErr = fmt.Errorf("list error")
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
 	_, err := manager.ListWorkers(ctx)
-	if err == nil {
-		t.Fatal("Expected error from ListWorkers")
-	}
-
-	if err.Error() != "list error" {
-		t.Errorf("Expected 'list error', got: %v", err)
-	}
+	require.Error(t, err)
+	assert.EqualError(t, err, "list error")
 }
 
 func TestWaitForLastOperation(t *testing.T) {
 	backend := newMockSyncBackend()
 	backend.createDelay = 100 * time.Millisecond
 	mgr := MakeAsync(backend).(*asyncBackendManager)
-
 	ctx := context.Background()
 
-	// Start an operation
 	_, err := mgr.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	start := time.Now()
-
-	// Wait for it to complete
 	err = mgr.WaitForLastOperation(ctx)
-	if err != nil {
-		t.Fatalf("WaitForLastOperation failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	elapsed := time.Since(start)
-
-	// Should have waited at least the create delay
-	if elapsed < 100*time.Millisecond {
-		t.Errorf("WaitForLastOperation returned too quickly: %v", elapsed)
-	}
-
-	if backend.createCallCount != 1 {
-		t.Errorf("Expected 1 create call, got %d", backend.createCallCount)
-	}
+	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond, "WaitForLastOperation returned too quickly: %v", elapsed)
+	assert.Equal(t, 1, backend.createCallCount)
 }
 
 func TestWaitForLastOperationNoOp(t *testing.T) {
 	backend := newMockSyncBackend()
 	mgr := MakeAsync(backend).(*asyncBackendManager)
-
 	ctx := context.Background()
 
-	// Wait without any operations - should return immediately
 	start := time.Now()
 	err := mgr.WaitForLastOperation(ctx)
-	if err != nil {
-		t.Fatalf("WaitForLastOperation failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	elapsed := time.Since(start)
-	if elapsed > 10*time.Millisecond {
-		t.Errorf("WaitForLastOperation took too long with no ops: %v", elapsed)
-	}
+	assert.Less(t, elapsed, 10*time.Millisecond, "WaitForLastOperation took too long with no ops: %v", elapsed)
 }
 
 func TestConcurrentOperations(t *testing.T) {
 	backend := newMockSyncBackend()
 	manager := MakeAsync(backend)
-
 	ctx := context.Background()
 
-	// Start multiple operations concurrently
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			_, err := manager.RequestScaleUp(ctx)
-			if err != nil {
-				t.Errorf("RequestScaleUp failed: %v", err)
-			}
+			assert.NoError(t, err)
 		}()
 	}
-
 	wg.Wait()
 
-	// Wait for all operations to complete
 	time.Sleep(200 * time.Millisecond)
 
 	mgr := manager.(*asyncBackendManager)
 	mgr.mu.RLock()
-	if backend.createCallCount != 10 {
-		t.Errorf("Expected 10 create calls, got %d", backend.createCallCount)
-	}
+	assert.Equal(t, 10, backend.createCallCount)
 	mgr.mu.RUnlock()
 
 	workers, err := manager.ListWorkers(ctx)
-	if err != nil {
-		t.Fatalf("ListWorkers failed: %v", err)
-	}
-
-	if len(workers) != 10 {
-		t.Errorf("Expected 10 workers, got %d", len(workers))
-	}
+	require.NoError(t, err)
+	assert.Len(t, workers, 10)
 }
 
 func TestMakeAsyncResumable(t *testing.T) {
 	backend := newMockSyncBackend()
 	manager := MakeAsyncResumable(backend, 3)
 
-	if manager == nil {
-		t.Fatal("MakeAsyncResumable returned nil")
-	}
-
-	// Verify it implements the interface
+	require.NotNil(t, manager)
 	var _ broker.ResourcePoolBackend = manager
 
-	// Verify maxSuspended is set
 	mgr := manager.(*asyncBackendManager)
-	if mgr.maxSuspended != 3 {
-		t.Errorf("Expected maxSuspended=3, got %d", mgr.maxSuspended)
-	}
-	if mgr.resumable == nil {
-		t.Error("Expected resumable to be set")
-	}
+	assert.Equal(t, 3, mgr.maxSuspended)
+	assert.NotNil(t, mgr.resumable)
 }
 
 func TestSuspendWorker(t *testing.T) {
@@ -654,42 +485,22 @@ func TestSuspendWorker(t *testing.T) {
 	manager := MakeAsyncResumable(backend, 3)
 	ctx := context.Background()
 
-	// Create a worker
 	name, err := manager.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// Wait for creation
 	time.Sleep(50 * time.Millisecond)
 
-	// Request delete - should suspend instead
 	err = manager.RequestDelete(ctx, name)
-	if err != nil {
-		t.Fatalf("RequestDelete failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// Wait for suspend
 	time.Sleep(50 * time.Millisecond)
 
 	mgr := manager.(*asyncBackendManager)
 	mgr.mu.RLock()
-	if backend.deleteCallCount != 0 {
-		t.Errorf("Expected 0 delete calls, got %d", backend.deleteCallCount)
-	}
-	if backend.suspendCallCount != 1 {
-		t.Errorf("Expected 1 suspend call, got %d", backend.suspendCallCount)
-	}
-	mgr.mu.RUnlock()
-
-	// Check suspended workers
-	mgr.mu.RLock()
-	if len(mgr.suspendedWorkers) != 1 {
-		t.Errorf("Expected 1 suspended worker, got %d", len(mgr.suspendedWorkers))
-	}
-	if len(mgr.activeWorkers) != 0 {
-		t.Errorf("Expected 0 active workers, got %d", len(mgr.activeWorkers))
-	}
+	assert.Equal(t, 0, backend.deleteCallCount)
+	assert.Equal(t, 1, backend.suspendCallCount)
+	assert.Len(t, mgr.suspendedWorkers, 1)
+	assert.Empty(t, mgr.activeWorkers)
 	mgr.mu.RUnlock()
 }
 
@@ -698,76 +509,50 @@ func TestResumeWorker(t *testing.T) {
 	manager := MakeAsyncResumable(backend, 3)
 	ctx := context.Background()
 
-	// Create and suspend a worker
-	name1, _ := manager.RequestScaleUp(ctx)
+	name1, err := manager.RequestScaleUp(ctx)
+	require.NoError(t, err)
 	time.Sleep(50 * time.Millisecond)
-	manager.RequestDelete(ctx, name1)
+	require.NoError(t, manager.RequestDelete(ctx, name1))
 	time.Sleep(50 * time.Millisecond)
 
-	// Now request scale up - should resume the suspended worker
 	name2, err := manager.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp failed: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, name1, name2, "expected to resume existing worker")
 
-	// Should resume existing worker
-	if name2 != name1 {
-		t.Errorf("Expected to resume worker %s, got %s", name1, name2)
-	}
-
-	// Wait for resume
 	time.Sleep(50 * time.Millisecond)
 
 	mgr := manager.(*asyncBackendManager)
 	mgr.mu.RLock()
-	if backend.createCallCount != 1 {
-		t.Errorf("Expected 1 create call, got %d", backend.createCallCount)
-	}
-	if backend.resumeCallCount != 1 {
-		t.Errorf("Expected 1 resume call, got %d", backend.resumeCallCount)
-	}
-
-	// Check workers state
-	if len(mgr.suspendedWorkers) != 0 {
-		t.Errorf("Expected 0 suspended workers, got %d", len(mgr.suspendedWorkers))
-	}
-	if len(mgr.activeWorkers) != 1 {
-		t.Errorf("Expected 1 active worker, got %d", len(mgr.activeWorkers))
-	}
+	assert.Equal(t, 1, backend.createCallCount)
+	assert.Equal(t, 1, backend.resumeCallCount)
+	assert.Empty(t, mgr.suspendedWorkers)
+	assert.Len(t, mgr.activeWorkers, 1)
 	mgr.mu.RUnlock()
 }
 
 func TestSuspendMaxLimit(t *testing.T) {
 	backend := newMockSyncBackend()
-	manager := MakeAsyncResumable(backend, 2) // Max 2 suspended
+	manager := MakeAsyncResumable(backend, 2)
 	ctx := context.Background()
 
-	// Create 3 workers
 	var names []string
 	for i := 0; i < 3; i++ {
-		name, _ := manager.RequestScaleUp(ctx)
+		name, err := manager.RequestScaleUp(ctx)
+		require.NoError(t, err)
 		names = append(names, name)
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	// Delete all 3 - first 2 should suspend, 3rd should delete
 	for _, name := range names {
-		manager.RequestDelete(ctx, name)
+		require.NoError(t, manager.RequestDelete(ctx, name))
 	}
 	time.Sleep(100 * time.Millisecond)
 
 	mgr := manager.(*asyncBackendManager)
 	mgr.mu.RLock()
-	if backend.suspendCallCount != 2 {
-		t.Errorf("Expected 2 suspend calls, got %d", backend.suspendCallCount)
-	}
-	if backend.deleteCallCount != 1 {
-		t.Errorf("Expected 1 delete call, got %d", backend.deleteCallCount)
-	}
-
-	if len(mgr.suspendedWorkers) != 2 {
-		t.Errorf("Expected 2 suspended workers, got %d", len(mgr.suspendedWorkers))
-	}
+	assert.Equal(t, 2, backend.suspendCallCount)
+	assert.Equal(t, 1, backend.deleteCallCount)
+	assert.Len(t, mgr.suspendedWorkers, 2)
 	mgr.mu.RUnlock()
 }
 
@@ -776,20 +561,12 @@ func TestListWorkersExcludesSuspended(t *testing.T) {
 	backend.workers["worker-1"] = WorkerInfo{State: WorkerStateActive, Data: "id-1"}
 	backend.suspendedWks["worker-2"] = WorkerInfo{State: WorkerStateSuspended, Data: "id-2"}
 	manager := MakeAsyncResumable(backend, 5)
-
 	ctx := context.Background()
-	workers, err := manager.ListWorkers(ctx)
-	if err != nil {
-		t.Fatalf("ListWorkers failed: %v", err)
-	}
 
-	// Should only include active workers
-	if len(workers) != 1 {
-		t.Errorf("Expected 1 worker, got %d", len(workers))
-	}
-	if len(workers) > 0 && workers[0].Name != "worker-1" {
-		t.Errorf("Expected worker-1, got %s", workers[0].Name)
-	}
+	workers, err := manager.ListWorkers(ctx)
+	require.NoError(t, err)
+	require.Len(t, workers, 1)
+	assert.Equal(t, "worker-1", workers[0].Name)
 }
 
 func TestSilentRemoveSuspendedWorkerStartsNewAfterSync(t *testing.T) {
@@ -797,42 +574,25 @@ func TestSilentRemoveSuspendedWorkerStartsNewAfterSync(t *testing.T) {
 	mgr := MakeAsyncResumable(backend, 3).(*asyncBackendManager)
 	ctx := context.Background()
 
-	// Put a suspended worker in both backend and manager caches
 	backend.suspendedWks["worker-silent"] = WorkerInfo{State: WorkerStateSuspended, Data: "id-silent"}
 	mgr.suspendedWorkers["worker-silent"] = WorkerInfo{State: WorkerStateSuspended, Data: "id-silent"}
 
-	// Backend silently removes the suspended worker (e.g., external deletion)
 	delete(backend.suspendedWks, "worker-silent")
 
-	// Sync caches via ListWorkers
 	_, err := mgr.ListWorkers(ctx)
-	if err != nil {
-		t.Fatalf("ListWorkers failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	// After sync, manager should no longer have the suspended worker cached
 	mgr.mu.RLock()
-	if _, ok := mgr.suspendedWorkers["worker-silent"]; ok {
-		t.Errorf("Expected suspended worker to be removed from manager cache after sync")
-	}
+	_, stillCached := mgr.suspendedWorkers["worker-silent"]
 	mgr.mu.RUnlock()
+	assert.False(t, stillCached, "expected suspended worker to be removed from manager cache after sync")
 
-	// Request scale up: since suspended was removed, manager should create a new worker (not resume)
 	name, err := mgr.RequestScaleUp(ctx)
-	if err != nil {
-		t.Fatalf("RequestScaleUp failed: %v", err)
-	}
-	if name == "worker-silent" {
-		t.Fatalf("Expected a new worker name, got resumed name %s", name)
-	}
+	require.NoError(t, err)
+	assert.NotEqual(t, "worker-silent", name, "expected a new worker name, got resumed name %s", name)
 
-	// Wait for creation to complete
 	time.Sleep(100 * time.Millisecond)
 
-	if backend.createCallCount != 1 {
-		t.Errorf("Expected create call when suspended worker missing, got %d", backend.createCallCount)
-	}
-	if backend.resumeCallCount != 0 {
-		t.Errorf("Did not expect resume call, got %d", backend.resumeCallCount)
-	}
+	assert.Equal(t, 1, backend.createCallCount)
+	assert.Equal(t, 0, backend.resumeCallCount)
 }

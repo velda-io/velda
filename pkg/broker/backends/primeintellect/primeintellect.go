@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	pb "google.golang.org/protobuf/proto"
 
 	"velda.io/velda/pkg/broker"
@@ -324,7 +326,7 @@ func (p *primeIntellectPoolBackend) searchCheapestOffer(ctx context.Context) (*p
 		return nil, fmt.Errorf("failed to decode availability response: %w", err)
 	}
 	if len(availResp.Items) == 0 {
-		return nil, fmt.Errorf("no PrimeIntellect offers matched search criteria")
+		return nil, status.Error(codes.ResourceExhausted, "No available offers")
 	}
 
 	minVcpus := int(p.cfg.GetMinVcpus())

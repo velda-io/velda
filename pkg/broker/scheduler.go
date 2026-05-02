@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/emirpasic/gods/sets/treeset"
+	"github.com/simonfxr/pubsub"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -32,6 +33,7 @@ type SchedulerSet struct {
 	mu                 sync.Mutex
 	agents             map[string]*Scheduler
 	ctx                context.Context
+	poolStatusBus      *pubsub.Bus
 }
 
 func NewSchedulerSet(ctx context.Context) *SchedulerSet {
@@ -39,6 +41,7 @@ func NewSchedulerSet(ctx context.Context) *SchedulerSet {
 		agents:             make(map[string]*Scheduler),
 		ctx:                ctx,
 		AllowCreateNewPool: true,
+		poolStatusBus:      pubsub.NewBus(),
 	}
 }
 
@@ -60,6 +63,9 @@ func (s *SchedulerSet) getOrCreatePool(pool string, createAllowed bool) (*Schedu
 			if !strings.Contains(pool, ":") {
 				p.SetPoolManager(NewAutoScaledPool(pool, AutoScaledPoolConfig{
 					Context: s.ctx,
+					OnAllocationStatusChange: func(poolName string, status PoolAllocationStatus) {
+						s.PublishPoolAllocationStatus(poolName, status)
+					},
 				}))
 			}
 			s.agents[pool] = p
@@ -105,6 +111,27 @@ func (s *SchedulerSet) GetPoolAllocationStatus(pool string) (PoolAllocationStatu
 		return PoolAllocationStatus{}, nil
 	}
 	return p.PoolManager.GetAllocationStatus(), nil
+}
+
+func (s *SchedulerSet) SubscribePoolAllocationStatus(pool string, statusChan chan PoolAllocationStatus) *pubsub.Subscription {
+	topic := fmt.Sprintf("pool:%s", pool)
+	return s.poolStatusBus.SubscribeChan(topic, statusChan, pubsub.CloseOnUnsubscribe)
+}
+
+func (s *SchedulerSet) UnsubscribePoolAllocationStatus(sub *pubsub.Subscription) {
+	if sub == nil {
+		return
+	}
+	s.poolStatusBus.Unsubscribe(sub)
+}
+
+func (s *SchedulerSet) PublishPoolAllocationStatus(pool string, status PoolAllocationStatus) {
+	topic := fmt.Sprintf("pool:%s", pool)
+	s.poolStatusBus.Publish(topic, status)
+}
+
+func (s *SchedulerSet) Context() context.Context {
+	return s.ctx
 }
 
 type Scheduler struct {

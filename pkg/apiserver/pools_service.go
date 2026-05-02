@@ -27,11 +27,12 @@ import (
 
 type PoolManagerServiceServer struct {
 	proto.UnimplementedPoolManagerServiceServer
-	s *broker.SchedulerSet
+	s   *broker.SchedulerSet
+	ctx context.Context
 }
 
-func NewPoolManagerServiceServer(s *broker.SchedulerSet) *PoolManagerServiceServer {
-	return &PoolManagerServiceServer{s: s}
+func NewPoolManagerServiceServer(ctx context.Context, s *broker.SchedulerSet) *PoolManagerServiceServer {
+	return &PoolManagerServiceServer{s: s, ctx: ctx}
 }
 
 func (s *PoolManagerServiceServer) ListPools(ctx context.Context, in *proto.ListPoolsRequest) (*proto.ListPoolsResponse, error) {
@@ -72,12 +73,62 @@ func (s *PoolManagerServiceServer) GetPool(ctx context.Context, in *proto.GetPoo
 	return &proto.GetPoolResponse{Pool: poolProto}, nil
 }
 
+func (s *PoolManagerServiceServer) WatchPoolStatus(in *proto.WatchPoolStatusRequest, stream proto.PoolManagerService_WatchPoolStatusServer) error {
+	if in.GetPool() == "" {
+		return status.Error(codes.InvalidArgument, "pool name is required")
+	}
+	pool := in.GetPool()
+
+	statusChan := make(chan broker.PoolAllocationStatus, 1)
+	sub := s.s.SubscribePoolAllocationStatus(pool, statusChan)
+	defer s.s.UnsubscribePoolAllocationStatus(sub)
+
+	status, err := s.s.GetPoolAllocationStatus(pool)
+	if err != nil {
+		return err
+	}
+	if !status.LastAllocationErrorAt.IsZero() {
+		if err := stream.Send(toProtoPoolStatusNotification(pool, status)); err != nil {
+			return err
+		}
+	}
+
+	var last string
+	for {
+		select {
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		case status := <-statusChan:
+			if status.LastAllocationErrorAt.IsZero() {
+				last = ""
+				continue
+			}
+			if status.LastAllocationError.Error() == last {
+				continue
+			}
+			if err := stream.Send(toProtoPoolStatusNotification(pool, status)); err != nil {
+				return err
+			}
+			last = status.LastAllocationError.Error()
+		}
+	}
+}
+
 func toProtoPoolAutoscalerStatus(status broker.PoolAllocationStatus) *proto.PoolAutoscalerStatus {
 	if status.LastAllocationErrorAt.IsZero() {
 		return &proto.PoolAutoscalerStatus{}
 	}
 	return &proto.PoolAutoscalerStatus{
-		LastAllocationError:     status.LastAllocationError,
+		LastAllocationError:     broker.PoolAllocationErrorToClientString(status.LastAllocationError),
 		LastAllocationErrorTime: timestamppb.New(status.LastAllocationErrorAt),
+	}
+}
+
+func toProtoPoolStatusNotification(pool string, status broker.PoolAllocationStatus) *proto.PoolStatusNotification {
+	return &proto.PoolStatusNotification{
+		Pool:             pool,
+		AutoscalerStatus: toProtoPoolAutoscalerStatus(status),
 	}
 }

@@ -389,13 +389,14 @@ func (m *asyncBackendManager) WaitForLastOperation(ctx context.Context) error {
 }
 
 func (m *asyncBackendManager) emitCreationErrorEvent(workerName string, err error) {
+	eventType := broker.ResourcePoolEventTypeStartupFailure
+	if isResourceExhaustedError(err) {
+		eventType = broker.ResourcePoolEventTypeResourceExhausted
+	}
 	event := broker.ResourcePoolEvent{
 		WorkerName: workerName,
-		EventType:  broker.ResourcePoolEventTypeStartupFailure,
-		Detail:     err.Error(),
-	}
-	if isResourceExhaustedError(err) {
-		event.EventType = broker.ResourcePoolEventTypeResourceExhausted
+		EventType:  eventType,
+		Err:        err,
 	}
 	select {
 	case m.events <- event:

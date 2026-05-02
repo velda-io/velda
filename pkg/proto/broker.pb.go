@@ -1275,7 +1275,7 @@ type ExecutionStatus struct {
 	Status        ExecutionStatus_Status         `protobuf:"varint,3,opt,name=status,proto3,enum=velda.ExecutionStatus_Status" json:"status,omitempty"`
 	TaskId        string                         `protobuf:"bytes,4,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	SshConnection *ExecutionStatus_SshConnection `protobuf:"bytes,5,opt,name=ssh_connection,json=sshConnection,proto3" json:"ssh_connection,omitempty"`
-	// Set once the task starts running on an agent.
+	// The time when the session/execution starts running on an agent.
 	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

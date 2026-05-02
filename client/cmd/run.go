@@ -32,6 +32,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"google.golang.org/grpc/codes"
@@ -39,6 +40,7 @@ import (
 
 	"velda.io/velda/pkg/clientlib"
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/utils"
 )
 
 // runCmd represents the run command
@@ -165,6 +167,7 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	sessionReq.Priority = priority
 
 	batch, _ := cmd.Flags().GetBool("batch")
+	followFlag, _ := cmd.Flags().GetBool("follow")
 	// Handle writable-dirs and snapshot for both batch and non-batch modes
 	writableDirs, _ := cmd.Flags().GetStringSlice("writable-dir")
 	snapshotName, _ := cmd.Flags().GetString("snapshot")
@@ -206,6 +209,13 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		}
 	}
 	quiet, _ := cmd.Flags().GetBool("quiet")
+	watchPoolStatus := !batch || followFlag
+	if watchPoolStatus && sessionReq.Pool != "" {
+		watchCtx, watchCancel := context.WithCancel(cmd.Context())
+		defer watchCancel()
+		watchRegion := utils.ExtractRegionId(instanceId)
+		go streamPoolStatusNotifications(watchCtx, conn, sessionReq.Pool, watchRegion, cmd)
+	}
 
 	if !quiet && !batch {
 		cmd.PrintErrf("Requesting compute node from pool %s\n", sessionReq.Pool)
@@ -249,7 +259,6 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		taskId := resp.GetTaskId()
 		fmt.Printf("%s\n", taskId)
 
-		followFlag, _ := cmd.Flags().GetBool("follow")
 		if followFlag {
 			if err := followTask(taskId); err != nil {
 				return err
@@ -382,6 +391,53 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		}
 	}
 	return nil
+}
+
+func streamPoolStatusNotifications(ctx context.Context, conn grpc.ClientConnInterface, pool string, region int, cmd *cobra.Command) {
+	client := proto.NewPoolManagerServiceClient(conn)
+	stream, err := client.WatchPoolStatus(ctx, &proto.WatchPoolStatusRequest{Pool: pool, RegionId: int32(region)})
+	if err != nil {
+		DebugLog("Failed to watch pool status for %s: %v", pool, err)
+		return
+	}
+
+	lastEventKey := ""
+	for {
+		notification, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF || ctx.Err() != nil {
+				return
+			}
+			DebugLog("Pool status stream ended for %s: %v", pool, err)
+			return
+		}
+
+		status := notification.GetAutoscalerStatus()
+		if status == nil || status.GetLastAllocationError() == "" {
+			continue
+		}
+		timestamp := status.GetLastAllocationErrorTime()
+		eventTs := int64(0)
+		if timestamp != nil {
+			eventTs = timestamp.AsTime().UnixNano()
+		}
+		eventKey := fmt.Sprintf("%s|%d", status.GetLastAllocationError(), eventTs)
+		if eventKey == lastEventKey {
+			continue
+		}
+		lastEventKey = eventKey
+
+		notificationPool := notification.GetPool()
+		if notificationPool == "" {
+			notificationPool = pool
+		}
+		if timestamp == nil || timestamp.AsTime().IsZero() {
+			cmd.PrintErrf("Pool %s had error to allocate node: %s\n", notificationPool, status.GetLastAllocationError())
+			continue
+		}
+		errTime := timestamp.AsTime()
+		cmd.PrintErrf("Pool %s had error to allocate node at %s: %s\n", notificationPool, errTime.Format(time.RFC3339), status.GetLastAllocationError())
+	}
 }
 
 func getWorkload(cmd *cobra.Command, args []string) (*proto.Workload, error) {
