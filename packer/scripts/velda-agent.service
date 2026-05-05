@@ -13,7 +13,7 @@ Restart=always
 RestartSec=5
 Environment="PATH=/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
 Environment="HOME=/root"
-StandardError=journal
+StandardError=journal+console
 OOMPolicy=continue
 LimitNOFILE=524288:524288
 CPUWeight=10000

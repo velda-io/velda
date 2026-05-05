@@ -130,10 +130,6 @@ func (s *SchedulerSet) PublishPoolAllocationStatus(pool string, status PoolAlloc
 	s.poolStatusBus.Publish(topic, status)
 }
 
-func (s *SchedulerSet) Context() context.Context {
-	return s.ctx
-}
-
 type Scheduler struct {
 	PoolManager *AutoScaledPool
 	agents      map[string]*Agent
