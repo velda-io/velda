@@ -204,7 +204,7 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		Type:           diskTypeFromProto(n.cfg.GetBootDiskType()),
 		Source: &compute.DiskSpec_SourceImageFamily{
 			SourceImageFamily: &compute.SourceImageFamily{
-				ImageFamily: "ubuntu24.04-cuda12",
+				ImageFamily: "ubuntu24.04-cuda13.0",
 			},
 		},
 	}
