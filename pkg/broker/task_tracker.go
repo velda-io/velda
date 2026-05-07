@@ -350,7 +350,7 @@ func (t *TaskTracker) CancelJob(ctx context.Context, jobId string) error {
 		return nil
 	}
 	for _, session := range sessions {
-		err := session.Kill(ctx, false)
+		err := session.Kill(ctx, true)
 		if err != nil {
 			// TODO: Handle this?
 			log.Printf("Failed to kill session %s: %v", session.Request.SessionId, err)
