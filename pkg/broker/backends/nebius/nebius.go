@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -24,9 +25,11 @@ import (
 	"github.com/nebius/gosdk"
 	"github.com/nebius/gosdk/auth"
 	"github.com/nebius/gosdk/config/reader"
+	"github.com/nebius/gosdk/operations"
 	common "github.com/nebius/gosdk/proto/nebius/common/v1"
 	compute "github.com/nebius/gosdk/proto/nebius/compute/v1"
 	computeservice "github.com/nebius/gosdk/services/nebius/compute/v1"
+	"google.golang.org/grpc/status"
 	pb "google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 
@@ -122,6 +125,14 @@ func (n *nebiusPoolBackend) CreateWorker(ctx context.Context, name string) (back
 		return backends.WorkerInfo{}, err
 	}
 	return backends.WorkerInfo{State: backends.WorkerStateActive, Data: instanceID}, nil
+}
+
+func toStatus(err error) error {
+	nebiusError := &operations.Error{}
+	if errors.As(err, &nebiusError) {
+		return status.Error(nebiusError.Code, err.Error())
+	}
+	return err
 }
 
 func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (string, error) {
@@ -294,12 +305,32 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		Spec: instanceSpec,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to create Nebius instance: %w", err)
+		log.Printf("Failed to create Nebius instance %s: %v", name, err)
+		operation, diskErr := n.diskService.Delete(ctx, &compute.DeleteDiskRequest{Id: diskId})
+		if diskErr != nil {
+			log.Printf("Failed to delete boot disk %s after instance creation failure: %v", diskId, diskErr)
+		} else {
+			_, diskErr = operation.Wait(ctx)
+			if diskErr != nil {
+				log.Printf("Failed to wait for boot disk deletion %s after instance creation failure: %v", diskId, diskErr)
+			}
+		}
+		return "", fmt.Errorf("failed to create Nebius instance: %w", toStatus(err))
 	}
 
 	operation, err = operation.Wait(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to wait for Nebius instance creation: %w", err)
+		log.Printf("Failed to create Nebius instance %s: %v", name, err)
+		operation, diskErr := n.diskService.Delete(ctx, &compute.DeleteDiskRequest{Id: diskId})
+		if diskErr != nil {
+			log.Printf("Failed to delete boot disk %s after instance creation failure: %v", diskId, diskErr)
+		} else {
+			_, diskErr = operation.Wait(ctx)
+			if diskErr != nil {
+				log.Printf("Failed to wait for boot disk deletion %s after instance creation failure: %v", diskId, diskErr)
+			}
+		}
+		return "", fmt.Errorf("failed to wait for Nebius instance creation: %w", toStatus(err))
 	}
 
 	log.Printf("Created Nebius instance %s AS %s", operation.ResourceID(), name)
@@ -393,10 +424,10 @@ func (n *nebiusPoolBackend) ResumeWorker(ctx context.Context, workerName string,
 	log.Printf("Starting suspended Nebius instance %s (%s)", instanceID, workerName)
 	op, err := n.instanceService.Start(ctx, &compute.StartInstanceRequest{Id: instanceID})
 	if err != nil {
-		return err
+		return toStatus(err)
 	}
 	_, err = op.Wait(ctx)
-	return err
+	return toStatus(err)
 }
 
 type stoppedInstanceCleanup struct {
