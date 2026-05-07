@@ -53,32 +53,12 @@ func (p *BatchPlugin) Run(ctx context.Context) error {
 	if sessionReq.Workload != nil {
 		waiter := ctx.Value(p.waiterPlugin).(*Waiter)
 		wait := waiter.AcquireLock()
-		cmd, logsDone, err := p.start(ctx, sessionReq)
+		completion, err := p.start(ctx, sessionReq, wait)
 		if err != nil {
 			wait <- nil
 			return err
 		}
-		processStateChan := make(chan *ProcessState)
-		wait <- &WaitRequest{
-			Pid:   cmd.Process.Pid,
-			State: processStateChan,
-		}
-		completion := make(chan struct{})
-		go func() {
-			processState := <-processStateChan
-			// Release resources managed by exec.Cmd
-			cmd.Wait()
-			// Wait for all log streaming goroutines to finish.
-			logsDone.Wait()
-			err := p.handleResult(processState)
-			p.completionSignal.Complete(ctx, err)
-			close(completion)
-		}()
 		err = p.RunNext(ctx)
-		if err != nil {
-			// TODO: Kill all processes to avoid orphaned sub-process, especially if they inherit stdout/stderr
-			cmd.Process.Kill()
-		}
 		<-completion
 		return err
 	} else {
@@ -86,24 +66,26 @@ func (p *BatchPlugin) Run(ctx context.Context) error {
 	}
 }
 
-func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionRequest) (*exec.Cmd, *sync.WaitGroup, error) {
+func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionRequest, wait chan<- *WaitRequest) (<-chan struct{}, error) {
 	workload := sessionReq.Workload
 	taskId := sessionReq.TaskId
 	stdin, err := os.Open("/dev/null")
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to open /dev/null: %w", err)
+		return nil, fmt.Errorf("Failed to open /dev/null: %w", err)
 	}
 
 	// Create pipes so we can tee the output to both local files and the server.
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to create stdout pipe: %w", err)
+		stdin.Close()
+		return nil, fmt.Errorf("Failed to create stdout pipe: %w", err)
 	}
 	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
+		stdin.Close()
 		stdoutR.Close()
 		stdoutW.Close()
-		return nil, nil, fmt.Errorf("Failed to create stderr pipe: %w", err)
+		return nil, fmt.Errorf("Failed to create stderr pipe: %w", err)
 	}
 
 	var user *User
@@ -111,7 +93,12 @@ func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionReques
 		// If a login user is specified, look up that user and use their environment
 		user, err = LookupUser(workload.LoginUser)
 		if err != nil {
-			return nil, nil, fmt.Errorf("Failed to lookup user %s: %w", workload.LoginUser, err)
+			stdin.Close()
+			stdoutR.Close()
+			stdoutW.Close()
+			stderrR.Close()
+			stderrW.Close()
+			return nil, fmt.Errorf("Failed to lookup user %s: %w", workload.LoginUser, err)
 		}
 		if workload.WorkingDir == "" {
 			workload.WorkingDir = user.HomeDir
@@ -127,7 +114,12 @@ func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionReques
 	}
 	commandPath, err = exec.LookPath(commandPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Command not found in PATH: %w", err)
+		stdin.Close()
+		stdoutR.Close()
+		stdoutW.Close()
+		stderrR.Close()
+		stderrW.Close()
+		return nil, fmt.Errorf("Command not found in PATH: %w", err)
 	}
 	cmd := exec.Command(commandPath, workload.Args...)
 	cmd.Dir = workload.WorkingDir
@@ -168,9 +160,15 @@ func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionReques
 	if err != nil {
 		stdoutR.Close()
 		stderrR.Close()
-		return nil, nil, fmt.Errorf("Failed to start process: %w", err)
+		return nil, fmt.Errorf("Failed to start process: %w", err)
 	}
 	log.Printf("Started batch task %s with PID %d", taskId, cmd.Process.Pid)
+
+	processStateChan := make(chan *ProcessState)
+	wait <- &WaitRequest{
+		Pid:   cmd.Process.Pid,
+		State: processStateChan,
+	}
 
 	// Open PushLogs stream to the server (best-effort; non-fatal on failure).
 	pushStream, pushErr := openPushLogsStream(ctx, taskId)
@@ -239,7 +237,30 @@ func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionReques
 		finalWg.Done()
 	}()
 
-	return cmd, finalWg, nil
+	completion := make(chan struct{})
+	go func() {
+		completionHandle := p.completionSignal.getHandle(ctx)
+		var processState *ProcessState
+		select {
+		case processState = <-processStateChan:
+			// Normal completion
+		case <-completionHandle.done:
+			cmd.Process.Kill()
+			processState = <-processStateChan // wait for process to exit after kill
+		}
+		// Release resources managed by exec.Cmd
+		cmd.Wait()
+
+		// Other process may still be writing to the pipes, but we can close the read ends to unblock them and allow the goroutines to exit.
+		stdoutR.Close()
+		stderrR.Close()
+		// Wait for all log streaming goroutines to finish.
+		finalWg.Wait()
+		err := p.handleResult(processState)
+		p.completionSignal.Complete(ctx, err)
+		close(completion)
+	}()
+	return completion, nil
 }
 
 // openPushLogsStream opens a client streaming gRPC call to TaskLogService.PushLogs.
