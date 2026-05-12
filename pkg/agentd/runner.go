@@ -299,14 +299,10 @@ func (r *Runner) Kill(key SessionKey, force bool) {
 	if force {
 		if err := cmd.Process.Signal(syscall.SIGQUIT); err != nil {
 			log.Printf("Failed to kill process for session %s: %v", key.SessionId, err)
-		} else {
-			log.Printf("Killed process for session %s", key.SessionId)
 		}
 	} else {
 		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 			log.Printf("Failed to terminate process for session %s: %v", key.SessionId, err)
-		} else {
-			log.Printf("Terminated process for session %s", key.SessionId)
 		}
 	}
 }

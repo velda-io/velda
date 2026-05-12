@@ -295,7 +295,7 @@ func (t *TaskTracker) ReconnectTask(ctx context.Context, session *Session) error
 	}
 	if !t.registerSession(session) {
 		log.Printf("Task %s is already cancelled, killing", taskId)
-		session.Kill(ctx, false)
+		session.Kill(ctx, true)
 	}
 	return nil
 }

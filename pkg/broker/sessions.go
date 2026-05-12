@@ -724,7 +724,7 @@ func (s *Session) startQuotaMonitoring() {
 			if err != nil {
 				log.Printf("Session %s quota check failed, terminating: %v", s.id, err)
 				// Terminate session due to quota expiration
-				s.Kill(ctx, false)
+				s.Kill(ctx, true)
 				return
 			}
 			s.quotaGrant = newGrant
