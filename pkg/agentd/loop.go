@@ -207,7 +207,7 @@ func (a *Agent) run(ctx context.Context) error {
 					InstanceId: killReq.InstanceId,
 					SessionId:  killReq.SessionId,
 				}
-				log.Printf("Received kill request for session %v", sessionKey)
+				log.Printf("Received kill request for session %v, force: %v", sessionKey, killReq.Force)
 				a.runner.Kill(sessionKey, killReq.Force)
 			}
 		case err := <-chanReqErr:
