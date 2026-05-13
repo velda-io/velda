@@ -33,7 +33,6 @@ theme:
     - content.code.annotate
     - content.code.copy
     - content.tooltips
-    - navigation.expand
     - navigation.footer
     - navigation.indexes
     - navigation.instant
@@ -118,10 +117,14 @@ nav:
           - Kubernetes CRD Integration: deployment/pool-kubernetes-crd.md
           - Multi-cloud pool: deployment/multi-cloud-pool.md
           - CAS File Caching: deployment/cas-file-caching.md
+  - Reference:
+      - CLI Reference: reference/cli/
 
 plugins:
   - search:
       separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - literate-nav:
+      nav_file: summary.md
   - minify:
       minify_html: true
   - mermaid2:
