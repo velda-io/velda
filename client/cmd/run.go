@@ -52,13 +52,12 @@ var runCmd = &cobra.Command{
 
 If no command is provided, it will start an interactive shell session.
 
-Session is the basic unit of execution in Velda.  It is a collection of
-pre-defined compute resources that can be independently attached your
-instance. You can run multiple sessions with the same instsance in parallel.
+Session is the basic unit of execution in Velda. It is a collection of
+pre-defined compute resources that can be independently attached to your
+instance. You can run multiple sessions with the same instance in parallel.
 
-
-If a session ID is provided, it will attach to the an existing session, or
-create a new one if not already exists.`,
+If a session ID is provided, it will attach to the existing session, or
+create a new one.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var returnCode int
 		err := runCommand(cmd, args, &returnCode)

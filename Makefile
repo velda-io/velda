@@ -1,4 +1,4 @@
-.PHONY: velda format gen test unittest
+.PHONY: velda format gen test unittest cli-docs
 
 all: velda
 
@@ -46,6 +46,9 @@ test: unittest e2etest
 
 tidy:
 	go mod tidy
+
+cli-docs:
+	go run ./tools/gen_cli_docs/
 
 PACKER_FILTER ?= *
 

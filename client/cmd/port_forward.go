@@ -32,7 +32,7 @@ import (
 var portForwardCmd = &cobra.Command{
 	Use:     "port-forward [-i instance] [-s session] [-l localhost:port] -p remote-port",
 	Example: "velda port-forward -s ssh -l localhost:2222 -p 22",
-	Short:   "Establiash a tunnel for forwarding TCP connections",
+	Short:   "Establish a tunnel for forwarding TCP connections",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var lis net.Listener
 		var err error
