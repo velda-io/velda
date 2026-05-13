@@ -15,13 +15,18 @@ package broker
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
 type QuotaChecker interface {
 	// Quota management methods
-	GrantQuota(ctx context.Context, pool string, previousGrant QuotaGrant, totalConsumedTime time.Duration) (QuotaGrant, error)
+	GrantQuota(ctx context.Context, pool string, instanceID int64, sessionID string, previousGrant QuotaGrant, totalConsumedTime time.Duration) (QuotaGrant, error)
 	ReturnQuota(ctx context.Context, grant QuotaGrant, actualUsageDuration time.Duration) error
+}
+
+func SessionGrantID(instanceID int64, sessionID string) string {
+	return fmt.Sprintf("%d:%s", instanceID, sessionID)
 }
 
 type QuotaGrant interface {
@@ -37,7 +42,7 @@ func (g *alwaysValidQuotaGrant) NextCheck() time.Duration {
 // AlwaysAllowQuotaChecker is the OSS dummy implementation that always permits actions.
 type AlwaysAllowQuotaChecker struct{}
 
-func (a *AlwaysAllowQuotaChecker) GrantQuota(ctx context.Context, pool string, previousGrant QuotaGrant, totalConsumedTime time.Duration) (QuotaGrant, error) {
+func (a *AlwaysAllowQuotaChecker) GrantQuota(ctx context.Context, pool string, instanceID int64, sessionID string, previousGrant QuotaGrant, totalConsumedTime time.Duration) (QuotaGrant, error) {
 	return &alwaysValidQuotaGrant{}, nil
 }
 
