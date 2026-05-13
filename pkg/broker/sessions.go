@@ -680,7 +680,7 @@ func (s *Session) checkQuota(ctx context.Context) error {
 		consumed = time.Since(s.startTime)
 	}
 
-	grant, err := s.helpers.GrantQuota(ctx, pool, nil, consumed)
+	grant, err := s.helpers.GrantQuota(ctx, pool, s.Request.InstanceId, s.id, nil, consumed)
 	if err != nil {
 		return fmt.Errorf("failed to grant quota: %w", err)
 	}
@@ -720,7 +720,11 @@ func (s *Session) startQuotaMonitoring() {
 	ctx := rbac.ContextWithUser(context.Background(), s.user)
 	go func() {
 		for {
-			newGrant, err := s.helpers.GrantQuota(ctx, s.Request.Pool, s.quotaGrant, time.Since(s.startTime))
+			consumed := time.Since(s.startTime)
+			if consumed == 0 {
+				consumed = time.Millisecond
+			}
+			newGrant, err := s.helpers.GrantQuota(ctx, s.Request.Pool, s.Request.InstanceId, s.id, s.quotaGrant, consumed)
 			if err != nil {
 				log.Printf("Session %s quota check failed, terminating: %v", s.id, err)
 				// Terminate session due to quota expiration
