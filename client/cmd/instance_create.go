@@ -115,6 +115,7 @@ func init() {
 	flags.BoolP("quiet", "q", false, "Suppress status output (task ID is still printed)")
 	flags.Bool("follow", true, "Wait for docker-image initialization task and stream status/logs")
 	flags.Bool("no-init", false, "Skip running the initialization script when creating from a Docker image")
+	flags.String("docker-auth", "", "Registry auth for --docker-image in the form username:password")
 	flags.String("region", "", "Region to create the instance in (defaults to current region)")
 }
 
@@ -122,10 +123,23 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 	quiet, _ := cmd.Flags().GetBool("quiet")
 	region, _ := cmd.Flags().GetString("region")
 	noInit, _ := cmd.Flags().GetBool("no-init")
+	dockerAuth, _ := cmd.Flags().GetString("docker-auth")
 	pr := func(format string, a ...interface{}) {
 		if !quiet {
 			cmd.PrintErrf(format, a...)
 		}
+	}
+
+	dockerAuth = strings.TrimSpace(dockerAuth)
+	dockerAuthUsername := ""
+	dockerAuthPassword := ""
+	if dockerAuth != "" {
+		parts := strings.SplitN(dockerAuth, ":", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			return fmt.Errorf("--docker-auth must be in format username:password")
+		}
+		dockerAuthUsername = parts[0]
+		dockerAuthPassword = parts[1]
 	}
 
 	pr("Creating instance %s from container image %s\n", name, dockerImage)
@@ -134,6 +148,8 @@ func createInstanceFromDocker(cmd *cobra.Command, client proto.InstanceServiceCl
 		Region:               region,
 		DockerImage:          dockerImage,
 		SkipDockerInitScript: noInit,
+		DockerAuthUsername:   dockerAuthUsername,
+		DockerAuthPassword:   dockerAuthPassword,
 	}
 
 	instance, err := client.CreateInstance(cmd.Context(), request)
