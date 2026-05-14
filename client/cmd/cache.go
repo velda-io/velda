@@ -1,4 +1,4 @@
-//go:build !clionly
+//go:build !clionly && !agentonly
 
 // Copyright 2025 Velda Inc
 //

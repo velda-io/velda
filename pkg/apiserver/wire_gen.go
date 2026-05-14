@@ -12,11 +12,6 @@ import (
 	"velda.io/velda/pkg/proto"
 )
 
-import (
-	_ "net/http/pprof"
-	_ "velda.io/velda/pkg/broker/backends/registry"
-)
-
 // Injectors from wire.go:
 
 func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {

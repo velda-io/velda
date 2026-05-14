@@ -1,4 +1,5 @@
-// go:build !clionly && linux
+//go:build !clionly && !agentonly && linux
+
 // Copyright 2025 Velda Inc
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
