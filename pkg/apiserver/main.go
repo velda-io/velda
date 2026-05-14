@@ -19,15 +19,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/exec"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
-
-	_ "velda.io/velda/pkg/broker/backends/registry"
 )
 
 var (

@@ -1,4 +1,4 @@
-//go:build !clionly && linux
+//go:build !clionly && !agentonly && linux
 
 // Copyright 2025 Velda Inc
 //
@@ -19,6 +19,10 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 	"velda.io/velda/pkg/apiserver"
+
+	_ "net/http/pprof"
+
+	_ "velda.io/velda/pkg/broker/backends/registry"
 )
 
 var ApiServerCmd = &cobra.Command{
