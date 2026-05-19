@@ -102,6 +102,7 @@ nav:
       - Snapshots & Overlays: user-guide/snapshots-and-overlays.md
       - Storage & Volumes: user-guide/storage-volumes.md
   - Examples:
+      - Quick Start: examples/quick-start.md
       - Ray AutoScaled cluster: examples/ray-autoscaled-cluster.md
       - Distributed hyperparam tuning with wandb: examples/wandb-integration.md
   - Deployment:
