@@ -15,6 +15,7 @@ package instances
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -140,7 +141,7 @@ func (s *service) CreateInstance(ctx context.Context, in *proto.CreateInstanceRe
 	}
 
 	if in.GetDockerImage() != "" {
-		initTaskID, err := s.enqueueDockerInitTask(ctx, instance.Id, in.GetDockerImage(), in.GetSkipDockerInitScript())
+		initTaskID, err := s.enqueueDockerInitTask(ctx, instance.Id, in.GetDockerImage(), in.GetSkipDockerInitScript(), in.GetDockerAuthUsername(), in.GetDockerAuthPassword())
 		if err != nil {
 			return nil, err
 		}
@@ -150,12 +151,22 @@ func (s *service) CreateInstance(ctx context.Context, in *proto.CreateInstanceRe
 	return instance, nil
 }
 
-func (s *service) enqueueDockerInitTask(ctx context.Context, instanceID int64, dockerImage string, skipInitScript bool) (string, error) {
+func (s *service) enqueueDockerInitTask(ctx context.Context, instanceID int64, dockerImage string, skipInitScript bool, dockerAuthUsername, dockerAuthPassword string) (string, error) {
 	if s.broker == nil {
 		return "", status.Errorf(codes.FailedPrecondition, "broker service not available")
 	}
 
-	args := []string{"instance", "import", "--auth", "anonymous", dockerImage}
+	args := []string{"instance", "import"}
+	dockerAuthB64 := ""
+	if strings.TrimSpace(dockerAuthUsername) != "" {
+		dockerAuthB64 = base64.StdEncoding.EncodeToString([]byte(dockerAuthUsername + ":" + dockerAuthPassword))
+	}
+	if strings.TrimSpace(dockerAuthB64) != "" {
+		args = append(args, "--auth-encoded", dockerAuthB64)
+	} else {
+		args = append(args, "--auth", "anonymous")
+	}
+	args = append(args, dockerImage)
 	if !skipInitScript {
 		args = append(args, "--post-install")
 	}

@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"archive/tar"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
@@ -61,6 +63,8 @@ func init() {
 	f := importContainerCmd.Flags()
 	f.String("auth", "anonymous",
 		"Registry auth method: anonymous (default), docker (default keychain), google (GCR/AR), manual (stdin prompt)")
+	f.String("auth-encoded", "", "Base64-encoded registry auth in the form base64(username:password)")
+	f.MarkHidden("auth-encoded")
 	f.Bool("post-install", true, "Whether to run post-install script included in the image, if any. By default, the post-install script will be run if detected. Set this flag to false to skip running the post-install script.")
 }
 
@@ -72,7 +76,8 @@ func runImportContainer(cmd *cobra.Command, args []string) error {
 
 	imageRef := args[0]
 	authMethod, _ := cmd.Flags().GetString("auth")
-	remoteOpt, err := resolveRegistryAuth(authMethod)
+	authB64, _ := cmd.Flags().GetString("auth-encoded")
+	remoteOpt, err := resolveRegistryAuthWithBase64(authMethod, authB64)
 	if err != nil {
 		return fmt.Errorf("resolving registry auth: %w", err)
 	}
@@ -118,6 +123,28 @@ func runImportContainer(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+func resolveRegistryAuthWithBase64(method, authB64 string) (remote.Option, error) {
+	authB64 = strings.TrimSpace(authB64)
+	if authB64 == "" {
+		return resolveRegistryAuth(method)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(authB64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --auth-encoded: %w", err)
+	}
+	parts := strings.SplitN(string(decoded), ":", 2)
+	if len(parts) != 2 || parts[0] == "" {
+		return nil, fmt.Errorf("invalid --auth-encoded payload: expected base64(username:password)")
+	}
+
+	auth := authn.FromConfig(authn.AuthConfig{
+		Username: parts[0],
+		Password: parts[1],
+	})
+	return remote.WithAuth(auth), nil
 }
 
 func remountRootReadWrite() error {
