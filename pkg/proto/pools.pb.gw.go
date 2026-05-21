@@ -163,7 +163,7 @@ func RegisterPoolManagerServiceHandlerServer(ctx context.Context, mux *runtime.S
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.PoolManagerService/ListPools", runtime.WithHTTPPathPattern("/rest/velda/pool"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.PoolManagerService/ListPools", runtime.WithHTTPPathPattern("/rest/pool"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -183,7 +183,7 @@ func RegisterPoolManagerServiceHandlerServer(ctx context.Context, mux *runtime.S
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.PoolManagerService/GetPool", runtime.WithHTTPPathPattern("/rest/velda/pool/{pool}"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/velda.PoolManagerService/GetPool", runtime.WithHTTPPathPattern("/rest/pool/{pool}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -248,7 +248,7 @@ func RegisterPoolManagerServiceHandlerClient(ctx context.Context, mux *runtime.S
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/ListPools", runtime.WithHTTPPathPattern("/rest/velda/pool"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/ListPools", runtime.WithHTTPPathPattern("/rest/pool"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -265,7 +265,7 @@ func RegisterPoolManagerServiceHandlerClient(ctx context.Context, mux *runtime.S
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/GetPool", runtime.WithHTTPPathPattern("/rest/velda/pool/{pool}"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/GetPool", runtime.WithHTTPPathPattern("/rest/pool/{pool}"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -282,7 +282,7 @@ func RegisterPoolManagerServiceHandlerClient(ctx context.Context, mux *runtime.S
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/WatchPoolStatus", runtime.WithHTTPPathPattern("/rest/velda/pool/{pool}/watch"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/velda.PoolManagerService/WatchPoolStatus", runtime.WithHTTPPathPattern("/rest/pool/{pool}/watch"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
@@ -299,9 +299,9 @@ func RegisterPoolManagerServiceHandlerClient(ctx context.Context, mux *runtime.S
 }
 
 var (
-	pattern_PoolManagerService_ListPools_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"rest", "velda", "pool"}, ""))
-	pattern_PoolManagerService_GetPool_0         = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 2}, []string{"rest", "velda", "pool"}, ""))
-	pattern_PoolManagerService_WatchPoolStatus_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 2, 2, 3}, []string{"rest", "velda", "pool", "watch"}, ""))
+	pattern_PoolManagerService_ListPools_0       = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"rest", "pool"}, ""))
+	pattern_PoolManagerService_GetPool_0         = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 1}, []string{"rest", "pool"}, ""))
+	pattern_PoolManagerService_WatchPoolStatus_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 1, 0, 4, 1, 5, 1, 2, 2}, []string{"rest", "pool", "watch"}, ""))
 )
 
 var (
