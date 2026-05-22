@@ -68,9 +68,7 @@ message SearchTasksRequest {
   string page_token = 3;
 }
 
-message GetTaskRequest {
-  string task_id = 1;
-}
+message GetTaskRequest { string task_id = 1; }
 
 message TaskPageResult {
   repeated Task tasks = 1;
@@ -92,9 +90,7 @@ message LogTaskResponse {
   bytes data = 2;
 }
 
-message CancelJobRequest {
-  string job_id = 1;
-}
+message CancelJobRequest { string job_id = 1; }
 
 // PushLogsRequest carries a chunk of stdout or stderr output for a batch task.
 // The agent streams these to the server so logs are saved centrally.
@@ -107,31 +103,31 @@ message PushLogsRequest {
 service TaskService {
   rpc GetTask(GetTaskRequest) returns (Task) {
     option (google.api.http) = {
-            get: "/rest/task/info/{task_id=**}"
-        };
+      get : "/rest/task/info/{task_id=**}"
+    };
   };
   rpc ListTasks(ListTasksRequest) returns (TaskPageResult) {
     option (google.api.http) = {
-            get: "/rest/task/tasks/{parent_id=**}"
-        };
+      get : "/rest/task/tasks/{parent_id=**}"
+    };
   };
 
   rpc SearchTasks(SearchTasksRequest) returns (TaskPageResult) {
     option (google.api.http) = {
-            get: "/rest/task/search"
-        };
+      get : "/rest/task/search"
+    };
   };
 
   rpc CancelJob(CancelJobRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
-            post: "/rest/task/cancel/{job_id=**}"
-        };
+      post : "/rest/task/cancel/{job_id=**}"
+    };
   };
 
   rpc WatchTask(GetTaskRequest) returns (stream Task) {
     option (google.api.http) = {
-            get: "/rest/task/watch/{task_id=**}"
-        };
+      get : "/rest/task/watch/{task_id=**}"
+    };
   };
 
   rpc Logs(LogTaskRequest) returns (stream LogTaskResponse) {};

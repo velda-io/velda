@@ -15,7 +15,6 @@ syntax = "proto3";
 
 package velda;
 
-import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -34,34 +33,14 @@ message LoginResponse {
   string email = 5;
 }
 
-message IssueTokenRequest {
-  string refresh_token = 1;
-}
+message IssueTokenRequest { string refresh_token = 1; }
 
-message RevokeTokenRequest {
-  string token = 1;
-}
+message RevokeTokenRequest { string token = 1; }
 
 service AuthService {
-  rpc AccessCodeLogin(AccessCodeLoginRequest) returns (LoginResponse) {
-    option (google.api.http) = {
-      post : "/rest/auth/accesscodelogin"
-      body : "*"
-    };
-  };
+  rpc AccessCodeLogin(AccessCodeLoginRequest) returns (LoginResponse) {};
 
-  rpc IssueToken(IssueTokenRequest) returns (LoginResponse) {
-    option (google.api.http) = {
-      post : "/rest/auth/issuetoken"
-      body : "*"
-    };
-  };
+  rpc IssueToken(IssueTokenRequest) returns (LoginResponse) {};
 
-  rpc RevokeToken(RevokeTokenRequest) returns (google.protobuf.Empty) {
-    option (google.api.http) = {
-      post : "/rest/auth/revoke"
-      body : "*"
-    };
-  };
-
+  rpc RevokeToken(RevokeTokenRequest) returns (google.protobuf.Empty) {};
 }

@@ -51,17 +51,17 @@ message ListPoolsResponse {
 service PoolManagerService {
   rpc ListPools(ListPoolsRequest) returns (ListPoolsResponse) {
     option (google.api.http) = {
-      get : "/rest/velda/pool"
+      get : "/rest/pool"
     };
   };
   rpc GetPool(GetPoolRequest) returns (GetPoolResponse) {
     option (google.api.http) = {
-      get : "/rest/velda/pool/{pool}"
+      get : "/rest/pool/{pool}"
     };
   };
   rpc WatchPoolStatus(WatchPoolStatusRequest) returns (stream PoolStatusNotification) {
     option (google.api.http) = {
-      get : "/rest/velda/pool/{pool}/watch"
+      get : "/rest/pool/{pool}/watch"
     };
   };
 }
