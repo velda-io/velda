@@ -374,7 +374,8 @@ func (p *AutoScaledPool) Reconnect(ctx context.Context) error {
 	// Check for unknown workers, if expired, request deletion.
 	if p.killUnknownAfter > 0 {
 		for name, lastConnect := range p.lastKnownTime {
-			if time.Since(lastConnect) > p.killUnknownAfter {
+			// TODO: worker stuck in pending should also be killed after some time.
+			if (p.workerStatus[name] == WorkerStatusUnknown || p.workerStatus[name] == WorkerStatusLost) && time.Since(lastConnect) > p.killUnknownAfter {
 				if err := p.backend.RequestDelete(ctx, name); err != nil {
 					p.logPrintf("Failed to request deletion for unknown worker %s: %v", name, err)
 				} else {
