@@ -58,3 +58,34 @@ source "azure-arm" "velda" {
   image_sku = "server"
   image_version = "latest"
 }
+
+source "nebius-image" "velda" {
+  communicator = "ssh"
+  ssh_username = "ubuntu"
+  disk {
+    size_gibibytes = 20
+  }
+  service_account {
+    public_key_id = var.nebius_sa_public_key_id
+    account_id = var.nebius_sa_account_id
+    private_key_file = var.nebius_sa_private_key
+  }
+  base_image {
+    family = "ubuntu24.04-driverless"
+  }
+  network {
+    associate_public_ip_address = true
+  }
+  instance {
+    platform = "cpu-d3"
+    preset   = "4vcpu-16gb"
+  }
+  image {
+    name                        = "velda-ubuntu2404-${var.version}"
+    version                     = var.version
+    image_family                = "velda-ubuntu2404"
+    cpu_architecture            = "amd64"
+    image_family_human_readable = "Velda Ubuntu 24.04"
+  }
+  parent_id = "project-e00p4q4gpr00z4za2wqc9m"
+}

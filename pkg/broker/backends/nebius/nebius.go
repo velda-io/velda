@@ -209,14 +209,19 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 
 	diskName := name + "-boot-disk"
 	log.Printf("Creating new boot disk %s", diskName)
+	sourceImageFamily := &compute.SourceImageFamily{
+		ImageFamily: "ubuntu24.04-cuda13.0",
+	}
+	if n.cfg.GetImageFamily() != "" {
+		sourceImageFamily.ImageFamily = n.cfg.GetImageFamily()
+		sourceImageFamily.ParentId = n.cfg.GetParentId()
+	}
 	diskSpec := &compute.DiskSpec{
 		Size:           &compute.DiskSpec_SizeGibibytes{SizeGibibytes: diskSizeGb},
 		BlockSizeBytes: 4096,
 		Type:           diskTypeFromProto(n.cfg.GetBootDiskType()),
 		Source: &compute.DiskSpec_SourceImageFamily{
-			SourceImageFamily: &compute.SourceImageFamily{
-				ImageFamily: "ubuntu24.04-cuda13.0",
-			},
+			SourceImageFamily: sourceImageFamily,
 		},
 	}
 	if diskSpec.GetType() != compute.DiskSpec_NETWORK_SSD {
@@ -292,7 +297,11 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 
 	// Add preemptible settings if configured
 	if n.cfg.GetPreemptible() {
-		instanceSpec.Preemptible = &compute.PreemptibleSpec{}
+		instanceSpec.Preemptible = &compute.PreemptibleSpec{
+			OnPreemption: compute.PreemptibleSpec_STOP,
+			Priority:     1,
+		}
+		instanceSpec.RecoveryPolicy = compute.InstanceRecoveryPolicy_FAIL
 	}
 
 	log.Printf("Creating Nebius instance %s", name)
