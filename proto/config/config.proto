@@ -301,6 +301,10 @@ message AutoscalerBackendNebiusLaunchTemplate {
 
   // Service account ID to attach to created instances.
   string service_account_id = 19;
+
+  // Image family to use for the instance. If set, it will override
+  // the default image.
+  string image_family = 20;
 }
 
 // Nebius boot disk type enum.
@@ -479,6 +483,10 @@ message NebiusAutoProvisioner {
 
   // Service account ID to attach to all created instances.
   string service_account_id = 14;
+
+  // Image family to use for all instances. If set, it will override
+  // the default image.
+  string image_family = 15;
 }
 
 message AutoscalerBackendMithrilSpotBid {
@@ -621,13 +629,16 @@ message AutoscalerBackendPrimeIntellectInstance {
   // Example keys: gpu_type, regions, gpu_count
   map<string, string> search_criteria = 7;
 
-  // Minimum vCPUs required. Offers whose max vCPU cannot meet this are excluded.
+  // Minimum vCPUs required. Offers whose max vCPU cannot meet this are
+  // excluded.
   int32 min_vcpus = 8;
 
-  // Minimum memory in GB required. Offers whose max memory cannot meet this are excluded.
+  // Minimum memory in GB required. Offers whose max memory cannot meet this are
+  // excluded.
   int32 min_memory_gb = 9;
 
-  // Minimum disk in GB required. Offers whose max disk cannot meet this are excluded.
+  // Minimum disk in GB required. Offers whose max disk cannot meet this are
+  // excluded.
   int32 min_disk_gb = 10;
 
   // Whether spot instances are allowed. Defaults to false (spot excluded).
@@ -637,7 +648,6 @@ message AutoscalerBackendPrimeIntellectInstance {
   // Must match the SSH key used by the controller for bootstrapping.
   string ssh_key_id = 12;
 }
-
 
 message MithrilAutoProvisioner {
   // Common configuration shared across all pools

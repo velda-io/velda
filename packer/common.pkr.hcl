@@ -16,6 +16,10 @@ packer {
       source  = "github.com/hashicorp/azure"
       version = "~> 2"
     }
+    nebius = {
+      source  = "github.com/nebius/nebius"
+      version = ">= 0.0.1"
+    }
   }
 }
 
@@ -99,10 +103,25 @@ variable "azure_shared_image_gallery_resource_group" {
   default = null
 }
 
+variable "nebius_sa_public_key_id" {
+  type    = string
+  default = null
+}
+
+variable "nebius_sa_account_id" {
+  type    = string
+  default = null
+}
+
+variable "nebius_sa_private_key" {
+  type    = string
+  default = null
+}
+
 locals {
   isdev       = startswith(var.version, "dev")
   istest      = strcontains(var.version, "test") || local.isdev
-  binary_path = var.binary_path != null ? var.binary_path : "bin/velda-${var.version}-linux-amd64"
+  binary_path = var.binary_path != null ? var.binary_path : "bin/velda-${var.version}-cli-linux-amd64"
 
   ami_groups = local.istest || length(var.ami_users) > 0 ? [] : ["all"]
 

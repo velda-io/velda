@@ -19,6 +19,9 @@ build {
     }
   }
 
+  source "nebius-image.velda" {
+  }
+
   // Make boot faster
   provisioner "shell" {
     inline = [
@@ -50,7 +53,7 @@ build {
   }
 
   provisioner "file" {
-    only        = ["amazon-ebs.velda", "azure-arm.velda"]
+    only        = ["amazon-ebs.velda", "azure-arm.velda", "nebius-image.velda"]
     source      = "${path.root}/scripts/velda-agent.service"
     destination = "/tmp/velda-install/velda-agent.service"
   }
