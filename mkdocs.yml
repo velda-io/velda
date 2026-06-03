@@ -104,6 +104,7 @@ nav:
   - Examples:
       - Quick Start: examples/quick-start.md
       - Ray AutoScaled cluster: examples/ray-autoscaled-cluster.md
+      - Isaac Sim: examples/isaac-sim.md
       - Distributed hyperparam tuning with wandb: examples/wandb-integration.md
   - Deployment:
       - Deployment Overview: deployment/overview.md
