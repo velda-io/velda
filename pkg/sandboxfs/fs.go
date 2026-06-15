@@ -71,6 +71,7 @@ func WithNoCacheMode() MountOptions {
 // - Optimized for serving filesystem snapshots over network
 func WithDirectFSSnapshotMode() MountOptions {
 	return func(opts *VeldaMountOptions) {
+		opts.SnapshotMode = true
 		opts.DirectFSMode = true
 		opts.FuseOptions.EnableSymlinkCaching = true
 		opts.FuseOptions.ExplicitDataCacheControl = true
