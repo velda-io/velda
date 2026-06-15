@@ -409,11 +409,7 @@ func (sc *DirectFSClient) sendRequestWorker() {
 		case <-sc.ctx.Done():
 			return
 		case op, ok := <-sc.normalReqQueue:
-			if !ok && ok {
-				// normalReqQueue closed but check writeReqQueue
-				continue
-			}
-			if op != nil {
+			if ok {
 				sc.executeRequestOp(op)
 			}
 		default:
@@ -422,17 +418,11 @@ func (sc *DirectFSClient) sendRequestWorker() {
 			case <-sc.ctx.Done():
 				return
 			case op, ok := <-sc.writeReqQueue:
-				if !ok && ok {
-					return
-				}
-				if op != nil {
+				if ok {
 					sc.executeRequestOp(op)
 				}
 			case op, ok := <-sc.normalReqQueue:
-				if !ok && ok {
-					return
-				}
-				if op != nil {
+				if ok {
 					sc.executeRequestOp(op)
 				}
 			}

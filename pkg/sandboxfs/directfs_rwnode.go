@@ -286,9 +286,6 @@ func (n *RWNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32,
 	}
 
 	isWrite := (flags&unix.O_WRONLY != 0) || (flags&unix.O_RDWR != 0)
-	if n.attr == nil {
-
-	}
 	file := newRWFile(n.client, n.fh, resp.Fd, *attr, isWrite)
 	// For read-only opens with a valid cache key, try to open from cache
 	if isWrite {
@@ -296,13 +293,11 @@ func (n *RWNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32,
 		n.attr.Sha256 = [32]byte{}
 		n.mu.Unlock()
 	} else {
-		log.Printf("Opening file with attr: %+v\n", *attr)
 		var zeroHash [32]byte
 		if attr.Sha256 != zeroHash {
 			log.Printf("File has hash: %x\n", attr.Sha256)
 			sha256Hex := fmt.Sprintf("%x", attr.Sha256[:])
 			if cachedPath, err := n.client.cache.Lookup(sha256Hex); err == nil && cachedPath != "" {
-				log.Printf("Cache hit for hash %s at path %s\n", sha256Hex, cachedPath)
 				fd, err := unix.Open(cachedPath, unix.O_RDONLY, 0)
 				if err == nil {
 					if GlobalCacheMetrics != nil {
