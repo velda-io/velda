@@ -24,6 +24,7 @@ import (
 
 // TestSnapshotMode verifies that snapshot mode enables aggressive caching
 func TestSnapshotMode(t *testing.T) {
+	checkCapSysAdmin(t)
 	// Setup test environment
 	srcDir := t.TempDir()
 	mountDir := t.TempDir()

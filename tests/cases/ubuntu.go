@@ -182,6 +182,7 @@ cat vrun-test/file.txt
 		output, err = vrunCommandGetOutput("cat", "/persisted/vrun-test.txt")
 		require.NoError(t, err)
 		assert.Equal(t, "vrun-writable\n", output, "Writable directory should persist changes")
+		time.Sleep(10 * time.Second)
 	})
 
 	t.Run("VrunSnapshotModeWithExistingSnapshot", func(t *testing.T) {

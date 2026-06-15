@@ -15,17 +15,24 @@ package fileserver
 
 import (
 	"io"
+	"syscall"
 
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"golang.org/x/sys/unix"
 )
 
 // Protocol operation codes
 const (
-	OpMount    = 0x1
-	OpLookup   = 0x2
-	OpRead     = 0x3
-	OpReadDir  = 0x4
-	OpReadlink = 0x5
+	OpMount     = 0x1
+	OpLookup    = 0x2
+	OpRead      = 0x3
+	OpReadDir   = 0x4
+	OpReadlink  = 0x5
+	OpOpen      = 0x6
+	OpReadFd    = 0x7
+	OpWriteFd   = 0x8
+	OpFlushFd   = 0x9
+	OpReleaseFd = 0xa
 
 	// Write operations (read-write mode)
 	OpCreate  = 0x10
@@ -39,6 +46,9 @@ const (
 	OpLink    = 0x18
 	OpFlush   = 0x19
 	OpGetattr = 0x1a
+	OpGetlk   = 0x1b
+	OpSetlk   = 0x1c
+	OpSetlkw  = 0x1d
 
 	OpDirDataNotification = 0x101
 )
@@ -142,6 +152,13 @@ type ReadRequest struct {
 	Size   uint32          // Number of bytes to read
 }
 
+// ReadFdRequest reads data from a session-scoped file descriptor token.
+type ReadFdRequest struct {
+	Fd     uint32 // Session-scoped file descriptor token
+	Offset uint64 // Offset in file
+	Size   uint32 // Number of bytes to read
+}
+
 // ReadResponse represents a read response
 type ReadResponse struct {
 	Data []byte // File data
@@ -199,17 +216,43 @@ type CreateRequest struct {
 	Name     string
 	Flags    uint32 // O_WRONLY, O_RDWR, etc.
 	Mode     uint32 // File permission bits
+	HasOwner uint8
+	Uid      uint32
+	Gid      uint32
 }
 
 // CreateResponse returns the new file's handle and attributes
 type CreateResponse struct {
+	Fd   uint32
 	Fh   unix.FileHandle
+	Attr FileAttr
+}
+
+// OpenRequest opens an existing file and returns a session-scoped fd token.
+type OpenRequest struct {
+	Fh       unix.FileHandle
+	Flags    uint32
+	HasOwner uint8
+	Uid      uint32
+	Gid      uint32
+}
+
+// OpenResponse returns the session-scoped fd token and attributes.
+type OpenResponse struct {
+	Fd   uint32
 	Attr FileAttr
 }
 
 // WriteRequest writes data to a file at a given offset
 type WriteRequest struct {
 	Fh     unix.FileHandle
+	Offset uint64
+	Data   []byte
+}
+
+// WriteFdRequest writes data through a session-scoped file descriptor token.
+type WriteFdRequest struct {
+	Fd     uint32
 	Offset uint64
 	Data   []byte
 }
@@ -224,6 +267,9 @@ type MkdirRequest struct {
 	ParentFh unix.FileHandle
 	Name     string
 	Mode     uint32
+	HasOwner uint8
+	Uid      uint32
+	Gid      uint32
 }
 
 // MkdirResponse returns the new directory's handle and attributes
@@ -293,6 +339,9 @@ type SymlinkRequest struct {
 	ParentFh unix.FileHandle
 	Name     string
 	Target   string
+	HasOwner uint8
+	Uid      uint32
+	Gid      uint32
 }
 
 // SymlinkResponse returns the symlink's handle and attributes
@@ -325,6 +374,14 @@ type FlushRequest struct {
 	Sha256 [32]byte
 }
 
+// FlushFdRequest flushes pending writes for a session-scoped fd token.
+type FlushFdRequest struct {
+	Fd             uint32
+	LastWriteReqID uint64
+	HasSha256      uint8
+	Sha256         [32]byte
+}
+
 // FlushResponse returns updated attributes after flush (with SHA256 if available)
 type FlushResponse struct {
 	Attr FileAttr
@@ -338,4 +395,26 @@ type GetattrRequest struct {
 // GetattrResponse returns current file attributes
 type GetattrResponse struct {
 	Attr FileAttr
+}
+
+type LockRequest struct {
+	Fd    uint32
+	Owner uint64
+	Lk    fuse.FileLock
+	Flags uint32
+}
+
+// ReleaseFdRequest releases a session-scoped fd token explicitly.
+type ReleaseFdRequest struct {
+	Fd uint32
+}
+
+type GetlkResponse struct {
+	Lk fuse.FileLock
+}
+
+type EmptyResponse struct{}
+
+func NewUnlockFileLock() fuse.FileLock {
+	return fuse.FileLock{Typ: syscall.F_UNLCK}
 }

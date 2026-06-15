@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"golang.org/x/sys/unix"
 )
 
@@ -272,6 +273,34 @@ func (r *ReadRequest) Serialize(w io.Writer) error {
 	return nil
 }
 
+// Serialize writes ReadFdRequest to io.Writer (including header)
+func (r *ReadFdRequest) Serialize(w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, r.Fd); err != nil {
+		return fmt.Errorf("failed to write fd: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Offset); err != nil {
+		return fmt.Errorf("failed to write offset: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Size); err != nil {
+		return fmt.Errorf("failed to write size: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads ReadFdRequest from io.Reader (header-excluded data)
+func (r *ReadFdRequest) Deserialize(reader io.Reader) error {
+	if err := binary.Read(reader, binary.LittleEndian, &r.Fd); err != nil {
+		return fmt.Errorf("failed to read fd: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Offset); err != nil {
+		return fmt.Errorf("failed to read offset: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Size); err != nil {
+		return fmt.Errorf("failed to read size: %w", err)
+	}
+	return nil
+}
+
 // Deserialize reads ReadRequest from io.Reader (header-excluded data)
 func (r *ReadRequest) Deserialize(reader io.Reader) error {
 	fh, err := decodeFileHandle(reader)
@@ -450,6 +479,38 @@ func decodeFileHandle(r io.Reader) (unix.FileHandle, error) {
 	return unix.NewFileHandle(handleType, handleBytes), nil
 }
 
+func serializeFuseFileLock(w io.Writer, lk *fuse.FileLock) error {
+	if err := binary.Write(w, binary.LittleEndian, lk.Start); err != nil {
+		return fmt.Errorf("failed to write lock start: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, lk.End); err != nil {
+		return fmt.Errorf("failed to write lock end: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, lk.Typ); err != nil {
+		return fmt.Errorf("failed to write lock type: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, lk.Pid); err != nil {
+		return fmt.Errorf("failed to write lock pid: %w", err)
+	}
+	return nil
+}
+
+func deserializeFuseFileLock(r io.Reader, lk *fuse.FileLock) error {
+	if err := binary.Read(r, binary.LittleEndian, &lk.Start); err != nil {
+		return fmt.Errorf("failed to read lock start: %w", err)
+	}
+	if err := binary.Read(r, binary.LittleEndian, &lk.End); err != nil {
+		return fmt.Errorf("failed to read lock end: %w", err)
+	}
+	if err := binary.Read(r, binary.LittleEndian, &lk.Typ); err != nil {
+		return fmt.Errorf("failed to read lock type: %w", err)
+	}
+	if err := binary.Read(r, binary.LittleEndian, &lk.Pid); err != nil {
+		return fmt.Errorf("failed to read lock pid: %w", err)
+	}
+	return nil
+}
+
 // Serialize writes DirDataNotification to io.Writer
 func (n *DirDataNotification) Serialize(w io.Writer) error {
 	// Write inode number
@@ -559,6 +620,48 @@ func (r *ReadlinkResponse) Deserialize(reader io.Reader) error {
 
 // --- Write operation serialization ---
 
+// Serialize writes OpenRequest to io.Writer
+func (r *OpenRequest) Serialize(w io.Writer) error {
+	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
+		return fmt.Errorf("failed to write fh: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Flags); err != nil {
+		return fmt.Errorf("failed to write flags: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.HasOwner); err != nil {
+		return fmt.Errorf("failed to write has owner: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Uid); err != nil {
+		return fmt.Errorf("failed to write uid: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Gid); err != nil {
+		return fmt.Errorf("failed to write gid: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads OpenRequest from io.Reader
+func (r *OpenRequest) Deserialize(reader io.Reader) error {
+	fh, err := decodeFileHandle(reader)
+	if err != nil {
+		return err
+	}
+	r.Fh = fh
+	if err := binary.Read(reader, binary.LittleEndian, &r.Flags); err != nil {
+		return fmt.Errorf("failed to read flags: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.HasOwner); err != nil {
+		return fmt.Errorf("failed to read has owner: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Uid); err != nil {
+		return fmt.Errorf("failed to read uid: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Gid); err != nil {
+		return fmt.Errorf("failed to read gid: %w", err)
+	}
+	return nil
+}
+
 // Serialize writes CreateRequest to io.Writer
 func (r *CreateRequest) Serialize(w io.Writer) error {
 	if _, err := w.Write(encodeFileHandle(r.ParentFh)); err != nil {
@@ -572,6 +675,15 @@ func (r *CreateRequest) Serialize(w io.Writer) error {
 	}
 	if err := binary.Write(w, binary.LittleEndian, r.Mode); err != nil {
 		return fmt.Errorf("failed to write mode: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.HasOwner); err != nil {
+		return fmt.Errorf("failed to write has owner: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Uid); err != nil {
+		return fmt.Errorf("failed to write uid: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Gid); err != nil {
+		return fmt.Errorf("failed to write gid: %w", err)
 	}
 	return nil
 }
@@ -594,11 +706,23 @@ func (r *CreateRequest) Deserialize(reader io.Reader) error {
 	if err := binary.Read(reader, binary.LittleEndian, &r.Mode); err != nil {
 		return fmt.Errorf("failed to read mode: %w", err)
 	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.HasOwner); err != nil {
+		return fmt.Errorf("failed to read has owner: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Uid); err != nil {
+		return fmt.Errorf("failed to read uid: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Gid); err != nil {
+		return fmt.Errorf("failed to read gid: %w", err)
+	}
 	return nil
 }
 
 // Serialize writes CreateResponse to io.Writer
 func (r *CreateResponse) Serialize(w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, r.Fd); err != nil {
+		return fmt.Errorf("failed to write fd: %w", err)
+	}
 	if _, err := w.Write(encodeFileHandle(r.Fh)); err != nil {
 		return fmt.Errorf("failed to write fh: %w", err)
 	}
@@ -610,11 +734,36 @@ func (r *CreateResponse) Serialize(w io.Writer) error {
 
 // Deserialize reads CreateResponse from io.Reader
 func (r *CreateResponse) Deserialize(reader io.Reader) error {
+	if err := binary.Read(reader, binary.LittleEndian, &r.Fd); err != nil {
+		return fmt.Errorf("failed to read fd: %w", err)
+	}
 	fh, err := decodeFileHandle(reader)
 	if err != nil {
 		return err
 	}
 	r.Fh = fh
+	if err := binary.Read(reader, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to read attr: %w", err)
+	}
+	return nil
+}
+
+// Serialize writes OpenResponse to io.Writer
+func (r *OpenResponse) Serialize(w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, r.Fd); err != nil {
+		return fmt.Errorf("failed to write fd: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, &r.Attr); err != nil {
+		return fmt.Errorf("failed to write attr: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads OpenResponse from io.Reader
+func (r *OpenResponse) Deserialize(reader io.Reader) error {
+	if err := binary.Read(reader, binary.LittleEndian, &r.Fd); err != nil {
+		return fmt.Errorf("failed to read fd: %w", err)
+	}
 	if err := binary.Read(reader, binary.LittleEndian, &r.Attr); err != nil {
 		return fmt.Errorf("failed to read attr: %w", err)
 	}
@@ -635,6 +784,46 @@ func (r *WriteRequest) Serialize(w io.Writer) error {
 	if len(r.Data) > 0 {
 		if _, err := w.Write(r.Data); err != nil {
 			return fmt.Errorf("failed to write data: %w", err)
+		}
+	}
+	return nil
+}
+
+// Serialize writes WriteFdRequest to io.Writer
+func (r *WriteFdRequest) Serialize(w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, r.Fd); err != nil {
+		return fmt.Errorf("failed to write fd: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Offset); err != nil {
+		return fmt.Errorf("failed to write offset: %w", err)
+	}
+	if err := writeVarint(w, uint64(len(r.Data))); err != nil {
+		return fmt.Errorf("failed to write data length: %w", err)
+	}
+	if len(r.Data) > 0 {
+		if _, err := w.Write(r.Data); err != nil {
+			return fmt.Errorf("failed to write data: %w", err)
+		}
+	}
+	return nil
+}
+
+// Deserialize reads WriteFdRequest from io.Reader
+func (r *WriteFdRequest) Deserialize(reader io.Reader) error {
+	if err := binary.Read(reader, binary.LittleEndian, &r.Fd); err != nil {
+		return fmt.Errorf("failed to read fd: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Offset); err != nil {
+		return fmt.Errorf("failed to read offset: %w", err)
+	}
+	count, err := readVarint(reader, MaxPacketSize)
+	if err != nil {
+		return fmt.Errorf("failed to read data length: %w", err)
+	}
+	if count > 0 {
+		r.Data = make([]byte, count)
+		if _, err := io.ReadFull(reader, r.Data); err != nil {
+			return fmt.Errorf("failed to read data: %w", err)
 		}
 	}
 	return nil
@@ -684,6 +873,15 @@ func (r *MkdirRequest) Serialize(w io.Writer) error {
 	if err := binary.Write(w, binary.LittleEndian, r.Mode); err != nil {
 		return fmt.Errorf("failed to write mode: %w", err)
 	}
+	if err := binary.Write(w, binary.LittleEndian, r.HasOwner); err != nil {
+		return fmt.Errorf("failed to write has owner: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Uid); err != nil {
+		return fmt.Errorf("failed to write uid: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Gid); err != nil {
+		return fmt.Errorf("failed to write gid: %w", err)
+	}
 	return nil
 }
 
@@ -701,6 +899,15 @@ func (r *MkdirRequest) Deserialize(reader io.Reader) error {
 	r.Name = name
 	if err := binary.Read(reader, binary.LittleEndian, &r.Mode); err != nil {
 		return fmt.Errorf("failed to read mode: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.HasOwner); err != nil {
+		return fmt.Errorf("failed to read has owner: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Uid); err != nil {
+		return fmt.Errorf("failed to read uid: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Gid); err != nil {
+		return fmt.Errorf("failed to read gid: %w", err)
 	}
 	return nil
 }
@@ -922,6 +1129,15 @@ func (r *SymlinkRequest) Serialize(w io.Writer) error {
 	if err := writeString(w, r.Target); err != nil {
 		return fmt.Errorf("failed to write target: %w", err)
 	}
+	if err := binary.Write(w, binary.LittleEndian, r.HasOwner); err != nil {
+		return fmt.Errorf("failed to write has owner: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Uid); err != nil {
+		return fmt.Errorf("failed to write uid: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Gid); err != nil {
+		return fmt.Errorf("failed to write gid: %w", err)
+	}
 	return nil
 }
 
@@ -942,6 +1158,15 @@ func (r *SymlinkRequest) Deserialize(reader io.Reader) error {
 		return fmt.Errorf("failed to read target: %w", err)
 	}
 	r.Target = target
+	if err := binary.Read(reader, binary.LittleEndian, &r.HasOwner); err != nil {
+		return fmt.Errorf("failed to read has owner: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Uid); err != nil {
+		return fmt.Errorf("failed to read uid: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Gid); err != nil {
+		return fmt.Errorf("failed to read gid: %w", err)
+	}
 	return nil
 }
 
@@ -1044,6 +1269,40 @@ func (r *FlushRequest) Serialize(w io.Writer) error {
 	return nil
 }
 
+// Serialize writes FlushFdRequest to io.Writer
+func (r *FlushFdRequest) Serialize(w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, r.Fd); err != nil {
+		return fmt.Errorf("failed to write fd: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.LastWriteReqID); err != nil {
+		return fmt.Errorf("failed to write last_write_req_id: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.HasSha256); err != nil {
+		return fmt.Errorf("failed to write has_sha256: %w", err)
+	}
+	if _, err := w.Write(r.Sha256[:]); err != nil {
+		return fmt.Errorf("failed to write sha256: %w", err)
+	}
+	return nil
+}
+
+// Deserialize reads FlushFdRequest from io.Reader
+func (r *FlushFdRequest) Deserialize(reader io.Reader) error {
+	if err := binary.Read(reader, binary.LittleEndian, &r.Fd); err != nil {
+		return fmt.Errorf("failed to read fd: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.LastWriteReqID); err != nil {
+		return fmt.Errorf("failed to read last_write_req_id: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.HasSha256); err != nil {
+		return fmt.Errorf("failed to read has_sha256: %w", err)
+	}
+	if _, err := io.ReadFull(reader, r.Sha256[:]); err != nil {
+		return fmt.Errorf("failed to read sha256: %w", err)
+	}
+	return nil
+}
+
 // Deserialize reads FlushRequest from io.Reader
 func (r *FlushRequest) Deserialize(reader io.Reader) error {
 	fh, err := decodeFileHandle(reader)
@@ -1100,3 +1359,55 @@ func (r *GetattrResponse) Serialize(w io.Writer) error {
 func (r *GetattrResponse) Deserialize(reader io.Reader) error {
 	return binary.Read(reader, binary.LittleEndian, &r.Attr)
 }
+
+func (r *LockRequest) Serialize(w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, r.Fd); err != nil {
+		return fmt.Errorf("failed to write fd: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Owner); err != nil {
+		return fmt.Errorf("failed to write owner: %w", err)
+	}
+	if err := serializeFuseFileLock(w, &r.Lk); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.LittleEndian, r.Flags); err != nil {
+		return fmt.Errorf("failed to write flags: %w", err)
+	}
+	return nil
+}
+
+func (r *LockRequest) Deserialize(reader io.Reader) error {
+	if err := binary.Read(reader, binary.LittleEndian, &r.Fd); err != nil {
+		return fmt.Errorf("failed to read fd: %w", err)
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Owner); err != nil {
+		return fmt.Errorf("failed to read owner: %w", err)
+	}
+	if err := deserializeFuseFileLock(reader, &r.Lk); err != nil {
+		return err
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &r.Flags); err != nil {
+		return fmt.Errorf("failed to read flags: %w", err)
+	}
+	return nil
+}
+
+func (r *GetlkResponse) Serialize(w io.Writer) error {
+	return serializeFuseFileLock(w, &r.Lk)
+}
+
+func (r *GetlkResponse) Deserialize(reader io.Reader) error {
+	return deserializeFuseFileLock(reader, &r.Lk)
+}
+
+func (r *ReleaseFdRequest) Serialize(w io.Writer) error {
+	return binary.Write(w, binary.LittleEndian, r.Fd)
+}
+
+func (r *ReleaseFdRequest) Deserialize(reader io.Reader) error {
+	return binary.Read(reader, binary.LittleEndian, &r.Fd)
+}
+
+func (r *EmptyResponse) Serialize(w io.Writer) error { return nil }
+
+func (r *EmptyResponse) Deserialize(reader io.Reader) error { return nil }

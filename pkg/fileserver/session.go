@@ -16,6 +16,7 @@ package fileserver
 import (
 	"log"
 	"net"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -26,6 +27,10 @@ type Session struct {
 	conn    net.Conn
 	mountID int32 // Mount ID for this session
 	rootFd  int   // File descriptor for root directory (for OpenByHandleAt)
+	fdMu    sync.Mutex
+	fdNext  uint32
+	fds     map[uint32]int
+	onClose func()
 }
 
 // NewSession creates a new session
@@ -34,6 +39,8 @@ func NewSession(conn net.Conn) *Session {
 		conn:    conn,
 		mountID: -1, // Not mounted yet
 		rootFd:  -1, // Not opened yet
+		fdNext:  1,
+		fds:     make(map[uint32]int),
 	}
 
 	// If this is a TCP connection, set TCP_NOTSENT_LOWAT so the kernel
@@ -65,6 +72,47 @@ func (s *Session) Init(mountID int32, rootFd int) {
 	s.rootFd = rootFd
 }
 
+func (s *Session) TrackFd(fd int) uint32 {
+	s.fdMu.Lock()
+	defer s.fdMu.Unlock()
+	token := s.fdNext
+	s.fdNext++
+	s.fds[token] = fd
+	return token
+}
+
+func (s *Session) LookupFd(token uint32) (int, bool) {
+	s.fdMu.Lock()
+	defer s.fdMu.Unlock()
+	fd, ok := s.fds[token]
+	return fd, ok
+}
+
+func (s *Session) CloseFd(token uint32) {
+	s.fdMu.Lock()
+	fd, ok := s.fds[token]
+	if ok {
+		delete(s.fds, token)
+	}
+	s.fdMu.Unlock()
+	if ok {
+		unix.Close(fd)
+	}
+}
+
+func (s *Session) CloseAllFds() {
+	s.fdMu.Lock()
+	openFds := make([]int, 0, len(s.fds))
+	for token, fd := range s.fds {
+		openFds = append(openFds, fd)
+		delete(s.fds, token)
+	}
+	s.fdMu.Unlock()
+	for _, fd := range openFds {
+		unix.Close(fd)
+	}
+}
+
 // Write writes data to the session
 func (s *Session) Write(data []byte) (int, error) {
 	return s.conn.Write(data)
@@ -87,6 +135,11 @@ func (s *Session) SetWriteDeadline(t time.Time) error {
 
 // Close closes the session
 func (s *Session) Close() error {
+	if s.onClose != nil {
+		s.onClose()
+		s.onClose = nil
+	}
+	s.CloseAllFds()
 	if s.rootFd != -1 {
 		unix.Close(s.rootFd)
 		s.rootFd = -1

@@ -672,14 +672,20 @@ func reqToOpCode(req fileserver.Serializable) (uint32, error) {
 		opCode = fileserver.OpLookup
 	case *fileserver.ReadRequest:
 		opCode = fileserver.OpRead
+	case *fileserver.ReadFdRequest:
+		opCode = fileserver.OpReadFd
 	case *fileserver.ReadDirRequest:
 		opCode = fileserver.OpReadDir
 	case *fileserver.ReadlinkRequest:
 		opCode = fileserver.OpReadlink
+	case *fileserver.OpenRequest:
+		opCode = fileserver.OpOpen
 	case *fileserver.CreateRequest:
 		opCode = fileserver.OpCreate
 	case *fileserver.WriteRequest:
 		opCode = fileserver.OpWrite
+	case *fileserver.WriteFdRequest:
+		opCode = fileserver.OpWriteFd
 	case *fileserver.MkdirRequest:
 		opCode = fileserver.OpMkdir
 	case *fileserver.UnlinkRequest:
@@ -696,8 +702,14 @@ func reqToOpCode(req fileserver.Serializable) (uint32, error) {
 		opCode = fileserver.OpLink
 	case *fileserver.FlushRequest:
 		opCode = fileserver.OpFlush
+	case *fileserver.FlushFdRequest:
+		opCode = fileserver.OpFlushFd
 	case *fileserver.GetattrRequest:
 		opCode = fileserver.OpGetattr
+	case *fileserver.LockRequest:
+		opCode = fileserver.OpSetlk
+	case *fileserver.ReleaseFdRequest:
+		opCode = fileserver.OpReleaseFd
 	default:
 		return 0, fmt.Errorf("unknown request type")
 	}

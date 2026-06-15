@@ -239,6 +239,11 @@ func (n *RWNode) Create(ctx context.Context, name string, flags uint32, mode uin
 		Flags:    flags,
 		Mode:     mode,
 	}
+	if caller, ok := fuse.FromContext(ctx); ok {
+		createReq.HasOwner = 1
+		createReq.Uid = caller.Uid
+		createReq.Gid = caller.Gid
+	}
 	createResp := fileserver.CreateResponse{}
 	if err := n.client.SendRequest(&createReq, &createResp); err != nil {
 		return nil, nil, 0, fs.ToErrno(err)
@@ -258,15 +263,15 @@ func (n *RWNode) Create(ctx context.Context, name string, flags uint32, mode uin
 	}
 	child := n.NewPersistentInode(ctx, childNode, stable)
 
-	file := newRWFile(n.client, createResp.Fh, createResp.Attr, true)
+	file := newRWFile(n.client, createResp.Fh, createResp.Fd, createResp.Attr, true)
 
 	return child, file, 0, fs.OK
 }
 
 // Open opens a file for reading or writing
 func (n *RWNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
-	req := fileserver.GetattrRequest{Fh: n.fh}
-	var resp fileserver.GetattrResponse
+	req := fileserver.OpenRequest{Fh: n.fh, Flags: flags}
+	var resp fileserver.OpenResponse
 	if err := n.client.SendRequest(&req, &resp); err != nil {
 		return nil, 0, fs.ToErrno(err)
 	}
@@ -284,7 +289,7 @@ func (n *RWNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32,
 	if n.attr == nil {
 
 	}
-	file := newRWFile(n.client, n.fh, *attr, isWrite)
+	file := newRWFile(n.client, n.fh, resp.Fd, *attr, isWrite)
 	// For read-only opens with a valid cache key, try to open from cache
 	if isWrite {
 		n.mu.Lock()
@@ -329,6 +334,11 @@ func (n *RWNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.
 		ParentFh: n.fh,
 		Name:     name,
 		Mode:     mode,
+	}
+	if caller, ok := fuse.FromContext(ctx); ok {
+		req.HasOwner = 1
+		req.Uid = caller.Uid
+		req.Gid = caller.Gid
 	}
 	var resp fileserver.MkdirResponse
 	if err := n.client.SendRequest(&req, &resp); err != nil {
@@ -435,6 +445,11 @@ func (n *RWNode) Symlink(ctx context.Context, target, name string, out *fuse.Ent
 		Name:     name,
 		Target:   target,
 	}
+	if caller, ok := fuse.FromContext(ctx); ok {
+		req.HasOwner = 1
+		req.Uid = caller.Uid
+		req.Gid = caller.Gid
+	}
 	var resp fileserver.SymlinkResponse
 	if err := n.client.SendRequest(&req, &resp); err != nil {
 		return nil, fs.ToErrno(err)
@@ -485,4 +500,13 @@ func (n *RWNode) Link(ctx context.Context, target fs.InodeEmbedder, name string,
 	}
 	child := n.NewPersistentInode(ctx, childNode, stable)
 	return child, fs.OK
+}
+
+var _ fs.NodeFsyncer = (*RWNode)(nil)
+
+func (n *RWNode) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
+	if file, ok := f.(*RWFile); ok {
+		return file.Fsync(ctx, flags)
+	}
+	return fs.OK
 }

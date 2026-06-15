@@ -48,6 +48,7 @@ const (
 type RWFile struct {
 	client *DirectFSClient
 	fh     unix.FileHandle
+	fd     uint32
 	attr   fileserver.FileAttr
 
 	// Cache-backed read
@@ -68,25 +69,39 @@ type RWFile struct {
 	seqEnabled    bool
 	seqWriter     CacheWriter
 	seqHashHex    string
+
+	// Track which lock owners/flag modes were set through this FD so we can
+	// explicitly release them from the client side on close.
+	fdLocks map[rwFileLockOwnerKey]struct{}
+}
+
+type rwFileLockOwnerKey struct {
+	owner uint64
+	flags uint32
 }
 
 // Ensure interface compliance
 var _ fs.FileHandle = (*RWFile)(nil)
 var _ fs.FileReader = (*RWFile)(nil)
 var _ fs.FileWriter = (*RWFile)(nil)
+var _ fs.FileGetlker = (*RWFile)(nil)
+var _ fs.FileSetlker = (*RWFile)(nil)
+var _ fs.FileSetlkwer = (*RWFile)(nil)
 var _ fs.FileFlusher = (*RWFile)(nil)
 var _ fs.FileReleaser = (*RWFile)(nil)
 var _ fs.FileSetattrer = (*RWFile)(nil)
 
-func newRWFile(client *DirectFSClient, fh unix.FileHandle, attr fileserver.FileAttr, isWrite bool) *RWFile {
+func newRWFile(client *DirectFSClient, fh unix.FileHandle, fd uint32, attr fileserver.FileAttr, isWrite bool) *RWFile {
 	f := &RWFile{
 		client:        client,
 		fh:            fh,
+		fd:            fd,
 		attr:          attr,
 		isWrite:       isWrite,
 		fetchDone:     make(chan struct{}),
 		nextSeqOffset: 0,
 		seqEnabled:    isWrite,
+		fdLocks:       make(map[rwFileLockOwnerKey]struct{}),
 	}
 
 	return f
@@ -130,11 +145,16 @@ func (f *RWFile) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	}
 
 	// Fallback: read from server
-	readReq := fileserver.ReadRequest{
-		Fh:     f.fh,
-		Offset: uint64(off),
-		Size:   uint32(len(dest)),
+	if f.fd != 0 {
+		readReq := fileserver.ReadFdRequest{Fd: f.fd, Offset: uint64(off), Size: uint32(len(dest))}
+		readResp := fileserver.ReadResponse{}
+		if err := f.client.SendRequest(&readReq, &readResp); err != nil {
+			return nil, fs.ToErrno(err)
+		}
+		return fuse.ReadResultData(readResp.Data), fs.OK
 	}
+
+	readReq := fileserver.ReadRequest{Fh: f.fh, Offset: uint64(off), Size: uint32(len(dest))}
 	readResp := fileserver.ReadResponse{}
 	if err := f.client.SendRequest(&readReq, &readResp); err != nil {
 		return nil, fs.ToErrno(err)
@@ -301,10 +321,11 @@ func (f *RWFile) Write(ctx context.Context, data []byte, off int64) (uint32, sys
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
-	req := &fileserver.WriteRequest{
-		Fh:     f.fh,
-		Offset: uint64(off),
-		Data:   dataCopy,
+	var req fileserver.Serializable
+	if f.fd != 0 {
+		req = &fileserver.WriteFdRequest{Fd: f.fd, Offset: uint64(off), Data: dataCopy}
+	} else {
+		req = &fileserver.WriteRequest{Fh: f.fh, Offset: uint64(off), Data: dataCopy}
 	}
 	resp := &fileserver.WriteResponse{}
 
@@ -356,11 +377,11 @@ func (f *RWFile) Flush(ctx context.Context) syscall.Errno {
 	}
 	f.mu.Unlock()
 
-	flushReq := &fileserver.FlushRequest{
-		Fh:             f.fh,
-		LastWriteReqID: f.lastWriteReq,
-		HasSha256:      hasHash,
-		Sha256:         clientHash,
+	var flushReq fileserver.Serializable
+	if f.fd != 0 {
+		flushReq = &fileserver.FlushFdRequest{Fd: f.fd, LastWriteReqID: f.lastWriteReq, HasSha256: hasHash, Sha256: clientHash}
+	} else {
+		flushReq = &fileserver.FlushRequest{Fh: f.fh, LastWriteReqID: f.lastWriteReq, HasSha256: hasHash, Sha256: clientHash}
 	}
 	flushResp := &fileserver.FlushResponse{}
 
@@ -419,10 +440,107 @@ func (f *RWFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.Attr
 	return fs.OK
 }
 
+func (f *RWFile) Getlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32, out *fuse.FileLock) syscall.Errno {
+	req := fileserver.LockRequest{
+		Fd:    f.fd,
+		Owner: owner,
+		Lk:    *lk,
+		Flags: flags,
+	}
+	var resp fileserver.GetlkResponse
+	if err := f.client.sendRequestWithData(fileserver.OpGetlk, fileserver.FlagNone, &req, &resp); err != nil {
+		return fs.ToErrno(err)
+	}
+	*out = resp.Lk
+	return fs.OK
+}
+
+func (f *RWFile) Setlk(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
+	req := fileserver.LockRequest{
+		Fd:    f.fd,
+		Owner: owner,
+		Lk:    *lk,
+		Flags: flags,
+	}
+	if err := f.client.sendRequestWithData(fileserver.OpSetlk, fileserver.FlagNone, &req, &fileserver.EmptyResponse{}); err != nil {
+		return fs.ToErrno(err)
+	}
+	f.recordFDLock(owner, lk.Typ, flags)
+	return fs.OK
+}
+
+func (f *RWFile) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLock, flags uint32) syscall.Errno {
+	req := fileserver.LockRequest{
+		Fd:    f.fd,
+		Owner: owner,
+		Lk:    *lk,
+		Flags: flags,
+	}
+	if err := f.client.sendRequestWithData(fileserver.OpSetlkw, fileserver.FlagNone, &req, &fileserver.EmptyResponse{}); err != nil {
+		return fs.ToErrno(err)
+	}
+	f.recordFDLock(owner, lk.Typ, flags)
+	return fs.OK
+}
+
+func (f *RWFile) recordFDLock(owner uint64, typ uint32, flags uint32) {
+	key := rwFileLockOwnerKey{owner: owner, flags: flags}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if typ == syscall.F_UNLCK {
+		delete(f.fdLocks, key)
+		return
+	}
+	f.fdLocks[key] = struct{}{}
+}
+
+func (f *RWFile) drainFDLocks() []rwFileLockOwnerKey {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]rwFileLockOwnerKey, 0, len(f.fdLocks))
+	for key := range f.fdLocks {
+		out = append(out, key)
+	}
+	f.fdLocks = make(map[rwFileLockOwnerKey]struct{})
+	return out
+}
+
+func (f *RWFile) unlockAllFDLocks() {
+	keys := f.drainFDLocks()
+	if len(keys) == 0 {
+		return
+	}
+
+	for _, key := range keys {
+		unlockReq := fileserver.LockRequest{
+			Fd:    f.fd,
+			Owner: key.owner,
+			Lk: fuse.FileLock{
+				Start: 0,
+				End:   ^uint64(0),
+				Typ:   syscall.F_UNLCK,
+				Pid:   0,
+			},
+			Flags: key.flags,
+		}
+		if err := f.client.sendRequestWithData(fileserver.OpSetlk, fileserver.FlagNone, &unlockReq, &fileserver.EmptyResponse{}); err != nil {
+			log.Printf("RWFile Release: failed to unlock fh (type=%d, size=%d) owner=%d flags=%d: %v", f.fh.Type(), f.fh.Size(), key.owner, key.flags, err)
+		}
+	}
+}
+
 // Release closes the file handle
 func (f *RWFile) Release(ctx context.Context) syscall.Errno {
 	if f.isWrite {
 		_ = f.Flush(ctx)
+	}
+	f.unlockAllFDLocks()
+	if f.fd != 0 {
+		releaseReq := fileserver.ReleaseFdRequest{Fd: f.fd}
+		if err := f.client.SendRequest(&releaseReq, &fileserver.EmptyResponse{}); err != nil {
+			log.Printf("RWFile Release: failed to release fd token %d: %v", f.fd, err)
+		}
+		f.fd = 0
 	}
 
 	f.mu.Lock()

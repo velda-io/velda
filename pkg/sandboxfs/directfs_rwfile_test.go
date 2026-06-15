@@ -18,10 +18,12 @@ package sandboxfs
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,8 +31,13 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 	"velda.io/velda/pkg/fileserver"
 )
+
+func getOFDLock(fd uintptr, lk *syscall.Flock_t) error {
+	return syscall.FcntlFlock(fd, unix.F_OFD_GETLK, lk)
+}
 
 func mountDirectFSRWClientForTest(client *DirectFSClient, mountPoint string) (*VeldaServer, error) {
 	fh, attr, err := client.Connect()
@@ -610,4 +617,173 @@ func TestRWFileDataIntegrity(t *testing.T) {
 	// Verify byte-for-byte equality
 	assert.Equal(t, content, readBack)
 	assert.Equal(t, len(content), len(readBack))
+}
+
+func TestRWFileLocking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping RWFile test in short mode")
+	}
+
+	env := setupRWDirectFSEnv(t)
+	testFile := filepath.Join(env.mountDir, "locking.txt")
+
+	f1, err := os.OpenFile(testFile, os.O_CREATE|os.O_RDWR, 0644)
+	require.NoError(t, err)
+	defer f1.Close()
+
+	// Use OFD write lock on f1
+	writeLock := syscall.Flock_t{
+		Type:   syscall.F_WRLCK,
+		Whence: io.SeekStart,
+		Start:  0,
+		Len:    0,
+	}
+	require.NoError(t, syscall.FcntlFlock(f1.Fd(), unix.F_OFD_SETLK, &writeLock))
+
+	f2, err := os.OpenFile(testFile, os.O_RDWR, 0644)
+	require.NoError(t, err)
+	defer f2.Close()
+
+	// Check the lock from f2 - should see f1's write lock
+	conflict := syscall.Flock_t{
+		Type:   syscall.F_WRLCK,
+		Whence: io.SeekStart,
+		Start:  0,
+		Len:    0,
+	}
+	require.NoError(t, getOFDLock(f2.Fd(), &conflict))
+	assert.Equal(t, int16(syscall.F_WRLCK), conflict.Type)
+
+	// Try to set a read lock on f2 - should fail because f1 has write lock
+	readLock := syscall.Flock_t{
+		Type:   syscall.F_RDLCK,
+		Whence: io.SeekStart,
+		Start:  0,
+		Len:    0,
+	}
+	err = syscall.FcntlFlock(f2.Fd(), unix.F_OFD_SETLK, &readLock)
+	assert.Error(t, err, "Setting read lock should fail due to write lock")
+	assert.True(t, errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK),
+		"Lock conflict should return EAGAIN or EWOULDBLOCK, got: %v", err)
+
+	// Unlock from f1
+	unlock := syscall.Flock_t{
+		Type:   syscall.F_UNLCK,
+		Whence: io.SeekStart,
+		Start:  0,
+		Len:    0,
+	}
+	require.NoError(t, syscall.FcntlFlock(f1.Fd(), unix.F_OFD_SETLK, &unlock))
+
+	// Now setting read lock on f2 should succeed
+	require.NoError(t, syscall.FcntlFlock(f2.Fd(), unix.F_OFD_SETLK, &readLock))
+
+	// Unlock from f2
+	require.NoError(t, syscall.FcntlFlock(f2.Fd(), unix.F_OFD_SETLK, &unlock))
+}
+
+// TestRWFileDeleteAfterRead tests that reads complete even after file is deleted
+// This verifies that the FD token persists after the backend file handle becomes invalid
+func TestRWFileDeleteAfterRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping RWFile test in short mode")
+	}
+
+	env := setupRWDirectFSEnv(t)
+
+	testFile := filepath.Join(env.mountDir, "delete_after_read.txt")
+	content := []byte("This is test content for deletion after read")
+
+	// Create and write file
+	f, err := os.OpenFile(testFile, os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = f.Write(content)
+	require.NoError(t, err)
+	f.Close()
+
+	// Open file for reading
+	f, err = os.OpenFile(testFile, os.O_RDONLY, 0644)
+	require.NoError(t, err)
+	defer f.Close()
+
+	// Delete file while it's still open
+	err = os.Remove(testFile)
+	require.NoError(t, err, "Should be able to delete open file")
+
+	// Read from the open file should still work - the fd token should persist
+	buf := make([]byte, len(content))
+	n, err := f.Read(buf)
+	require.NoError(t, err, "Read should succeed even after file deletion")
+	assert.Equal(t, len(content), n, "Should read all content")
+	assert.Equal(t, content, buf, "Content should match")
+
+	// Verify file is indeed deleted from filesystem
+	_, err = os.Stat(testFile)
+	assert.True(t, errors.Is(err, os.ErrNotExist), "File should not exist")
+}
+
+// TestRWFileAttrModifications tests chmod, chown, and truncate operations
+func TestRWFileAttrModifications(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping RWFile test in short mode")
+	}
+
+	env := setupRWDirectFSEnv(t)
+
+	testFile := filepath.Join(env.mountDir, "attr_mod.txt")
+	content := []byte("Test content with some data")
+
+	// Create file
+	f, err := os.OpenFile(testFile, os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = f.Write(content)
+	require.NoError(t, err)
+	f.Close()
+
+	// Get initial attributes
+	stat1, err := os.Stat(testFile)
+	require.NoError(t, err)
+	initialMode := stat1.Mode()
+	initialSize := stat1.Size()
+
+	// Test chmod
+	newMode := os.FileMode(0600)
+	err = os.Chmod(testFile, newMode)
+	require.NoError(t, err, "chmod should succeed")
+
+	stat2, err := os.Stat(testFile)
+	require.NoError(t, err)
+	// Compare permission bits (ignoring file type bits)
+	assert.Equal(t, newMode, stat2.Mode()&0777, "Permissions should change after chmod")
+	assert.NotEqual(t, initialMode&0777, stat2.Mode()&0777, "Mode bits should differ from initial")
+
+	// Test truncate
+	truncateSize := int64(10)
+	err = os.Truncate(testFile, truncateSize)
+	require.NoError(t, err, "truncate should succeed")
+
+	stat3, err := os.Stat(testFile)
+	require.NoError(t, err)
+	assert.Equal(t, truncateSize, stat3.Size(), "Size should match truncate target")
+	assert.Less(t, stat3.Size(), initialSize, "Truncated size should be less than initial")
+
+	// Verify file size reflects truncation
+	f, err = os.OpenFile(testFile, os.O_RDONLY, 0644)
+	require.NoError(t, err)
+	defer f.Close()
+
+	n, err := io.ReadAll(f)
+	require.NoError(t, err)
+	assert.Equal(t, int(truncateSize), len(n), "Read size should match truncated size")
+
+	// Test chown (if running as root)
+	if os.Geteuid() == 0 {
+		err = os.Chown(testFile, 0, 0)
+		require.NoError(t, err, "chown should succeed as root")
+
+		stat4, err := os.Stat(testFile)
+		require.NoError(t, err)
+		assert.Equal(t, uint32(0), uint32(stat4.Sys().(*syscall.Stat_t).Uid), "UID should be 0")
+		assert.Equal(t, uint32(0), uint32(stat4.Sys().(*syscall.Stat_t).Gid), "GID should be 0")
+	}
 }

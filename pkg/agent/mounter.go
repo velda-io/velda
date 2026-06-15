@@ -241,7 +241,7 @@ func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, works
 			}
 		} else if m.sandboxConfig.GetDiskSource().GetCasConfig().GetUseDirectProtocol() {
 			// Use DirectFS mode with NFS server address
-			args = append(args, "--mode", "directfs", "--verbose", "--debug")
+			args = append(args, "--mode", "directfs")
 		}
 	} else {
 		args = append(args, "--mode", "nocache")
