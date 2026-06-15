@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sys/unix"
 )
@@ -58,6 +59,122 @@ type FileServer struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
+	locks      *fileLockManager
+}
+
+type fileLockKey struct {
+	fh    string
+	owner uint64
+}
+
+type fileLockManager struct {
+	mu       sync.Mutex
+	sessions map[*Session]map[fileLockKey]int
+}
+
+func newFileLockManager() *fileLockManager {
+	return &fileLockManager{sessions: make(map[*Session]map[fileLockKey]int)}
+}
+
+func fileHandleKey(fh unix.FileHandle) string {
+	return string(encodeFileHandle(fh))
+}
+
+const (
+	_OFD_GETLK  = 36
+	_OFD_SETLK  = 37
+	_OFD_SETLKW = 38
+)
+
+func (m *fileLockManager) getOrCreateFD(session *Session, fh unix.FileHandle, owner uint64, write bool) (int, error) {
+	if session == nil || session.rootFd == -1 {
+		return -1, syscall.EBADF
+	}
+
+	key := fileLockKey{fh: fileHandleKey(fh), owner: owner}
+
+	m.mu.Lock()
+	if perSession, ok := m.sessions[session]; ok {
+		if fd, ok := perSession[key]; ok {
+			m.mu.Unlock()
+			return fd, nil
+		}
+	}
+	m.mu.Unlock()
+
+	openFlags := unix.O_NOFOLLOW | unix.O_CLOEXEC
+	mode := unix.O_RDONLY
+	if write {
+		mode = unix.O_RDWR
+	}
+
+	fd, err := unix.OpenByHandleAt(session.rootFd, fh, mode|openFlags)
+	if err != nil {
+		return -1, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	perSession := m.sessions[session]
+	if perSession == nil {
+		perSession = make(map[fileLockKey]int)
+		m.sessions[session] = perSession
+	}
+	if existing, ok := perSession[key]; ok {
+		unix.Close(fd)
+		return existing, nil
+	}
+	perSession[key] = fd
+	return fd, nil
+}
+
+func (m *fileLockManager) Getlk(fd int, owner uint64, lk fuse.FileLock, _ uint32) (fuse.FileLock, error) {
+	flk := syscall.Flock_t{}
+	lk.ToFlockT(&flk)
+	if err := syscall.FcntlFlock(uintptr(fd), _OFD_GETLK, &flk); err != nil {
+		return NewUnlockFileLock(), err
+	}
+	out := NewUnlockFileLock()
+	out.FromFlockT(&flk)
+	return out, nil
+}
+
+func (m *fileLockManager) Setlk(fd int, owner uint64, lk fuse.FileLock, flags uint32, blocking bool) error {
+	if (flags & fuse.FUSE_LK_FLOCK) != 0 {
+		var op int
+		switch lk.Typ {
+		case syscall.F_RDLCK:
+			op = syscall.LOCK_SH
+		case syscall.F_WRLCK:
+			op = syscall.LOCK_EX
+		case syscall.F_UNLCK:
+			op = syscall.LOCK_UN
+		default:
+			return syscall.EINVAL
+		}
+		if !blocking {
+			op |= syscall.LOCK_NB
+		}
+		return syscall.Flock(fd, op)
+	}
+
+	flk := syscall.Flock_t{}
+	lk.ToFlockT(&flk)
+	op := _OFD_SETLK
+	if blocking {
+		op = _OFD_SETLKW
+	}
+	return syscall.FcntlFlock(uintptr(fd), op, &flk)
+}
+
+func (m *fileLockManager) ReleaseSession(session *Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	perSession := m.sessions[session]
+	for _, fd := range perSession {
+		unix.Close(fd)
+	}
+	delete(m.sessions, session)
 }
 
 // Request wrapper for dispatching
@@ -87,6 +204,7 @@ func NewFileServer(rootPath string, numWorkers int) *FileServer {
 		numWorkers:    numWorkers,
 		ctx:           ctx,
 		cancel:        cancel,
+		locks:         newFileLockManager(),
 	}
 }
 
@@ -301,7 +419,7 @@ func (fs *FileServer) sendResponseChunked(resp Response) {
 	// Parse the header from the original packet.
 	var header Header
 	if err := header.Deserialize(bytes.NewReader(data[:HeaderSize])); err != nil || header.Seq == 0 {
-		fmt.Printf("Failed to parse header for chunking: %v\n", err)
+		log.Printf("Failed to parse header for chunking: %v", err)
 		fs.sendResponse(resp)
 		return
 	}
@@ -521,12 +639,26 @@ func (fs *FileServer) handleRequest(req Request) {
 		} else {
 			resp, err = fs.handleLookup(&lookupReq, req.Session)
 		}
+	case OpOpen:
+		openReq := OpenRequest{}
+		if deserErr := openReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize open request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleOpen(&openReq, req.Session)
+		}
 	case OpRead:
 		readReq := ReadRequest{}
 		if deserErr := readReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
 			err = fmt.Errorf("failed to deserialize read request: %w", syscall.EINVAL)
 		} else {
 			resp, err = fs.handleRead(&readReq, req.Session)
+		}
+	case OpReadFd:
+		readReq := ReadFdRequest{}
+		if deserErr := readReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize readfd request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleReadFd(&readReq, req.Session)
 		}
 	case OpReadDir:
 		readDirReq := ReadDirRequest{}
@@ -541,6 +673,125 @@ func (fs *FileServer) handleRequest(req Request) {
 			err = fmt.Errorf("failed to deserialize readlink request: %w", syscall.EINVAL)
 		} else {
 			resp, err = fs.handleReadlink(&readlinkReq, req.Session)
+		}
+	case OpCreate:
+		createReq := CreateRequest{}
+		if deserErr := createReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize create request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleCreate(&createReq, req.Session)
+		}
+	case OpWrite:
+		writeReq := WriteRequest{}
+		if deserErr := writeReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize write request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleWrite(&writeReq, req.Session)
+		}
+	case OpWriteFd:
+		writeReq := WriteFdRequest{}
+		if deserErr := writeReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize writefd request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleWriteFd(&writeReq, req.Session)
+		}
+	case OpMkdir:
+		mkdirReq := MkdirRequest{}
+		if deserErr := mkdirReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize mkdir request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleMkdir(&mkdirReq, req.Session)
+		}
+	case OpUnlink:
+		unlinkReq := UnlinkRequest{}
+		if deserErr := unlinkReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize unlink request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleUnlink(&unlinkReq, req.Session)
+		}
+	case OpRmdir:
+		rmdirReq := RmdirRequest{}
+		if deserErr := rmdirReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize rmdir request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleRmdir(&rmdirReq, req.Session)
+		}
+	case OpRename:
+		renameReq := RenameRequest{}
+		if deserErr := renameReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize rename request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleRename(&renameReq, req.Session)
+		}
+	case OpSetattr:
+		setattrReq := SetattrRequest{}
+		if deserErr := setattrReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize setattr request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleSetattr(&setattrReq, req.Session)
+		}
+	case OpSymlink:
+		symlinkReq := SymlinkRequest{}
+		if deserErr := symlinkReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize symlink request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleSymlink(&symlinkReq, req.Session)
+		}
+	case OpLink:
+		linkReq := LinkRequest{}
+		if deserErr := linkReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize link request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleLink(&linkReq, req.Session)
+		}
+	case OpFlush:
+		flushReq := FlushRequest{}
+		if deserErr := flushReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize flush request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleFlush(&flushReq, req.Session)
+		}
+	case OpFlushFd:
+		flushReq := FlushFdRequest{}
+		if deserErr := flushReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize flushfd request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleFlushFd(&flushReq, req.Session)
+		}
+	case OpReleaseFd:
+		releaseReq := ReleaseFdRequest{}
+		if deserErr := releaseReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize releasefd request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleReleaseFd(&releaseReq, req.Session)
+		}
+	case OpGetattr:
+		getattrReq := GetattrRequest{}
+		if deserErr := getattrReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize getattr request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleGetattr(&getattrReq, req.Session)
+		}
+	case OpGetlk:
+		lockReq := LockRequest{}
+		if deserErr := lockReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize getlk request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleGetlk(&lockReq, req.Session)
+		}
+	case OpSetlk:
+		lockReq := LockRequest{}
+		if deserErr := lockReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize setlk request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleSetlk(&lockReq, req.Session, false)
+		}
+	case OpSetlkw:
+		lockReq := LockRequest{}
+		if deserErr := lockReq.Deserialize(bytes.NewReader(req.Data)); deserErr != nil {
+			err = fmt.Errorf("failed to deserialize setlkw request: %w", syscall.EINVAL)
+		} else {
+			resp, err = fs.handleSetlk(&lockReq, req.Session, true)
 		}
 	default:
 		err = fmt.Errorf("unsupported opcode %d: %w", req.Header.Opcode, syscall.ENOSYS)
@@ -565,12 +816,13 @@ func (fs *FileServer) handleRequest(req Request) {
 	} else {
 		var serErr error
 		// Use opcode=0 for success responses
-		respBytes, serErr = SerializeWithHeader(0, req.Header.Seq, req.Header.Flags, resp)
+		respBytes, serErr = SerializeWithHeader(0, req.Header.Seq, 0, resp)
 		if serErr != nil {
 			log.Printf("Failed to serialize response for opcode=%d seq=%d: %v", req.Header.Opcode, req.Header.Seq, serErr)
 			respBytes = fs.makeErrorResponse(req.Header.Seq, syscall.EIO)
 		}
 	}
+	//log.Printf("Handled request opcode=%d seq=%d, response size=%d, error=%v", req.Header.Opcode, req.Header.Seq, len(respBytes), err)
 
 	// Route response to appropriate priority queue based on request priority
 	if req.Header.Flags&FlagQosLow != 0 {
@@ -677,6 +929,9 @@ func (fs *FileServer) handleMount(mountReq *MountRequest, session *Session) (Ser
 
 	// Save mount_id in session
 	session.Init(int32(mountID), rootFd)
+	session.onClose = func() {
+		fs.locks.ReleaseSession(session)
+	}
 
 	// Create file attributes for the root
 	attr := fs.makeFileAttr(&stat)
@@ -761,6 +1016,22 @@ func (fs *FileServer) handleRead(readReq *ReadRequest, session *Session) (Serial
 	}
 
 	return resp, nil
+}
+
+// handleReadFd handles read requests that reference a session-scoped fd token.
+func (fs *FileServer) handleReadFd(readReq *ReadFdRequest, session *Session) (Serializable, error) {
+	fd, ok := session.LookupFd(readReq.Fd)
+	if !ok {
+		return nil, fmt.Errorf("failed to resolve fd %d: %w", readReq.Fd, syscall.EBADF)
+	}
+
+	data := make([]byte, readReq.Size)
+	n, err := unix.Pread(fd, data, int64(readReq.Offset))
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("failed to read at offset=%d, size=%d: %w", readReq.Offset, readReq.Size, err)
+	}
+
+	return &ReadResponse{Data: data[:n]}, nil
 }
 
 // handleReadDir handles readdir requests
@@ -854,6 +1125,384 @@ func (fs *FileServer) handleReadlink(readlinkReq *ReadlinkRequest, session *Sess
 	return resp, nil
 }
 
+// handleCreate handles file creation requests
+func (fs *FileServer) handleCreate(req *CreateRequest, session *Session) (Serializable, error) {
+	parentFd, err := unix.OpenByHandleAt(session.rootFd, req.ParentFh, unix.O_DIRECTORY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open parent directory: %w", err)
+	}
+	defer unix.Close(parentFd)
+
+	flags := int(req.Flags) | os.O_CREATE
+	fd, err := unix.Openat(parentFd, req.Name, flags, req.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file %s: %w", req.Name, err)
+	}
+
+	if req.HasOwner != 0 {
+		if err := unix.Fchown(fd, int(req.Uid), int(req.Gid)); err != nil {
+			unix.Close(fd)
+			return nil, fmt.Errorf("failed to set owner on file %s to %d:%d: %w", req.Name, req.Uid, req.Gid, err)
+		}
+	}
+
+	// Get file handle
+	fileHandle, mountID, err := unix.NameToHandleAt(parentFd, req.Name, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file handle for %s: %w", req.Name, err)
+	}
+	if int32(mountID) != session.mountID {
+		unix.Close(fd)
+		return nil, fmt.Errorf("mount ID mismatch: %w", syscall.EXDEV)
+	}
+
+	attr, err := fs.makeFileAttrWithPath(parentFd, req.Name)
+	if err != nil {
+		unix.Close(fd)
+		return nil, err
+	}
+
+	fdToken := session.TrackFd(fd)
+	return &CreateResponse{Fd: fdToken, Fh: fileHandle, Attr: attr}, nil
+}
+
+// handleOpen opens an existing file and returns a session-scoped fd token.
+func (fs *FileServer) handleOpen(req *OpenRequest, session *Session) (Serializable, error) {
+	openFlags := int(req.Flags) | unix.O_CLOEXEC
+	if openFlags&(unix.O_RDONLY|unix.O_WRONLY|unix.O_RDWR) == 0 {
+		openFlags |= unix.O_RDONLY
+	}
+	fd, err := unix.OpenByHandleAt(session.rootFd, req.Fh, openFlags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+	if req.HasOwner != 0 {
+		if err := unix.Fchown(fd, int(req.Uid), int(req.Gid)); err != nil {
+			unix.Close(fd)
+			return nil, fmt.Errorf("failed to set owner on open file to %d:%d: %w", req.Uid, req.Gid, err)
+		}
+	}
+
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		unix.Close(fd)
+		return nil, fmt.Errorf("failed to stat opened file: %w", err)
+	}
+
+	fdToken := session.TrackFd(fd)
+	return &OpenResponse{Fd: fdToken, Attr: fs.makeFileAttr(&stat)}, nil
+}
+
+// handleWrite handles write requests
+func (fs *FileServer) handleWrite(req *WriteRequest, session *Session) (Serializable, error) {
+	fd, err := unix.OpenByHandleAt(session.rootFd, req.Fh, unix.O_WRONLY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for writing: %w", err)
+	}
+	defer unix.Close(fd)
+
+	n, err := unix.Pwrite(fd, req.Data, int64(req.Offset))
+	if err != nil {
+		return nil, fmt.Errorf("failed to write at offset=%d: %w", req.Offset, err)
+	}
+
+	return &WriteResponse{Size: uint32(n)}, nil
+}
+
+// handleWriteFd handles writes using a session-scoped fd token.
+func (fs *FileServer) handleWriteFd(req *WriteFdRequest, session *Session) (Serializable, error) {
+	fd, ok := session.LookupFd(req.Fd)
+	if !ok {
+		return nil, fmt.Errorf("failed to resolve fd %d: %w", req.Fd, syscall.EBADF)
+	}
+	n, err := unix.Pwrite(fd, req.Data, int64(req.Offset))
+	if err != nil {
+		return nil, fmt.Errorf("failed to write at offset=%d: %w", req.Offset, err)
+	}
+	return &WriteResponse{Size: uint32(n)}, nil
+}
+
+// handleMkdir handles mkdir requests
+func (fs *FileServer) handleMkdir(req *MkdirRequest, session *Session) (Serializable, error) {
+	parentFd, err := unix.OpenByHandleAt(session.rootFd, req.ParentFh, unix.O_DIRECTORY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open parent directory: %w", err)
+	}
+	defer unix.Close(parentFd)
+
+	if err := unix.Mkdirat(parentFd, req.Name, req.Mode); err != nil {
+		return nil, fmt.Errorf("failed to mkdir %s: %w", req.Name, err)
+	}
+
+	if req.HasOwner != 0 {
+		if err := unix.Fchownat(parentFd, req.Name, int(req.Uid), int(req.Gid), unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return nil, fmt.Errorf("failed to set owner on dir %s to %d:%d: %w", req.Name, req.Uid, req.Gid, err)
+		}
+	}
+
+	fileHandle, mountID, err := unix.NameToHandleAt(parentFd, req.Name, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file handle for %s: %w", req.Name, err)
+	}
+	if int32(mountID) != session.mountID {
+		return nil, fmt.Errorf("mount ID mismatch: %w", syscall.EXDEV)
+	}
+
+	attr, err := fs.makeFileAttrWithPath(parentFd, req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &MkdirResponse{Fh: fileHandle, Attr: attr}, nil
+}
+
+// handleUnlink handles unlink requests
+func (fs *FileServer) handleUnlink(req *UnlinkRequest, session *Session) (Serializable, error) {
+	parentFd, err := unix.OpenByHandleAt(session.rootFd, req.ParentFh, unix.O_DIRECTORY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open parent directory: %w", err)
+	}
+	defer unix.Close(parentFd)
+
+	if err := unix.Unlinkat(parentFd, req.Name, 0); err != nil {
+		return nil, fmt.Errorf("failed to unlink %s: %w", req.Name, err)
+	}
+
+	return &UnlinkResponse{}, nil
+}
+
+// handleRmdir handles rmdir requests
+func (fs *FileServer) handleRmdir(req *RmdirRequest, session *Session) (Serializable, error) {
+	parentFd, err := unix.OpenByHandleAt(session.rootFd, req.ParentFh, unix.O_DIRECTORY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open parent directory: %w", err)
+	}
+	defer unix.Close(parentFd)
+
+	if err := unix.Unlinkat(parentFd, req.Name, unix.AT_REMOVEDIR); err != nil {
+		return nil, fmt.Errorf("failed to rmdir %s: %w", req.Name, err)
+	}
+
+	return &RmdirResponse{}, nil
+}
+
+// handleRename handles rename requests
+func (fs *FileServer) handleRename(req *RenameRequest, session *Session) (Serializable, error) {
+	oldParentFd, err := unix.OpenByHandleAt(session.rootFd, req.OldParentFh, unix.O_DIRECTORY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open old parent directory: %w", err)
+	}
+	defer unix.Close(oldParentFd)
+
+	newParentFd, err := unix.OpenByHandleAt(session.rootFd, req.NewParentFh, unix.O_DIRECTORY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open new parent directory: %w", err)
+	}
+	defer unix.Close(newParentFd)
+
+	if err := unix.Renameat(oldParentFd, req.OldName, newParentFd, req.NewName); err != nil {
+		return nil, fmt.Errorf("failed to rename %s to %s: %w", req.OldName, req.NewName, err)
+	}
+
+	return &RenameResponse{}, nil
+}
+
+// handleSetattr handles setattr requests
+func (fs *FileServer) handleSetattr(req *SetattrRequest, session *Session) (Serializable, error) {
+	fd, err := unix.OpenByHandleAt(session.rootFd, req.Fh, unix.O_PATH)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for setattr: %w", err)
+	}
+	defer unix.Close(fd)
+
+	if req.Valid&SetattrMode != 0 {
+		if err := unix.Fchmodat(fd, "", req.Mode, unix.AT_EMPTY_PATH|unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return nil, fmt.Errorf("failed to chmod: %w", err)
+		}
+	}
+	if req.Valid&(SetattrUid|SetattrGid) != 0 {
+		uid := -1
+		gid := -1
+		if req.Valid&SetattrUid != 0 {
+			uid = int(req.Uid)
+		}
+		if req.Valid&SetattrGid != 0 {
+			gid = int(req.Gid)
+		}
+		if err := unix.Fchownat(fd, "", uid, gid, unix.AT_EMPTY_PATH|unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return nil, fmt.Errorf("failed to chown: %w", err)
+		}
+	}
+	if req.Valid&SetattrSize != 0 {
+		fdForWrite, err := unix.OpenByHandleAt(session.rootFd, req.Fh, unix.O_WRONLY)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file for truncate: %w", err)
+		}
+		if err := unix.Ftruncate(fdForWrite, req.Size); err != nil {
+			unix.Close(fdForWrite)
+			return nil, fmt.Errorf("failed to truncate: %w", err)
+		}
+		unix.Close(fdForWrite)
+	}
+	if req.Valid&(SetattrMtime|SetattrAtime) != 0 {
+		ts := []unix.Timespec{
+			{Sec: 0, Nsec: unix.UTIME_OMIT}, // atime
+			{Sec: 0, Nsec: unix.UTIME_OMIT}, // mtime
+		}
+		if req.Valid&SetattrAtime != 0 {
+			ts[0] = unix.Timespec{Sec: req.Atime}
+		}
+		if req.Valid&SetattrMtime != 0 {
+			ts[1] = unix.Timespec{Sec: req.Mtime}
+		}
+		if err := unix.UtimesNanoAt(fd, "", ts, unix.AT_EMPTY_PATH|unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return nil, fmt.Errorf("failed to set times: %w", err)
+		}
+	}
+
+	// Re-stat to get updated attributes
+	var stat unix.Stat_t
+	if err := unix.Fstatat(fd, "", &stat, unix.AT_EMPTY_PATH|unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return nil, fmt.Errorf("failed to stat after setattr: %w", err)
+	}
+
+	return &SetattrResponse{Attr: fs.makeFileAttr(&stat)}, nil
+}
+
+// handleSymlink handles symlink creation requests
+func (fs *FileServer) handleSymlink(req *SymlinkRequest, session *Session) (Serializable, error) {
+	parentFd, err := unix.OpenByHandleAt(session.rootFd, req.ParentFh, unix.O_DIRECTORY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open parent directory: %w", err)
+	}
+	defer unix.Close(parentFd)
+
+	if err := unix.Symlinkat(req.Target, parentFd, req.Name); err != nil {
+		return nil, fmt.Errorf("failed to symlink %s -> %s: %w", req.Name, req.Target, err)
+	}
+
+	if req.HasOwner != 0 {
+		if err := unix.Fchownat(parentFd, req.Name, int(req.Uid), int(req.Gid), unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return nil, fmt.Errorf("failed to set owner on symlink %s to %d:%d: %w", req.Name, req.Uid, req.Gid, err)
+		}
+	}
+
+	fileHandle, mountID, err := unix.NameToHandleAt(parentFd, req.Name, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file handle: %w", err)
+	}
+	if int32(mountID) != session.mountID {
+		return nil, fmt.Errorf("mount ID mismatch: %w", syscall.EXDEV)
+	}
+
+	attr, err := fs.makeFileAttrWithPath(parentFd, req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SymlinkResponse{Fh: fileHandle, Attr: attr}, nil
+}
+
+// handleLink handles hard link creation requests
+func (fs *FileServer) handleLink(req *LinkRequest, session *Session) (Serializable, error) {
+	// Open target by handle to get a /proc fd path for linkat
+	targetFd, err := unix.OpenByHandleAt(session.rootFd, req.TargetFh, unix.O_PATH)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open target: %w", err)
+	}
+	defer unix.Close(targetFd)
+
+	parentFd, err := unix.OpenByHandleAt(session.rootFd, req.ParentFh, unix.O_DIRECTORY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open parent directory: %w", err)
+	}
+	defer unix.Close(parentFd)
+
+	procPath := fmt.Sprintf("/proc/self/fd/%d", targetFd)
+	if err := unix.Linkat(unix.AT_FDCWD, procPath, parentFd, req.Name, unix.AT_SYMLINK_FOLLOW); err != nil {
+		return nil, fmt.Errorf("failed to link %s: %w", req.Name, err)
+	}
+
+	fileHandle, mountID, err := unix.NameToHandleAt(parentFd, req.Name, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file handle: %w", err)
+	}
+	if int32(mountID) != session.mountID {
+		return nil, fmt.Errorf("mount ID mismatch: %w", syscall.EXDEV)
+	}
+
+	attr, err := fs.makeFileAttrWithPath(parentFd, req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &LinkResponse{Fh: fileHandle, Attr: attr}, nil
+}
+
+// handleFlush handles flush requests without server-side hashing.
+// If the client provides a SHA256 value, it is persisted as xattr metadata.
+func (fs *FileServer) handleFlush(req *FlushRequest, session *Session) (Serializable, error) {
+	fd, err := unix.OpenByHandleAt(session.rootFd, req.Fh, unix.O_RDONLY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for flush: %w", err)
+	}
+	file := os.NewFile(uintptr(fd), "")
+	defer file.Close()
+
+	// Fsync the file
+	if err := file.Sync(); err != nil {
+		return nil, fmt.Errorf("failed to sync file: %w", err)
+	}
+
+	// Re-stat
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return nil, fmt.Errorf("failed to stat file after flush: %w", err)
+	}
+
+	attr := fs.makeFileAttr(&stat)
+
+	if req.HasSha256 != 0 {
+		copy(attr.Sha256[:], req.Sha256[:])
+		sha256Hex := hex.EncodeToString(req.Sha256[:])
+		mtime := time.Unix(stat.Mtim.Sec, stat.Mtim.Nsec)
+		xval := fmt.Sprintf("1:%s:%d.%d:%d", sha256Hex, mtime.Unix(), mtime.Nanosecond(), stat.Size)
+		_ = unix.Fsetxattr(fd, XattrCacheKey, []byte(xval), 0)
+	}
+
+	return &FlushResponse{Attr: attr}, nil
+}
+
+func (fs *FileServer) handleFlushFd(req *FlushFdRequest, session *Session) (Serializable, error) {
+	fd, ok := session.LookupFd(req.Fd)
+	if !ok {
+		return nil, fmt.Errorf("failed to resolve fd %d: %w", req.Fd, syscall.EBADF)
+	}
+	if err := unix.Fsync(fd); err != nil {
+		return nil, fmt.Errorf("failed to sync file: %w", err)
+	}
+
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return nil, fmt.Errorf("failed to stat file after flush: %w", err)
+	}
+
+	attr := fs.makeFileAttr(&stat)
+	if req.HasSha256 != 0 {
+		copy(attr.Sha256[:], req.Sha256[:])
+		sha256Hex := hex.EncodeToString(req.Sha256[:])
+		mtime := time.Unix(stat.Mtim.Sec, stat.Mtim.Nsec)
+		xval := fmt.Sprintf("1:%s:%d.%d:%d", sha256Hex, mtime.Unix(), mtime.Nanosecond(), stat.Size)
+		_ = unix.Fsetxattr(fd, XattrCacheKey, []byte(xval), 0)
+	}
+	return &FlushResponse{Attr: attr}, nil
+}
+
+func (fs *FileServer) handleReleaseFd(req *ReleaseFdRequest, session *Session) (Serializable, error) {
+	session.CloseFd(req.Fd)
+	return &EmptyResponse{}, nil
+}
+
 // Helper functions for encoding
 
 func (fs *FileServer) makeFileAttr(info *unix.Stat_t) FileAttr {
@@ -912,6 +1561,61 @@ func (fs *FileServer) makeFileAttrWithPath(parentFd int, name string) (FileAttr,
 	}
 
 	return attr, nil
+}
+
+// handleGetattr handles getattr requests — fetches fresh stat and optional SHA256 xattr for a file handle.
+func (fs *FileServer) handleGetattr(req *GetattrRequest, session *Session) (Serializable, error) {
+	fd, err := unix.OpenByHandleAt(session.rootFd, req.Fh, unix.O_PATH|unix.O_NOFOLLOW)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for getattr: %w", err)
+	}
+	defer unix.Close(fd)
+
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return nil, fmt.Errorf("failed to stat file for getattr: %w", err)
+	}
+
+	//log.Printf("Getattr for fh (type=%d, size=%d): stat=%+v", req.Fh.Type(), req.Fh.Size(), stat)
+	attr := fs.makeFileAttr(&stat)
+
+	// For regular files, try to read the SHA256 xattr written by flush.
+	if stat.Mode&syscall.S_IFMT == syscall.S_IFREG {
+		var xval [256]byte
+		if sz, xerr := unix.Fgetxattr(fd, XattrCacheKey, xval[:]); xerr == nil {
+			sha256sum, mtime, size, ok := decodeCacheXattr(string(xval[:sz]))
+			if ok && size == attr.Size && mtime.Equal(time.Unix(attr.Mtim, int64(attr.MtimNsec))) {
+				if sha256Bytes, decErr := hex.DecodeString(sha256sum); decErr == nil && len(sha256Bytes) == 32 {
+					copy(attr.Sha256[:], sha256Bytes)
+				}
+			}
+		}
+	}
+
+	return &GetattrResponse{Attr: attr}, nil
+}
+
+func (fs *FileServer) handleGetlk(req *LockRequest, session *Session) (Serializable, error) {
+	fd, ok := session.LookupFd(req.Fd)
+	if !ok {
+		return nil, fmt.Errorf("failed to resolve fd %d: %w", req.Fd, syscall.EBADF)
+	}
+	lk, err := fs.locks.Getlk(fd, req.Owner, req.Lk, req.Flags)
+	if err != nil {
+		return nil, err
+	}
+	return &GetlkResponse{Lk: lk}, nil
+}
+
+func (fs *FileServer) handleSetlk(req *LockRequest, session *Session, blocking bool) (Serializable, error) {
+	fd, ok := session.LookupFd(req.Fd)
+	if !ok {
+		return nil, fmt.Errorf("failed to resolve fd %d: %w", req.Fd, syscall.EBADF)
+	}
+	if err := fs.locks.Setlk(fd, req.Owner, req.Lk, req.Flags, blocking); err != nil {
+		return nil, err
+	}
+	return &EmptyResponse{}, nil
 }
 
 func (fs *FileServer) makeErrorResponse(seq uint32, errno syscall.Errno) []byte {

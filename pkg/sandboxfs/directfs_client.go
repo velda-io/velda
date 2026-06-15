@@ -28,7 +28,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sys/unix"
@@ -38,6 +37,14 @@ import (
 const (
 	// Number of background workers for prefetching
 	prefetchWorkers = 20
+	// Shared worker count for RW eager fetch of small/medium files
+	rwEagerFetchWorkers = 8
+	// Shared worker count for RW eager fetch of large files
+	rwEagerFetchLargeWorkers = 2
+	// Shared write workers for protocol write queue
+	writeQueueWorkers = 1
+	// Maximum total bytes buffered in global write queue
+	globalWriteQueueMaxBytes = 256 * 1024 * 1024 // 256MB
 	// Files larger than this (bytes) are considered "large" for eagerfetch concurrency limits
 	largeFileThreshold = 100 * 1024 * 1024 // 100 MB
 )
@@ -52,6 +59,32 @@ type partialMessage struct {
 	chunks [][]byte
 }
 
+type dirDataNotificationHandler interface {
+	HandleDirDataNotification(notification *fileserver.DirDataNotification)
+}
+
+// sendRequestOp represents a request to be sent by the send-request-worker
+type sendRequestOp struct {
+	opCode     uint32                  // Operation code (OpWrite, OpRead, etc.)
+	flags      uint32                  // Protocol flags (FlagQosLow, etc.)
+	req        fileserver.Serializable // Request object
+	responseOp responseOp
+}
+
+type responseOp struct {
+	resCh    chan Response
+	callback func(Response)
+}
+
+func (r responseOp) complete(resp Response) {
+	if r.resCh != nil {
+		r.resCh <- resp
+	}
+	if r.callback != nil {
+		r.callback(resp)
+	}
+}
+
 // DirectFSClient manages a FUSE filesystem that connects to a remote fileserver
 // using the fileserver protocol and uses sandboxfs cache manager
 type DirectFSClient struct {
@@ -61,7 +94,7 @@ type DirectFSClient struct {
 	// Connection state
 	mu             sync.Mutex
 	seq            uint32
-	pending        map[uint32]chan Response
+	pending        map[uint32]responseOp
 	partialPackets map[uint32]*partialMessage // Buffer for assembling partial packets
 	rootFh         unix.FileHandle
 	rootAttr       fileserver.FileAttr
@@ -71,7 +104,7 @@ type DirectFSClient struct {
 
 	// Inode tracking for pre-loaded metadata
 	inodeMu sync.RWMutex
-	inodes  map[uint64]*fs.Inode // Map from inode number to FUSE inode
+	inodes  map[uint64]dirDataNotificationHandler // Map from inode number to notification handler
 
 	// Cache from sandboxfs
 	cache *DirectoryCacheManager
@@ -86,6 +119,21 @@ type DirectFSClient struct {
 	workersWg     sync.WaitGroup
 	// Semaphore to limit concurrent large-file prefetches (per client)
 	largeFetchSem chan struct{}
+
+	// Shared eager-fetch worker queues for RW reads
+	rwEagerFetchQueue      chan *rwEagerFetchTask
+	rwEagerFetchLargeQueue chan *rwEagerFetchTask
+
+	// Shared request send workers
+	normalReqQueue chan *sendRequestOp // Higher priority for non-write operations
+	writeReqQueue  chan *sendRequestOp // Lower priority for write operations (QOS)
+	sendReqWg      sync.WaitGroup
+
+	// Write backpressure and request tracking
+	writeMu          sync.Mutex
+	writeBufCond     *sync.Cond
+	queuedWriteBytes int64
+	writeReqID       uint64
 
 	// FUSE state
 	fuseServer *fuse.Server
@@ -104,24 +152,33 @@ type prefetchJob struct {
 	path   string
 }
 
+type rwEagerFetchTask struct {
+	file *RWFile
+}
+
 // NewDirectFSClient creates a new direct filesystem client
 func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager, cacheSources []string, verbose bool) *DirectFSClient {
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &DirectFSClient{
-		serverAddr:         serverAddr,
-		pending:            make(map[uint32]chan Response),
-		partialPackets:     make(map[uint32]*partialMessage),
-		inodes:             make(map[uint64]*fs.Inode),
-		cache:              cache,
-		debug:              NewDebugTracker(),
-		cacheSources:       cacheSources,
-		cacheSourceClients: initializeCacheSources(cacheSources),
-		prefetchQueue:      make(chan *prefetchJob, 1000),
-		largeFetchSem:      make(chan struct{}, 1),
-		ctx:                ctx,
-		cancel:             cancel,
-		verbose:            verbose,
+		serverAddr:             serverAddr,
+		pending:                make(map[uint32]responseOp),
+		partialPackets:         make(map[uint32]*partialMessage),
+		inodes:                 make(map[uint64]dirDataNotificationHandler),
+		cache:                  cache,
+		debug:                  NewDebugTracker(),
+		cacheSources:           cacheSources,
+		cacheSourceClients:     initializeCacheSources(cacheSources),
+		prefetchQueue:          make(chan *prefetchJob, 1000),
+		largeFetchSem:          make(chan struct{}, 1),
+		rwEagerFetchQueue:      make(chan *rwEagerFetchTask, 256),
+		rwEagerFetchLargeQueue: make(chan *rwEagerFetchTask, 64),
+		normalReqQueue:         make(chan *sendRequestOp, 256),  // Higher priority
+		writeReqQueue:          make(chan *sendRequestOp, 1024), // Lower priority (QOS)
+		ctx:                    ctx,
+		cancel:                 cancel,
+		verbose:                verbose,
 	}
+	client.writeBufCond = sync.NewCond(&client.writeMu)
 
 	// Start prefetch workers
 	for i := 0; i < prefetchWorkers; i++ {
@@ -129,60 +186,34 @@ func NewDirectFSClient(serverAddr string, cache *DirectoryCacheManager, cacheSou
 		go client.prefetchWorker()
 	}
 
+	for i := 0; i < rwEagerFetchWorkers; i++ {
+		client.workersWg.Add(1)
+		go client.rwEagerFetchWorker(client.rwEagerFetchQueue)
+	}
+	for i := 0; i < rwEagerFetchLargeWorkers; i++ {
+		client.workersWg.Add(1)
+		go client.rwEagerFetchWorker(client.rwEagerFetchLargeQueue)
+	}
+
+	// Start send-request workers (1 worker for both queues with priority)
+	client.sendReqWg.Add(1)
+	go client.sendRequestWorker()
+
 	return client
 }
 
 // Connect connects to the file server and performs mount
-func (sc *DirectFSClient) Connect() (*SnapshotNode, error) {
+func (sc *DirectFSClient) Connect() (unix.FileHandle, fileserver.FileAttr, error) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	mountResp, err := sc.connect()
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect: %w", err)
+		return unix.FileHandle{}, fileserver.FileAttr{}, fmt.Errorf("failed to connect: %w", err)
 	}
 	// Store root file handle and attributes from mount response
 	sc.rootFh = mountResp.Fh
 	sc.rootAttr = mountResp.Attr
-	return &SnapshotNode{
-		client: sc,
-		fh:     sc.rootFh,
-		attr:   sc.rootAttr,
-	}, nil
-}
-
-// Mount mounts the filesystem at the given mount point
-func (sc *DirectFSClient) Mount(mountPoint string) (*VeldaServer, error) {
-	root, err := sc.Connect()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get root: %w", err)
-	}
-	// Set up FUSE options optimized for snapshots
-	timeout := 1 * time.Hour // Long timeout for snapshots
-	opts := &fs.Options{
-		EntryTimeout: &timeout,
-		AttrTimeout:  &timeout,
-		MountOptions: fuse.MountOptions{
-			AllowOther:  true,
-			DirectMount: true,
-			Name:        "veldafs-snapshot",
-			FsName:      "snapshot",
-			Options:     []string{"default_permissions"},
-		},
-	}
-
-	// Mount using go-fuse
-	server, err := fs.Mount(mountPoint, root, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to mount: %w", err)
-	}
-
-	sc.fuseServer = server
-
-	return &VeldaServer{
-		Server: server,
-		Cache:  sc.cache,
-		debug:  sc.debug,
-	}, nil
+	return sc.rootFh, sc.rootAttr, nil
 }
 
 // Unmount unmounts the filesystem
@@ -196,6 +227,11 @@ func (sc *DirectFSClient) Unmount() error {
 // Stop stops the client
 func (sc *DirectFSClient) Stop() {
 	sc.cancel()
+	//close(sc.prefetchQueue)
+	close(sc.rwEagerFetchQueue)
+	close(sc.rwEagerFetchLargeQueue)
+	close(sc.normalReqQueue)
+	close(sc.writeReqQueue)
 	func() {
 		sc.mu.Lock()
 		defer sc.mu.Unlock()
@@ -205,7 +241,14 @@ func (sc *DirectFSClient) Stop() {
 		}
 	}()
 	sc.workersWg.Wait()
+	sc.sendReqWg.Wait()
 	sc.wg.Wait()
+}
+
+func (sc *DirectFSClient) registerInodeHandler(ino uint64, handler dirDataNotificationHandler) {
+	sc.inodeMu.Lock()
+	sc.inodes[ino] = handler
+	sc.inodeMu.Unlock()
 }
 
 func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
@@ -247,7 +290,7 @@ func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
 
 	// Start new response reader
 	sc.wg.Add(1)
-	sc.pending = make(map[uint32]chan Response)
+	sc.pending = make(map[uint32]responseOp)
 	sc.partialPackets = make(map[uint32]*partialMessage) // Clear partial packets on reconnect
 	go sc.readResponses(conn, sc.pending)
 
@@ -266,7 +309,9 @@ func (sc *DirectFSClient) connect() (*fileserver.MountResponse, error) {
 	}
 	// Create response channel
 	respChan := make(chan Response, 1)
-	sc.pending[seq] = respChan
+	sc.pending[seq] = responseOp{
+		resCh: respChan,
+	}
 
 	// Send request with connection failure detection
 	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
@@ -333,6 +378,185 @@ func (sc *DirectFSClient) prefetchWorker() {
 			}
 			sc.processPrefetchJob(job)
 		}
+	}
+}
+
+func (sc *DirectFSClient) rwEagerFetchWorker(queue <-chan *rwEagerFetchTask) {
+	defer sc.workersWg.Done()
+	for {
+		select {
+		case <-sc.ctx.Done():
+			return
+		case task, ok := <-queue:
+			if !ok {
+				return
+			}
+			if task == nil || task.file == nil {
+				continue
+			}
+			task.file.performEagerFetch()
+		}
+	}
+}
+
+// sendRequestWorker processes both normal and write requests with priority scheduling.
+// It gives higher priority to normal operations and lower priority to write operations (QOS).
+func (sc *DirectFSClient) sendRequestWorker() {
+	defer sc.sendReqWg.Done()
+
+	for {
+		select {
+		case <-sc.ctx.Done():
+			return
+		case op, ok := <-sc.normalReqQueue:
+			if !ok && ok {
+				// normalReqQueue closed but check writeReqQueue
+				continue
+			}
+			if op != nil {
+				sc.executeRequestOp(op)
+			}
+		default:
+			// No normal request available, check write queue with lower priority
+			select {
+			case <-sc.ctx.Done():
+				return
+			case op, ok := <-sc.writeReqQueue:
+				if !ok && ok {
+					return
+				}
+				if op != nil {
+					sc.executeRequestOp(op)
+				}
+			case op, ok := <-sc.normalReqQueue:
+				if !ok && ok {
+					return
+				}
+				if op != nil {
+					sc.executeRequestOp(op)
+				}
+			}
+		}
+	}
+}
+
+// executeRequestOp executes a single request operation
+func (sc *DirectFSClient) executeRequestOp(op *sendRequestOp) {
+	resp := Response{errno: 0, data: nil}
+	seq := sc.nextSeq()
+	data, err := fileserver.SerializeWithHeader(op.opCode, seq, op.flags, op.req)
+	if err != nil {
+		resp.errno = syscall.EIO
+		op.responseOp.complete(resp)
+		return
+	}
+
+	// Create response channel and register it
+	sc.mu.Lock()
+	conn := sc.conn
+	for conn == nil {
+		if err := sc.reconnect(); err != nil {
+			sc.mu.Unlock()
+			resp.errno = syscall.ECONNREFUSED
+			op.responseOp.complete(resp)
+			return
+		}
+		conn = sc.conn
+	}
+	sc.pending[seq] = op.responseOp
+	sc.mu.Unlock()
+
+	// Send request
+	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	_, err = conn.Write(data)
+	if err != nil {
+		sc.mu.Lock()
+		if sc.conn == conn {
+			sc.conn.Close()
+			sc.conn = nil
+		}
+		delete(sc.pending, seq)
+		sc.mu.Unlock()
+		resp.errno = syscall.EIO
+		op.responseOp.complete(resp)
+		return
+	}
+}
+
+// enqueueGlobalWriteOp enqueues a write operation with backpressure handling.
+// The operation is queued as a low-priority request and returns a request ID.
+// The callback will be invoked asynchronously when the operation completes.
+func (sc *DirectFSClient) enqueueAsyncOp(size int64, req fileserver.Serializable, res fileserver.Serializable, callback func(error)) uint64 {
+	if size < 0 {
+		size = 0
+	}
+
+	id := atomic.AddUint64(&sc.writeReqID, 1)
+
+	sc.writeMu.Lock()
+	for sc.queuedWriteBytes+size > globalWriteQueueMaxBytes {
+		sc.writeBufCond.Wait()
+		select {
+		case <-sc.ctx.Done():
+			sc.writeMu.Unlock()
+			if callback != nil {
+				callback(fmt.Errorf("client stopped"))
+			}
+			return id
+		default:
+		}
+	}
+	sc.queuedWriteBytes += size
+	sc.writeMu.Unlock()
+	newCallback := func(resp Response) {
+		// Update bytes and broadcast after completion
+		sc.writeMu.Lock()
+		sc.queuedWriteBytes -= size
+		sc.writeBufCond.Broadcast()
+		sc.writeMu.Unlock()
+		var err error
+		err = resp.errno
+		if err != nil {
+			reader := bytes.NewReader(resp.data)
+			err = res.Deserialize(reader)
+		}
+		if callback != nil {
+			callback(err)
+		}
+	}
+	opCode, err := reqToOpCode(req)
+	if err != nil {
+		if callback != nil {
+			callback(fmt.Errorf("unknown request type: %w", err))
+		}
+		return id
+	}
+	sc.writeReqQueue <- &sendRequestOp{
+		opCode: opCode,
+		flags:  fileserver.FlagQosLow,
+		req:    req,
+		responseOp: responseOp{
+			callback: newCallback,
+		},
+	}
+	return id
+}
+
+func (sc *DirectFSClient) submitRWEagerFetch(file *RWFile) {
+	if file == nil {
+		return
+	}
+	task := &rwEagerFetchTask{file: file}
+	if file.attr.Size > int64(largeFileThreshold) {
+		select {
+		case sc.rwEagerFetchLargeQueue <- task:
+		default:
+		}
+		return
+	}
+	select {
+	case sc.rwEagerFetchQueue <- task:
+	default:
 	}
 }
 
@@ -406,38 +630,16 @@ func (sc *DirectFSClient) nextSeq() uint32 {
 
 // sendRequestWithData sends pre-serialized data and waits for response
 func (sc *DirectFSClient) sendRequestWithData(opCode uint32, flags uint32, req fileserver.Serializable, res fileserver.Serializable) error {
-	seq := sc.nextSeq()
-	data, err := fileserver.SerializeWithHeader(opCode, seq, flags, req)
-	if err != nil {
-		return fmt.Errorf("failed to serialize request: %w", err)
-	}
 	// Create response channel
 	respChan := make(chan Response, 1)
-	sc.mu.Lock()
-	conn := sc.conn
-	for conn == nil {
-		if err := sc.reconnect(); err != nil {
-			sc.mu.Unlock()
-			return fmt.Errorf("failed to reconnect: %w", err)
-		}
-		conn = sc.conn
-	}
-	sc.pending[seq] = respChan
-	sc.mu.Unlock()
-
-	// Send request with connection failure detection
-	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-	_, err = conn.Write(data)
-	if err != nil {
-		// Mark the connection as down and trigger reconnection at next request
-		sc.mu.Lock()
-		if sc.conn == conn {
-			sc.conn.Close()
-			sc.conn = nil
-		}
-		delete(sc.pending, seq)
-		sc.mu.Unlock()
-		return fmt.Errorf("write failed: %w", err)
+	sc.normalReqQueue <- &sendRequestOp{
+		opCode: opCode,
+		flags:  flags,
+		req:    req,
+		responseOp: responseOp{
+			resCh:    respChan,
+			callback: nil,
+		},
 	}
 
 	// Wait for response with timeout
@@ -461,17 +663,7 @@ func (sc *DirectFSClient) SendRequest(req fileserver.Serializable, res fileserve
 	return sc.SendRequestWithFlags(req, res, fileserver.FlagNone)
 }
 
-// SendRequestWithFlags sends a request with specified flags and waits for response
-func (sc *DirectFSClient) SendRequestWithFlags(req fileserver.Serializable, res fileserver.Serializable, flags uint32) error {
-	// Don't retry mount requests - they're part of reconnection
-	_, isMountReq := req.(*fileserver.MountRequest)
-
-	maxAttempts := 1
-	if !isMountReq {
-		maxAttempts = 2 // One attempt + one retry after reconnect
-	}
-
-	var lastErr error
+func reqToOpCode(req fileserver.Serializable) (uint32, error) {
 	var opCode uint32
 	switch req.(type) {
 	case *fileserver.MountRequest:
@@ -480,14 +672,65 @@ func (sc *DirectFSClient) SendRequestWithFlags(req fileserver.Serializable, res 
 		opCode = fileserver.OpLookup
 	case *fileserver.ReadRequest:
 		opCode = fileserver.OpRead
+	case *fileserver.ReadFdRequest:
+		opCode = fileserver.OpReadFd
 	case *fileserver.ReadDirRequest:
 		opCode = fileserver.OpReadDir
 	case *fileserver.ReadlinkRequest:
 		opCode = fileserver.OpReadlink
+	case *fileserver.OpenRequest:
+		opCode = fileserver.OpOpen
+	case *fileserver.CreateRequest:
+		opCode = fileserver.OpCreate
+	case *fileserver.WriteRequest:
+		opCode = fileserver.OpWrite
+	case *fileserver.WriteFdRequest:
+		opCode = fileserver.OpWriteFd
+	case *fileserver.MkdirRequest:
+		opCode = fileserver.OpMkdir
+	case *fileserver.UnlinkRequest:
+		opCode = fileserver.OpUnlink
+	case *fileserver.RmdirRequest:
+		opCode = fileserver.OpRmdir
+	case *fileserver.RenameRequest:
+		opCode = fileserver.OpRename
+	case *fileserver.SetattrRequest:
+		opCode = fileserver.OpSetattr
+	case *fileserver.SymlinkRequest:
+		opCode = fileserver.OpSymlink
+	case *fileserver.LinkRequest:
+		opCode = fileserver.OpLink
+	case *fileserver.FlushRequest:
+		opCode = fileserver.OpFlush
+	case *fileserver.FlushFdRequest:
+		opCode = fileserver.OpFlushFd
+	case *fileserver.GetattrRequest:
+		opCode = fileserver.OpGetattr
+	case *fileserver.LockRequest:
+		opCode = fileserver.OpSetlk
+	case *fileserver.ReleaseFdRequest:
+		opCode = fileserver.OpReleaseFd
 	default:
-		return fmt.Errorf("unknown request type")
+		return 0, fmt.Errorf("unknown request type")
+	}
+	return opCode, nil
+}
+
+// SendRequestWithFlags sends a request with specified flags and waits for response
+func (sc *DirectFSClient) SendRequestWithFlags(req fileserver.Serializable, res fileserver.Serializable, flags uint32) error {
+	// Don't retry mount requests - they're part of reconnection
+	_, isMountReq := req.(*fileserver.MountRequest)
+
+	opCode, err := reqToOpCode(req)
+	if err != nil {
+		return err
+	}
+	maxAttempts := 1
+	if !isMountReq {
+		maxAttempts = 2 // One attempt + one retry after reconnect
 	}
 
+	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		err := sc.sendRequestWithData(opCode, flags, req, res)
 		if err == nil {
@@ -524,14 +767,14 @@ func isRetriableError(err error) bool {
 }
 
 // readResponses reads responses from the connection
-func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]chan Response) {
+func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]responseOp) {
 	defer sc.wg.Done()
 	defer func() {
 		// Mark connection as down when reader exits
 		log.Printf("Response reader exited, connection marked as down")
 		sc.mu.Lock()
-		for _, ch := range pendingList {
-			ch <- Response{errno: syscall.ECONNRESET, data: nil}
+		for _, op := range pendingList {
+			op.complete(Response{errno: syscall.ECONNRESET, data: nil})
 		}
 		sc.mu.Unlock()
 	}()
@@ -626,6 +869,7 @@ func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]ch
 			decoder.Close()
 			if err != nil {
 				log.Printf("Failed to decompress data: %v", err)
+				log.Printf("header flags: %d, seq: %d, opcode: %d, compressed size: %d", header.Flags, header.Seq, header.Opcode, len(data))
 				return
 			}
 			data = decompressed
@@ -645,7 +889,7 @@ func (sc *DirectFSClient) readResponses(conn net.Conn, pendingList map[uint32]ch
 		sc.mu.Unlock()
 
 		if ok {
-			respChan <- Response{errno: syscall.Errno(header.Opcode), data: data}
+			respChan.complete(Response{errno: syscall.Errno(header.Opcode), data: data})
 		}
 	}
 }
@@ -661,7 +905,7 @@ func (sc *DirectFSClient) handleDirDataNotification(data []byte) {
 
 	// Find the inode for this directory
 	sc.inodeMu.RLock()
-	parentInode, exists := sc.inodes[notification.Ino]
+	handler, exists := sc.inodes[notification.Ino]
 	sc.inodeMu.RUnlock()
 
 	if !exists {
@@ -670,740 +914,11 @@ func (sc *DirectFSClient) handleDirDataNotification(data []byte) {
 		return
 	}
 
-	// Get the SnapshotNode from the inode
-	parentNode, ok := parentInode.Operations().(*SnapshotNode)
-	if !ok {
-		log.Printf("Failed to get SnapshotNode from inode %d", notification.Ino)
-		return
-	}
-
-	parentNode.dirFetched.Do(func() {
-		// Add all child inodes to the FUSE inode tree
-		ctx := context.Background()
-		for _, entry := range notification.Entries {
-			// Check if child already exists
-			existingChild := parentInode.GetChild(entry.Name)
-			if existingChild != nil {
-				// Child already exists, skip
-				continue
-			}
-
-			// Create child node
-			childNode := &SnapshotNode{
-				client: sc,
-				fh:     entry.Fh,
-				attr:   entry.Attr,
-			}
-
-			// Create persistent inode
-			stable := fs.StableAttr{
-				Mode: entry.Attr.Mode,
-				Ino:  entry.Attr.Ino,
-			}
-			childInode := parentNode.NewPersistentInode(ctx, childNode, stable)
-
-			// Register inode in the map for future notifications
-			sc.inodeMu.Lock()
-			sc.inodes[entry.Attr.Ino] = childInode
-			sc.inodeMu.Unlock()
-
-			// Add to parent's children (this makes it visible to readdir)
-			parentInode.AddChild(entry.Name, childInode, false)
-		}
-
-		sc.DebugLog("Pre-loaded %d entries for inode %d", len(notification.Entries), notification.Ino)
-	})
+	handler.HandleDirDataNotification(&notification)
 }
 
 func (sc *DirectFSClient) DebugLog(format string, args ...interface{}) {
 	if sc.verbose {
 		log.Printf(format, args...)
 	}
-}
-
-// SnapshotNode implements fs.InodeEmbedder for persistent inodes
-type SnapshotNode struct {
-	fs.Inode
-	client         *DirectFSClient
-	fh             unix.FileHandle     // File handle from server
-	attr           fileserver.FileAttr // Cached attributes
-	dirFetched     sync.Once           // Whether directory entries have been fetched
-	dirFetchError  error
-	prefetchedData uint32 // Atomic flag for whether small files have been prefetched
-
-	// Symlink caching
-	symlinkFetched sync.Once // Whether symlink target has been fetched
-	symlinkTarget  []byte    // Cached symlink target
-	symlinkError   error     // Error from fetching symlink
-}
-
-// Ensure SnapshotNode implements required interfaces
-var _ fs.InodeEmbedder = (*SnapshotNode)(nil)
-var _ fs.NodeGetattrer = (*SnapshotNode)(nil)
-var _ fs.NodeLookuper = (*SnapshotNode)(nil)
-var _ fs.NodeReaddirer = (*SnapshotNode)(nil)
-var _ fs.NodeOpener = (*SnapshotNode)(nil)
-var _ fs.NodeSetattrer = (*SnapshotNode)(nil)
-var _ fs.NodeCreater = (*SnapshotNode)(nil)
-var _ fs.NodeMkdirer = (*SnapshotNode)(nil)
-var _ fs.NodeUnlinker = (*SnapshotNode)(nil)
-var _ fs.NodeRmdirer = (*SnapshotNode)(nil)
-var _ fs.NodeRenamer = (*SnapshotNode)(nil)
-var _ fs.NodeReadlinker = (*SnapshotNode)(nil)
-
-// Getattr returns file attributes
-func (n *SnapshotNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	toFuseAttr(&n.attr, &out.Attr)
-	return fs.OK
-}
-
-// fetchDirIfNeeded prefetches directory entries on first call
-func (n *SnapshotNode) fetchDirIfNeeded(ctx context.Context) {
-	n.dirFetched.Do(func() {
-		n.client.DebugLog("Fetching directory entries for inode %d", n.attr.Ino)
-		// Increment counter for readdir request from client
-		if GlobalCacheMetrics != nil {
-			GlobalCacheMetrics.ReadDirFromClient.Inc()
-		}
-		// Send readdir request
-		readDirReq := fileserver.ReadDirRequest{
-			Fh: n.fh,
-		}
-
-		readDirResp := fileserver.ReadDirResponse{}
-		err := n.client.SendRequest(&readDirReq, &readDirResp)
-		if err != nil {
-			n.dirFetchError = err
-			return
-		}
-		for _, entry := range readDirResp.Entries {
-			// Create child node
-			childNode := &SnapshotNode{
-				client: n.client,
-				fh:     entry.Fh,
-				attr:   entry.Attr,
-			}
-
-			// Create persistent inode
-			stable := fs.StableAttr{
-				Mode: entry.Attr.Mode,
-				Ino:  entry.Attr.Ino,
-			}
-			child := n.NewPersistentInode(ctx, childNode, stable)
-
-			// Register inode in the map for potential DirDataNotification
-			n.client.inodeMu.Lock()
-			n.client.inodes[entry.Attr.Ino] = child
-			n.client.inodeMu.Unlock()
-
-			// Add to children, don't replace existing child if it already exists
-			n.AddChild(entry.Name, child, false)
-		}
-
-		n.client.DebugLog("Fetched directory entries for inode %d", n.attr.Ino)
-		// Start prefetching small files after directory fetch is complete
-		n.prefetchSmallFiles() // Empty file handle means don't exclude any file
-	})
-}
-
-// Lookup looks up a child node
-func (n *SnapshotNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	// Prefetch directory on first lookup
-	n.fetchDirIfNeeded(ctx)
-
-	// Check if child already exists (from prefetch)
-	existingChild := n.GetChild(name)
-	if existingChild != nil {
-		// Child exists from prefetch, return it
-		if childNode, ok := existingChild.Operations().(*SnapshotNode); ok {
-			toFuseAttr(&childNode.attr, &out.Attr)
-			out.SetEntryTimeout(time.Hour)
-			out.SetAttrTimeout(time.Hour)
-			return existingChild, fs.OK
-		}
-	}
-
-	// If directory has been fetched and child doesn't exist, return ENOENT
-	// without making a server call
-	if n.dirFetchError == nil {
-		return nil, syscall.ENOENT
-	}
-
-	// Send lookup request for directories that haven't been fully prefetched
-	lookupReq := fileserver.LookupRequest{
-		ParentFh: n.fh,
-		Name:     name,
-	}
-
-	lookupResp := fileserver.LookupResponse{}
-
-	err := n.client.SendRequest(&lookupReq, &lookupResp)
-	if err != nil {
-		return nil, fs.ToErrno(err)
-	}
-
-	// Create child node
-	childNode := &SnapshotNode{
-		client: n.client,
-		fh:     lookupResp.Fh,
-		attr:   lookupResp.Attr,
-	}
-
-	// Convert attr to fuse.Attr
-	toFuseAttr(&lookupResp.Attr, &out.Attr)
-
-	// Set long timeouts for snapshots
-	out.SetEntryTimeout(time.Hour)
-	out.SetAttrTimeout(time.Hour)
-
-	// Create persistent inode
-	stable := fs.StableAttr{
-		Mode: lookupResp.Attr.Mode,
-		Ino:  lookupResp.Attr.Ino,
-	}
-	child := n.NewPersistentInode(ctx, childNode, stable)
-
-	// Register inode in the map for potential DirDataNotification
-	n.client.inodeMu.Lock()
-	n.client.inodes[lookupResp.Attr.Ino] = child
-	n.client.inodeMu.Unlock()
-
-	return child, fs.OK
-}
-
-// Readdir reads directory entries
-func (n *SnapshotNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	// Fetch directory entries if not already done
-	n.fetchDirIfNeeded(ctx)
-
-	if n.dirFetchError != nil {
-		return nil, fs.ToErrno(n.dirFetchError)
-	}
-
-	// Convert to fuse.DirEntry
-	children := n.Children()
-	entries := make([]fuse.DirEntry, 0, len(children))
-	for name, entry := range children {
-		entries = append(entries, fuse.DirEntry{
-			Name: name,
-			Ino:  entry.StableAttr().Ino,
-			Mode: entry.StableAttr().Mode & unix.S_IFMT,
-		})
-	}
-	return fs.NewListDirStream(entries), fs.OK
-}
-
-// prefetchSmallFiles eagerly fetches small files (<128KB) from a directory
-// This is called on first read-only open to warm the cache for sibling files
-func (n *SnapshotNode) prefetchSmallFiles() {
-	// Ensure we only prefetch once per directory inode
-	if !atomic.CompareAndSwapUint32(&n.prefetchedData, 0, 1) {
-		return
-	}
-
-	// Spawn async goroutine to do the actual prefetching
-	go func() {
-		// Get all children of this directory
-		children := n.Children()
-
-		count := 0
-		for _, child := range children {
-			if count >= maxSmallFilePrefetch {
-				break
-			}
-
-			// Get child node
-			childNode, ok := child.Operations().(*SnapshotNode)
-			if !ok {
-				continue
-			}
-
-			// Only prefetch regular files under maxSmallFileSize
-			if childNode.attr.Mode&unix.S_IFMT == unix.S_IFREG &&
-				childNode.attr.Size > 0 &&
-				childNode.attr.Size <= maxSmallFileSize {
-
-				// Check if file has SHA256 and is already cached
-				var zeroHash [32]byte
-				if childNode.attr.Sha256 != zeroHash {
-					sha256Hex := fmt.Sprintf("%x", childNode.attr.Sha256[:])
-					cachedPath, err := n.client.cache.Lookup(sha256Hex)
-					if err == nil && cachedPath != "" {
-						// Already cached, skip prefetching
-						continue
-					}
-				}
-
-				// Submit prefetch job (non-blocking)
-				job := &prefetchJob{
-					client: n.client,
-					fh:     childNode.fh,
-					attr:   childNode.attr,
-					path:   childNode.Path(nil),
-				}
-
-				select {
-				case n.client.prefetchQueue <- job:
-					count++
-				default:
-					// Queue full, stop prefetching
-					return
-				}
-			}
-		}
-	}()
-}
-
-// Open opens a file for reading
-func (n *SnapshotNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
-	// Check if this is a directory
-	if n.attr.Mode&unix.S_IFMT == unix.S_IFDIR {
-		return nil, 0, syscall.EISDIR
-	}
-	if (flags & (unix.O_WRONLY | unix.O_RDWR)) != 0 {
-		return nil, 0, syscall.EROFS
-	}
-
-	// Check if file is in cache
-	var zeroHash [32]byte
-	sha256Hex := fmt.Sprintf("%x", n.attr.Sha256[:])
-	cacheKeyExists := n.attr.Sha256 != zeroHash
-
-	if cacheKeyExists {
-		cachedPath, err := n.client.cache.Lookup(sha256Hex)
-		if err == nil && cachedPath != "" {
-			// Open cached file using passthrough mode
-			fd, err := unix.Open(cachedPath, unix.O_RDONLY, 0)
-			if err == nil {
-				GlobalCacheMetrics.CacheHit.Inc()
-				// Use LoopbackFile for passthrough mode
-				loopbackFile := fs.NewLoopbackFile(fd).(*fs.LoopbackFile)
-				file := &SnapshotFile{
-					cachedBackingFile: loopbackFile,
-					client:            n.client,
-					fh:                n.fh,
-					attr:              n.attr,
-					cache:             n.client.cache,
-					debug:             n.client.debug,
-					path:              n.Path(nil),
-				}
-				file.debugHandleID = n.client.debug.RegisterHandle(DebugHandleSnapshot{
-					Kind:    "directfs",
-					Path:    file.path,
-					Access:  "read",
-					Backing: "cache",
-				})
-				return file, fuse.FOPEN_KEEP_CACHE, fs.OK
-			}
-		}
-		GlobalCacheMetrics.CacheMiss.Inc()
-	} else {
-		GlobalCacheMetrics.CacheNotExist.Inc()
-	}
-
-	// Cache miss or no cache key - create file handle and start eager fetch
-	file := &SnapshotFile{
-		client: n.client,
-		fh:     n.fh,
-		attr:   n.attr,
-		cache:  n.client.cache,
-		path:   n.Path(nil),
-		debug:  n.client.debug,
-	}
-	file.debugHandleID = n.client.debug.RegisterHandle(DebugHandleSnapshot{
-		Kind:    "directfs",
-		Path:    file.path,
-		Access:  "read",
-		Backing: "remote",
-	})
-
-	// Start eager fetch in background
-	go file.eagerFetchAndCache(cacheKeyExists, sha256Hex)
-
-	return file, fuse.FOPEN_KEEP_CACHE, fs.OK
-}
-
-// Setattr is not supported (read-only snapshot filesystem)
-func (n *SnapshotNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	return syscall.EROFS
-}
-
-// Create is not supported (read-only snapshot filesystem)
-func (n *SnapshotNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (*fs.Inode, fs.FileHandle, uint32, syscall.Errno) {
-	return nil, nil, 0, syscall.EROFS
-}
-
-// Mkdir is not supported (read-only snapshot filesystem)
-func (n *SnapshotNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	return nil, syscall.EROFS
-}
-
-// Unlink is not supported (read-only snapshot filesystem)
-func (n *SnapshotNode) Unlink(ctx context.Context, name string) syscall.Errno {
-	return syscall.EROFS
-}
-
-// Rmdir is not supported (read-only snapshot filesystem)
-func (n *SnapshotNode) Rmdir(ctx context.Context, name string) syscall.Errno {
-	return syscall.EROFS
-}
-
-// Rename is not supported (read-only snapshot filesystem)
-func (n *SnapshotNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
-	return syscall.EROFS
-}
-
-// Readlink reads the target of a symlink
-func (n *SnapshotNode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
-	// Fetch symlink target only once and cache it
-	n.symlinkFetched.Do(func() {
-		// Send readlink request
-		readlinkReq := fileserver.ReadlinkRequest{
-			Fh: n.fh,
-		}
-
-		readlinkResp := fileserver.ReadlinkResponse{}
-		err := n.client.SendRequest(&readlinkReq, &readlinkResp)
-		if err != nil {
-			n.symlinkError = err
-			return
-		}
-
-		n.symlinkTarget = []byte(readlinkResp.Target)
-	})
-
-	if n.symlinkError != nil {
-		return nil, fs.ToErrno(n.symlinkError)
-	}
-
-	return n.symlinkTarget, fs.OK
-}
-
-// SnapshotFile implements fs.FileHandle for reading files
-type SnapshotFile struct {
-	cachedBackingFile *fs.LoopbackFile // Embedded for passthrough mode when cached
-	client            *DirectFSClient
-	fh                unix.FileHandle
-	attr              fileserver.FileAttr
-	cache             *DirectoryCacheManager
-	debug             *DebugTracker
-	debugHandleID     uint64
-
-	// Eager fetch state
-	fetchMu     sync.Mutex
-	cacheWriter CacheWriter // Active cache writer for pread access during fetch
-
-	path string // For logging purposes
-}
-
-// Ensure SnapshotFile implements required interfaces
-var _ fs.FileHandle = (*SnapshotFile)(nil)
-var _ fs.FileReader = (*SnapshotFile)(nil)
-var _ fs.FileWriter = (*SnapshotFile)(nil)
-var _ fs.FileFlusher = (*SnapshotFile)(nil)
-var _ fs.FileSetattrer = (*SnapshotFile)(nil)
-var _ fs.FileReleaser = (*SnapshotFile)(nil)
-
-// eagerFetchAndCache fetches the entire file from server and caches it using 1MB buffered chunks
-// It first tries to fetch from configured cache sources, then falls back to fileserver
-func (f *SnapshotFile) eagerFetchAndCache(hasExistingKey bool, expectedSHA string) {
-	opID := f.debug.StartOperation("directfs-eager-fetch", f.path, fmt.Sprintf("size=%d expected_sha=%s", f.attr.Size, expectedSHA))
-	defer f.debug.FinishOperation(opID)
-
-	f.fetchMu.Lock()
-	if f.cacheWriter != nil {
-		f.fetchMu.Unlock()
-		return
-	}
-
-	// Create cache writer
-	writer, err := f.cache.CreateTemp()
-	if err != nil {
-		f.fetchMu.Unlock()
-		return
-	}
-
-	// Store writer for pread access
-	f.cacheWriter = writer
-	f.fetchMu.Unlock()
-
-	// Try to fetch from cache sources first if we have a hash
-	if hasExistingKey && len(f.client.cacheSourceClients) > 0 {
-		if f.tryFetchFromCacheSources(expectedSHA, writer) {
-			return // Successfully fetched from cache source
-		}
-	}
-
-	// For large files (> largeFileThreshold), only allow one concurrent fetch per client.
-	if f.attr.Size > int64(largeFileThreshold) {
-		// Acquire semaphore (blocks until available) and ensure release on function exit
-		f.client.largeFetchSem <- struct{}{}
-		defer func() { <-f.client.largeFetchSem }()
-	}
-
-	abort := func() {
-		writer.Abort()
-		f.fetchMu.Lock()
-		f.cacheWriter = nil
-		f.fetchMu.Unlock()
-	}
-
-	const chunkSize = 1024 * 1024 // 1MB chunks
-	var offset uint64
-
-	for offset < uint64(f.attr.Size) {
-		// Calculate read size for this chunk
-		remaining := uint64(f.attr.Size) - offset
-		readSize := uint32(chunkSize)
-		if remaining < uint64(chunkSize) {
-			readSize = uint32(remaining)
-		}
-
-		// Read chunk from server
-		readReq := fileserver.ReadRequest{
-			Fh:     f.fh,
-			Offset: offset,
-			Size:   readSize,
-		}
-
-		start := time.Now()
-		readResp := fileserver.ReadResponse{}
-		err := f.client.SendRequest(&readReq, &readResp)
-		if err != nil {
-			abort()
-			return
-		}
-
-		// Write chunk to cache
-		if _, err := writer.Write(readResp.Data); err != nil {
-			abort()
-			return
-		}
-		elapsed := time.Since(start)
-		f.client.DebugLog("Pre-fetched %d bytes for %s at offset %d in %v", len(readResp.Data), f.path, offset, elapsed)
-
-		offset += uint64(len(readResp.Data))
-
-		// Check if we got less data than expected (EOF)
-		if len(readResp.Data) < int(readSize) {
-			break
-		}
-	}
-
-	f.fetchMu.Lock()
-	defer f.fetchMu.Unlock()
-	f.cacheWriter = nil // Clear writer reference
-
-	// Commit the cache and get computed SHA256
-	computedSHA, err := writer.Commit()
-	if err != nil {
-		return
-	}
-
-	// Verify hash if we had an existing key
-	if hasExistingKey && computedSHA != expectedSHA {
-		log.Printf("Warning: computed hash %s doesn't match expected %s", computedSHA, expectedSHA)
-		// Don't update fetch state on hash mismatch
-		return
-	}
-
-	// Look up cached file path
-	cachedPath, err := f.cache.Lookup(computedSHA)
-	if err != nil || cachedPath == "" {
-		return
-	}
-
-	// Open cached file for future reads
-	fd, err := unix.Open(cachedPath, unix.O_RDONLY, 0)
-	if err != nil {
-		return
-	}
-
-	// Update fetch state and set cachedBackingFile
-	f.cachedBackingFile = fs.NewLoopbackFile(fd).(*fs.LoopbackFile)
-	f.debug.UpdateHandle(f.debugHandleID, func(handle *DebugHandleSnapshot) {
-		handle.Backing = "cache"
-	})
-
-	if GlobalCacheMetrics != nil {
-		GlobalCacheMetrics.CacheSaved.Inc()
-	}
-}
-
-// Read reads data from the file with caching
-func (f *SnapshotFile) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	opID := f.debug.StartOperation("handle-read", f.path, fmt.Sprintf("offset=%d size=%d", off, len(dest)))
-	defer f.debug.FinishOperation(opID)
-
-	// Check if eager fetch is in progress or completed
-	f.fetchMu.Lock()
-	// If file is from cache, use passthrough mode
-	cachedFile := f.cachedBackingFile
-	writer := f.cacheWriter
-
-	if writer != nil {
-		// Try to read from in-progress cache using ReadAt if available
-		// This access needs lock to prevent concurrent commit of the writer.
-		if readerAt, ok := writer.(io.ReaderAt); ok {
-			n, err := readerAt.ReadAt(dest, off)
-			if err == nil && n == len(dest) {
-				f.fetchMu.Unlock()
-				// Successfully read from in-progress cache
-				return fuse.ReadResultData(dest[:n]), fs.OK
-			}
-			// If ReadAt failed (range not yet cached), fall through to network fetch
-		}
-	}
-
-	f.fetchMu.Unlock()
-
-	if cachedFile != nil {
-		return cachedFile.Read(ctx, dest, off)
-	}
-	// Send read request to server
-	readReq := fileserver.ReadRequest{
-		Fh:     f.fh,
-		Offset: uint64(off),
-		Size:   uint32(len(dest)),
-	}
-
-	start := time.Now()
-	readResp := fileserver.ReadResponse{}
-	err := f.client.SendRequest(&readReq, &readResp)
-	if err != nil {
-		return nil, fs.ToErrno(err)
-	}
-	elapsed := time.Since(start)
-	f.client.DebugLog("Read %d bytes for file %s at offset %d in %v", len(readResp.Data), f.path, off, elapsed)
-
-	return fuse.ReadResultData(readResp.Data), fs.OK
-}
-
-// Write is not supported (read-only snapshot filesystem)
-func (f *SnapshotFile) Write(ctx context.Context, data []byte, off int64) (uint32, syscall.Errno) {
-	return 0, syscall.EROFS
-}
-
-// Flush is a no-op for read-only filesystem
-func (f *SnapshotFile) Flush(ctx context.Context) syscall.Errno {
-	return fs.OK
-}
-
-// Setattr is not supported (read-only snapshot filesystem)
-func (f *SnapshotFile) Setattr(ctx context.Context, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	return syscall.EROFS
-}
-
-// Release closes the file descriptor if it's a cached file
-func (f *SnapshotFile) Release(ctx context.Context) syscall.Errno {
-	f.fetchMu.Lock()
-	defer f.fetchMu.Unlock()
-	f.debug.UnregisterHandle(f.debugHandleID)
-	if f.cachedBackingFile != nil {
-		return f.cachedBackingFile.Release(ctx)
-	}
-	return fs.OK
-}
-
-var _ = (fs.FilePassthroughFder)((*SnapshotFile)(nil))
-
-func (f *SnapshotFile) PassthroughFd() (int, bool) {
-	if f.cachedBackingFile != nil {
-		return f.cachedBackingFile.PassthroughFd()
-	}
-	return -1, false
-}
-
-// tryFetchFromCacheSources attempts to fetch file from configured cache sources
-// Returns true if successfully fetched and cached, false otherwise
-func (f *SnapshotFile) tryFetchFromCacheSources(hash string, writer CacheWriter) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
-	defer cancel()
-
-	for _, source := range f.client.cacheSourceClients {
-		f.client.DebugLog("Trying to fetch %d/%s from %s cache source", f.attr.Size, hash, source.Type())
-
-		reader, size, err := source.Fetch(ctx, f.attr.Size, hash)
-		if err != nil {
-			log.Printf("Failed to fetch from %s cache source: %v", source.Type(), err)
-			continue
-		}
-		defer reader.Close()
-
-		// Copy data from cache source to local cache
-		written, err := io.Copy(writer, reader)
-		if err != nil {
-			log.Printf("Failed to copy from cache source: %v", err)
-			writer.Abort()
-			continue
-		}
-
-		// Verify size if provided
-		if size > 0 && written != size {
-			log.Printf("Size mismatch: expected %d, got %d", size, written)
-			writer.Abort()
-			continue
-		}
-
-		// Commit to cache
-		computedHash, err := writer.Commit()
-		if err != nil {
-			log.Printf("Failed to commit to cache: %v", err)
-			continue
-		}
-
-		// Verify hash matches
-		if computedHash != hash {
-			log.Printf("Hash mismatch: expected %s, got %s", hash, computedHash)
-			continue
-		}
-
-		// Successfully cached, now open for reading
-		cachedPath, err := f.cache.Lookup(computedHash)
-		if err != nil || cachedPath == "" {
-			log.Printf("Failed to lookup cached file: %v", err)
-			continue
-		}
-
-		fd, err := unix.Open(cachedPath, unix.O_RDONLY, 0)
-		if err != nil {
-			log.Printf("Failed to open cached file: %v", err)
-			continue
-		}
-
-		// Update file state
-		f.fetchMu.Lock()
-		f.cachedBackingFile = fs.NewLoopbackFile(fd).(*fs.LoopbackFile)
-		f.cacheWriter = nil
-		f.fetchMu.Unlock()
-
-		if GlobalCacheMetrics != nil {
-			GlobalCacheMetrics.CacheSaved.Inc()
-		}
-
-		f.client.DebugLog("Successfully fetched file %d/%s from %s cache source (%d bytes)", f.attr.Size, hash, source.Type(), written)
-		return true
-	}
-
-	return false
-}
-
-func toFuseAttr(attr *fileserver.FileAttr, out *fuse.Attr) {
-	// Convert FileAttr to fuse.Attr
-	out.Ino = attr.Ino
-	out.Size = uint64(attr.Size)
-	out.Blocks = uint64(attr.Blocks)
-	out.Mtime = uint64(attr.Mtim)
-	out.Mtimensec = uint32(attr.MtimNsec)
-	out.Ctime = uint64(attr.Ctim)
-	out.Ctimensec = uint32(attr.CtimNsec)
-	out.Mode = attr.Mode
-	out.Nlink = uint32(attr.Nlink)
-	out.Owner = fuse.Owner{
-		Uid: attr.Uid,
-		Gid: attr.Gid,
-	}
-	out.Rdev = uint32(attr.Rdev)
-	out.Blksize = uint32(attr.Blksize)
-
 }

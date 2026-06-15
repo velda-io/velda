@@ -8,11 +8,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+TESTS=$1
+TESTS=${TESTS:-"TestSnapshotClient|TestRWFile"}
 echo "Building directfs client tests..."
 go test -c -o /tmp/directfs_test -race
 
 echo "Running tests with sudo..."
-sudo /tmp/directfs_test -test.v -test.run TestSnapshotClient
+sudo /tmp/directfs_test -test.v -test.run "($TESTS)"
 
 # Cleanup
 rm -f /tmp/directfs_test

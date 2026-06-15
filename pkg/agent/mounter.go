@@ -89,14 +89,15 @@ func (m *SimpleMounter) mountInternal(ctx context.Context, session *proto.Sessio
 		var mountErr error
 
 		// Skip base mount if using DirectFS for snapshots
-		if useDirectFS && mType == mountTypeSnapshot {
-			// DirectFS will directly mount from the server, no need for base mount
-			baseCleanup = nil
-			mountErr = nil
-			if session.AgentSessionInfo.GetNfsMount().NfsSnapshotPath != "" {
-				dataDir = fmt.Sprintf("%s:7655@%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsSnapshotPath)
+		if useDirectFS {
+			if mType == mountTypeSnapshot {
+				if session.AgentSessionInfo.GetNfsMount().NfsSnapshotPath != "" {
+					dataDir = fmt.Sprintf("%s:7655@%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsSnapshotPath)
+				} else {
+					dataDir = fmt.Sprintf("%s:7655@%s/.zfs/snapshot/%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsPath, snapshotName)
+				}
 			} else {
-				dataDir = fmt.Sprintf("%s:7655@%s/.zfs/snapshot/%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsPath, snapshotName)
+				dataDir = fmt.Sprintf("%s:7655@%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsPath)
 			}
 		} else {
 			if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -238,6 +239,9 @@ func (m *SimpleMounter) runVeldafsWrapper(ctx context.Context, disk, name, works
 			} else {
 				args = append(args, "--mode", "snapshot")
 			}
+		} else if m.sandboxConfig.GetDiskSource().GetCasConfig().GetUseDirectProtocol() {
+			// Use DirectFS mode with NFS server address
+			args = append(args, "--mode", "directfs")
 		}
 	} else {
 		args = append(args, "--mode", "nocache")
