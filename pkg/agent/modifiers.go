@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,26 +21,23 @@ type CommandModifier func(cmd *exec.Cmd)
 
 func gpuModifier(libraryPath, binPath string) func(*exec.Cmd) {
 	return func(cmd *exec.Cmd) {
-		existingLdLibraryPath := ""
-		existingPath := ""
-
-		for _, env := range cmd.Env {
-			if len(env) > 15 && env[:15] == "LD_LIBRARY_PATH=" {
-				existingLdLibraryPath = env[16:]
+		libAdded := false
+		binAdded := false
+		for i, env := range cmd.Env {
+			if len(env) > 16 && env[:16] == "LD_LIBRARY_PATH=" {
+				cmd.Env[i] = "LD_LIBRARY_PATH=" + libraryPath + ":" + env[16:]
+				libAdded = true
 			}
 			if len(env) > 5 && env[:5] == "PATH=" {
-				existingPath = env[5:]
+				cmd.Env[i] = "PATH=" + binPath + ":" + env[5:]
+				binAdded = true
 			}
 		}
-
-		if existingLdLibraryPath != "" {
-			libraryPath = libraryPath + ":" + existingLdLibraryPath
+		if !libAdded {
+			cmd.Env = append(cmd.Env, "LD_LIBRARY_PATH="+libraryPath)
 		}
-
-		if existingPath != "" {
-			binPath = binPath + ":" + existingPath
+		if !binAdded {
+			cmd.Env = append(cmd.Env, "PATH="+binPath)
 		}
-		cmd.Env = append(cmd.Env, "LD_LIBRARY_PATH="+libraryPath)
-		cmd.Env = append(cmd.Env, "PATH="+binPath)
 	}
 }
