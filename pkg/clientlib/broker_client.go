@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"velda.io/velda/pkg/proto"
+	"velda.io/velda/pkg/utils"
 )
 
 const (
@@ -111,7 +112,17 @@ func GetApiConnection() (*grpc.ClientConn, error) {
 					connErr = errors.New("both broker mTLS client cert and key must be set")
 					return
 				}
-				clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
+				clientCertBytes, err := utils.LoadFileOrSecret(context.Background(), clientCertPath)
+				if err != nil {
+					connErr = fmt.Errorf("failed to load broker mTLS client cert: %w", err)
+					return
+				}
+				clientKeyBytes, err := utils.LoadFileOrSecret(context.Background(), clientKeyPath)
+				if err != nil {
+					connErr = fmt.Errorf("failed to load broker mTLS client key: %w", err)
+					return
+				}
+				clientCert, err := tls.X509KeyPair(clientCertBytes, clientKeyBytes)
 				if err != nil {
 					connErr = fmt.Errorf("failed to load broker mTLS client cert/key: %w", err)
 					return
