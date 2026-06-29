@@ -93,7 +93,14 @@ build {
       "sudo mkdir -p /var/nvidia/lib",
       "sudo mkdir -p /var/nvidia/bin",
       "echo Instaling nvidia driver for kernel $(uname -r)",
-      "sudo apt install -y linux-headers-$(uname -r) gcc make",
+      "sudo apt install -y linux-headers-$(uname -r) gcc make linux-modules-extra-$(uname -r)",
+      <<-EOT
+      sudo bash -c 'cat <<EOF > /etc/modprobe.d/blacklist-nouveau.conf
+      blacklist nouveau
+      options nouveau modeset=0
+      EOF'
+      EOT
+      ,
       "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/lib/* /var/nvidia/lib",
       "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/bin/* /var/nvidia/bin",
       "sudo cp -r nvidia_driver-linux-x86_64-${var.driver_version}-archive/sbin/* /var/nvidia/bin",
