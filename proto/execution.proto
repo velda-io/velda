@@ -68,6 +68,9 @@ message Workload {
 
   // For batch jobs with snapshots: the snapshot name to use as base
   string snapshot_name = 15;
+
+  // Optional non-streaming stdin payload for batch workloads.
+  bytes stdin = 16;
 }
 
 message BatchTaskResult {

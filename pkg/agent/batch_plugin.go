@@ -14,6 +14,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -69,9 +70,15 @@ func (p *BatchPlugin) Run(ctx context.Context) error {
 func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionRequest, wait chan<- *WaitRequest) (<-chan struct{}, error) {
 	workload := sessionReq.Workload
 	taskId := sessionReq.TaskId
-	stdin, err := os.Open("/dev/null")
-	if err != nil {
-		return nil, fmt.Errorf("Failed to open /dev/null: %w", err)
+	var stdin io.ReadCloser
+	var err error
+	if len(workload.Stdin) > 0 {
+		stdin = io.NopCloser(bytes.NewReader(workload.Stdin))
+	} else {
+		stdin, err = os.Open("/dev/null")
+		if err != nil {
+			return nil, fmt.Errorf("Failed to open /dev/null: %w", err)
+		}
 	}
 
 	// Create pipes so we can tee the output to both local files and the server.

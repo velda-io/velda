@@ -21,6 +21,9 @@ import (
 	"strings"
 
 	"github.com/simonfxr/pubsub"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+	gproto "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"velda.io/velda/pkg/proto"
 	"velda.io/velda/pkg/rbac"
@@ -58,20 +61,101 @@ type TaskServiceServer struct {
 	logDb       TaskLogDb
 	taskTracker TaskTracker
 	permission  rbac.Permissions
+	broker      proto.BrokerServiceServer
+	instances   proto.InstanceServiceServer
 	bus         *pubsub.Bus
 }
 
-func NewTaskServiceServer(ctx context.Context, db TaskDb, logDb TaskLogDb, taskTracker TaskTracker, permissions rbac.Permissions) *TaskServiceServer {
+func NewTaskServiceServer(ctx context.Context, db TaskDb, logDb TaskLogDb, taskTracker TaskTracker, permissions rbac.Permissions, broker proto.BrokerServiceServer, instances proto.InstanceServiceServer) *TaskServiceServer {
 	s := &TaskServiceServer{
 		ctx:         ctx,
 		db:          db,
 		logDb:       logDb,
 		taskTracker: taskTracker,
 		permission:  permissions,
+		broker:      broker,
+		instances:   instances,
 		bus:         pubsub.NewBus(),
 	}
 	db.SetTaskStatusCallback(s.NotifyTaskStatusFromDb)
 	return s
+}
+
+func (s *TaskServiceServer) RunTask(ctx context.Context, in *proto.RunTaskRequest) (*proto.RunTaskResponse, error) {
+	if in.Workload == nil {
+		return nil, grpcstatus.Error(codes.InvalidArgument, "workload is required")
+	}
+
+	instanceID, err := s.resolveRunTaskInstance(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	if in.Pool == "" {
+		in.Pool = "shell"
+	}
+
+	workload, ok := gproto.Clone(in.Workload).(*proto.Workload)
+	if !ok {
+		return nil, fmt.Errorf("invalid workload payload")
+	}
+	if workload.LoginUser == "" {
+		workload.LoginUser = "user"
+	}
+	resp, err := s.broker.RequestSession(ctx, &proto.SessionRequest{
+		InstanceId:   instanceID,
+		User:         workload.LoginUser,
+		Pool:         in.Pool,
+		Priority:     in.Priority,
+		Workload:     workload,
+		Labels:       in.Labels,
+		SnapshotName: in.SnapshotName,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.GetTaskId() == "" {
+		return nil, fmt.Errorf("task request succeeded but task id is empty")
+	}
+
+	return &proto.RunTaskResponse{
+		TaskId:     resp.GetTaskId(),
+		InstanceId: instanceID,
+	}, nil
+}
+
+func (s *TaskServiceServer) resolveRunTaskInstance(ctx context.Context, in *proto.RunTaskRequest) (instanceID int64, err error) {
+	switch target := in.Target.(type) {
+	case *proto.RunTaskRequest_InstanceId:
+		if target.InstanceId == 0 {
+			return 0, grpcstatus.Error(codes.InvalidArgument, "instance_id must be non-zero")
+		}
+		_, err := s.instances.GetInstance(ctx, &proto.GetInstanceRequest{InstanceId: target.InstanceId})
+		if err != nil {
+			return 0, err
+		}
+		return target.InstanceId, nil
+	case *proto.RunTaskRequest_InstanceName:
+		if strings.TrimSpace(target.InstanceName) == "" {
+			return 0, grpcstatus.Error(codes.InvalidArgument, "instance_name must be non-empty")
+		}
+		instance, err := s.instances.GetInstanceByName(ctx, &proto.GetInstanceByNameRequest{InstanceName: target.InstanceName})
+		if err != nil {
+			return 0, err
+		}
+		return instance.GetId(), nil
+	case *proto.RunTaskRequest_NewInstance_:
+		if target.NewInstance == nil || target.NewInstance.CreateInstance == nil {
+			return 0, grpcstatus.Error(codes.InvalidArgument, "new_instance.create_instance is required")
+		}
+		instance, err := s.instances.CreateInstance(ctx, target.NewInstance.CreateInstance)
+		if err != nil {
+			return 0, err
+		}
+		return instance.GetId(), nil
+	default:
+		return 0, grpcstatus.Error(codes.InvalidArgument, "one target must be set")
+	}
 }
 
 func (s *TaskServiceServer) GetTask(ctx context.Context, in *proto.GetTaskRequest) (*proto.Task, error) {

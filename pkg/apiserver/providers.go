@@ -249,8 +249,8 @@ func ProvideTaskLogService(grpcServer *grpc.Server, config *configpb.Config) pro
 	return s
 }
 
-func ProvideTaskService(ctx context.Context, grpcServer *grpc.Server, mux *runtime.ServeMux, db tasks.TaskDb, logdb tasks.TaskLogDb, taskTracker tasks.TaskTracker, perm rbac.Permissions) proto.TaskServiceServer {
-	s := tasks.NewTaskServiceServer(ctx, db, logdb, taskTracker, perm)
+func ProvideTaskService(ctx context.Context, grpcServer *grpc.Server, mux *runtime.ServeMux, db tasks.TaskDb, logdb tasks.TaskLogDb, taskTracker tasks.TaskTracker, perm rbac.Permissions, broker proto.BrokerServiceServer, instances proto.InstanceServiceServer) proto.TaskServiceServer {
+	s := tasks.NewTaskServiceServer(ctx, db, logdb, taskTracker, perm, broker, instances)
 	proto.RegisterTaskServiceServer(grpcServer, s)
 	proto.RegisterTaskServiceHandlerServer(context.Background(), mux, s)
 	return s
