@@ -37,6 +37,7 @@ const (
 	TaskService_GetTask_FullMethodName     = "/velda.TaskService/GetTask"
 	TaskService_ListTasks_FullMethodName   = "/velda.TaskService/ListTasks"
 	TaskService_SearchTasks_FullMethodName = "/velda.TaskService/SearchTasks"
+	TaskService_RunTask_FullMethodName     = "/velda.TaskService/RunTask"
 	TaskService_CancelJob_FullMethodName   = "/velda.TaskService/CancelJob"
 	TaskService_WatchTask_FullMethodName   = "/velda.TaskService/WatchTask"
 	TaskService_Logs_FullMethodName        = "/velda.TaskService/Logs"
@@ -49,6 +50,7 @@ type TaskServiceClient interface {
 	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*Task, error)
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*TaskPageResult, error)
 	SearchTasks(ctx context.Context, in *SearchTasksRequest, opts ...grpc.CallOption) (*TaskPageResult, error)
+	RunTask(ctx context.Context, in *RunTaskRequest, opts ...grpc.CallOption) (*RunTaskResponse, error)
 	CancelJob(ctx context.Context, in *CancelJobRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	WatchTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Task], error)
 	Logs(ctx context.Context, in *LogTaskRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogTaskResponse], error)
@@ -86,6 +88,16 @@ func (c *taskServiceClient) SearchTasks(ctx context.Context, in *SearchTasksRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TaskPageResult)
 	err := c.cc.Invoke(ctx, TaskService_SearchTasks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *taskServiceClient) RunTask(ctx context.Context, in *RunTaskRequest, opts ...grpc.CallOption) (*RunTaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunTaskResponse)
+	err := c.cc.Invoke(ctx, TaskService_RunTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +159,7 @@ type TaskServiceServer interface {
 	GetTask(context.Context, *GetTaskRequest) (*Task, error)
 	ListTasks(context.Context, *ListTasksRequest) (*TaskPageResult, error)
 	SearchTasks(context.Context, *SearchTasksRequest) (*TaskPageResult, error)
+	RunTask(context.Context, *RunTaskRequest) (*RunTaskResponse, error)
 	CancelJob(context.Context, *CancelJobRequest) (*emptypb.Empty, error)
 	WatchTask(*GetTaskRequest, grpc.ServerStreamingServer[Task]) error
 	Logs(*LogTaskRequest, grpc.ServerStreamingServer[LogTaskResponse]) error
@@ -168,6 +181,9 @@ func (UnimplementedTaskServiceServer) ListTasks(context.Context, *ListTasksReque
 }
 func (UnimplementedTaskServiceServer) SearchTasks(context.Context, *SearchTasksRequest) (*TaskPageResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SearchTasks not implemented")
+}
+func (UnimplementedTaskServiceServer) RunTask(context.Context, *RunTaskRequest) (*RunTaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunTask not implemented")
 }
 func (UnimplementedTaskServiceServer) CancelJob(context.Context, *CancelJobRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelJob not implemented")
@@ -253,6 +269,24 @@ func _TaskService_SearchTasks_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TaskService_RunTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TaskServiceServer).RunTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TaskService_RunTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TaskServiceServer).RunTask(ctx, req.(*RunTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TaskService_CancelJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CancelJobRequest)
 	if err := dec(in); err != nil {
@@ -311,6 +345,10 @@ var TaskService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SearchTasks",
 			Handler:    _TaskService_SearchTasks_Handler,
+		},
+		{
+			MethodName: "RunTask",
+			Handler:    _TaskService_RunTask_Handler,
 		},
 		{
 			MethodName: "CancelJob",

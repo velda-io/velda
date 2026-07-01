@@ -70,9 +70,9 @@ func RunAllService(flag *pflag.FlagSet) (CompletionError, error) {
 	storageManager := ProvideStorageManager(storage)
 	brokerServiceServer := ProvideBrokerServer(server, runtimeServeMux, schedulerSet, sessionDatabase, permissions, taskTracker, brokerAuth, apiserverDatabase, storageManager)
 	taskLogDb := ProvideTaskLogDb(config, storage)
-	taskServiceServer := ProvideTaskService(context, server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions)
-	poolManagerServiceServer := ProvidePoolService(context, server, runtimeServeMux, schedulerSet)
 	instanceServiceServer := ProvideInstanceService(server, runtimeServeMux, apiserverDatabase, storage, permissions, brokerServiceServer)
+	taskServiceServer := ProvideTaskService(context, server, runtimeServeMux, apiserverDatabase, taskLogDb, taskTracker, permissions, brokerServiceServer, instanceServiceServer)
+	poolManagerServiceServer := ProvidePoolService(context, server, runtimeServeMux, schedulerSet)
 	taskLogServiceServer := ProvideTaskLogService(server, config)
 	registry := _wireRegistryValue
 	metricRegistryRunner := ProvideMetrics(registry, serverMetrics, schedulerSet)

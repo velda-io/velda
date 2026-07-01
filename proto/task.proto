@@ -20,6 +20,7 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
 import "execution.proto";
+import "instances.proto";
 
 option go_package = "velda.io/velda/pkg/proto";
 
@@ -92,6 +93,29 @@ message LogTaskResponse {
 
 message CancelJobRequest { string job_id = 1; }
 
+message RunTaskRequest {
+  message NewInstance {
+    CreateInstanceRequest create_instance = 1;
+  }
+
+  oneof target {
+    int64 instance_id = 1;
+    string instance_name = 2;
+    NewInstance new_instance = 3;
+  }
+
+  string pool = 5;
+  int64 priority = 6;
+  repeated string labels = 7;
+  Workload workload = 9;
+  string snapshot_name = 11;
+}
+
+message RunTaskResponse {
+  string task_id = 1;
+  int64 instance_id = 2;
+}
+
 // PushLogsRequest carries a chunk of stdout or stderr output for a batch task.
 // The agent streams these to the server so logs are saved centrally.
 message PushLogsRequest {
@@ -115,6 +139,13 @@ service TaskService {
   rpc SearchTasks(SearchTasksRequest) returns (TaskPageResult) {
     option (google.api.http) = {
       get : "/rest/task/search"
+    };
+  };
+
+  rpc RunTask(RunTaskRequest) returns (RunTaskResponse) {
+    option (google.api.http) = {
+      post : "/rest/task/run"
+      body : "*"
     };
   };
 
