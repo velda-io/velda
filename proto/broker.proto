@@ -317,12 +317,7 @@ service BrokerService {
   rpc AgentUpdate(stream AgentUpdateRequest)
       returns (stream AgentUpdateResponse);
 
-  rpc RequestSession(SessionRequest) returns (ExecutionStatus) {
-    option (google.api.http) = {
-      post : "/rest/broker/v1/session"
-      body : "*"
-    };
-  }
+  rpc RequestSession(SessionRequest) returns (ExecutionStatus) {}
 
   rpc KillSession(KillSessionRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {

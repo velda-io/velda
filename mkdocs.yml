@@ -121,6 +121,7 @@ nav:
           - CAS File Caching: deployment/cas-file-caching.md
   - Reference:
       - CLI Reference: reference/cli/
+      - API Reference: reference/api/
 
 plugins:
   - search:
