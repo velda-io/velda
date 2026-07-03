@@ -179,9 +179,15 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	}
 
 	if batch {
+		emailEnabled, _ := cmd.Flags().GetBool("email")
 		workload, err := getWorkload(cmd, args)
 		if err != nil {
 			return err
+		}
+		if emailEnabled {
+			workload.EmailStatus = proto.Workload_EMAIL_STATUS_ENABLED
+		} else {
+			workload.EmailStatus = proto.Workload_EMAIL_STATUS_DISABLED
 		}
 		sessionReq.TaskId = cmd.Flag("name").Value.String()
 		sessionReq.Workload = workload
@@ -571,6 +577,7 @@ func init() {
 	runCmd.Flags().BoolP("noinput", "I", false, "Don't take input from stdin. Only used with a command.")
 	runCmd.Flags().Bool("shell", false, "Use shell")
 	runCmd.Flags().Bool("batch", false, "Batch mode. Queue the job, and return immediately")
+	runCmd.Flags().Bool("email", true, "Enable batch completion email notification. Batch mode only.")
 	runCmd.Flags().Bool("new-session", false, "Always create a new session")
 	runCmd.Flags().Bool("keep-alive", false, "Keep the session alive after all processes exits even if all connections are closed.")
 	runCmd.Flags().BoolP("quiet", "q", false, "Suppress all non-error loggings.")

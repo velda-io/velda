@@ -71,6 +71,15 @@ message Workload {
 
   // Optional non-streaming stdin payload for batch workloads.
   bytes stdin = 16;
+
+  // Controls whether to send job completion email for this workload.
+  // Default is EMAIL_STATUS_UNSPECIFIED (no email).
+  enum EmailStatus {
+    EMAIL_STATUS_UNSPECIFIED = 0;
+    EMAIL_STATUS_ENABLED = 1;
+    EMAIL_STATUS_DISABLED = 2;
+  }
+  EmailStatus email_status = 17;
 }
 
 message BatchTaskResult {

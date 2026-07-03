@@ -138,6 +138,7 @@ func (p *BatchPlugin) start(ctx context.Context, sessionReq *proto.SessionReques
 		// Update working directory if using user home directory
 		// Load default environment and append explicit environs
 		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, fmt.Sprintf("HOME=%s", user.HomeDir))
 		cmd.Env = append(cmd.Env, workload.Environs...)
 	} else {
 		// Use credentials from workload
