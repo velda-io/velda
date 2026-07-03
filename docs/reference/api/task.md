@@ -278,6 +278,7 @@ Authorization: Bearer <token>
 | `writable_dirs` | string[] | For batch jobs with snapshots: writable directories where changes persist |
 | `snapshot_name` | string | For batch jobs with snapshots: the snapshot name to use as base |
 | `stdin` | bytes | Optional non-streaming stdin payload for batch workloads. |
+| `email_status` | [EmailStatus](#emailstatus) |  |
 
 ### InstanceStatus
 
@@ -311,6 +312,14 @@ Authorization: Bearer <token>
 | `TASK_STATUS_FAILURE` | 6 |
 | `TASK_STATUS_FAILED_UPSTREAM` | 7 |
 | `TASK_STATUS_CANCELLED` | 8 |
+
+### EmailStatus
+
+| Value | Number |
+|-------|--------|
+| `EMAIL_STATUS_UNSPECIFIED` | 0 |
+| `EMAIL_STATUS_ENABLED` | 1 |
+| `EMAIL_STATUS_DISABLED` | 2 |
 
 ### ShardScheduling
 
