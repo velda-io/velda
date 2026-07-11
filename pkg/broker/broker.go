@@ -197,6 +197,7 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 		// Save writable_dirs and snapshot_name to workload for root task
 		req.Workload.WritableDirs = req.WritableDirs
 		req.Workload.SnapshotName = req.SnapshotName
+		req.Workload.ServiceName = req.ServiceName
 		// Assign & fixup task ID
 		if inBatch {
 			if strings.Contains(req.TaskId, "/") {

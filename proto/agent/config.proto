@@ -140,4 +140,5 @@ message AgentConfig {
   string pool = 6;
 
   string task_id = 7;
+  string service = 8;
 }

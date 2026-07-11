@@ -195,6 +195,61 @@ vbatch -N 2 ./script.sh testfile_sharded
 			return true
 		}, 30*time.Second, 1000*time.Millisecond)
 	})
+
+	t.Run("ServiceNameInTaskState", func(t *testing.T) {
+		taskId, err := runBatchJob("-s", "batch-service-state", "sh", "-c", "echo ok")
+		require.NoError(t, err)
+		taskId = strings.TrimSpace(taskId)
+
+		assert.Eventually(t, func() bool {
+			status := getTaskStatus(t, taskId)
+			return status == "TASK_STATUS_SUCCESS" || status == "TASK_STATUS_FAILURE"
+		}, 30*time.Second, 1000*time.Millisecond)
+
+		serviceName, err := runVeldaWithOutput("task", "get", taskId, "-o", "workload.serviceName", "--header=false")
+		require.NoError(t, err)
+		assert.Equal(t, "batch-service-state\n", serviceName)
+	})
+
+	t.Run("ServiceNameInVeldaYaml", func(t *testing.T) {
+		taskId, err := runBatchJob("-s", "batch-service-yaml", "sh", "-c", "grep -q '^service: batch-service-yaml$' /run/velda/velda.yaml")
+		require.NoError(t, err)
+		taskId = strings.TrimSpace(taskId)
+
+		assert.Eventually(t, func() bool {
+			return getTaskStatus(t, taskId) == "TASK_STATUS_SUCCESS"
+		}, 30*time.Second, 1000*time.Millisecond)
+	})
+
+	t.Run("ShardedServiceNameSuffix", func(t *testing.T) {
+		require.NoError(t, runCommand("sh", "-c", `
+cat << EOF > shard_service.sh
+#!/bin/sh
+service_name=\$(grep '^service:' /run/velda/velda.yaml | sed 's/service:[[:space:]]*//')
+echo \${service_name} > "\$1.\${VELDA_SHARD_ID}"
+EOF
+chmod +x shard_service.sh
+vbatch -s svc-shard- -N 2 ./shard_service.sh shard_service
+`))
+
+		assert.Eventually(t, func() bool {
+			output, err := runCommandGetOutput("cat", "shard_service.0")
+			log.Printf("shard_service.0 output: %s, err: %v", output, err)
+			if err != nil {
+				return false
+			}
+			return output == "svc-shard-0\n"
+		}, 5*time.Second, 1000*time.Millisecond)
+
+		assert.Eventually(t, func() bool {
+			output, err := runCommandGetOutput("cat", "shard_service.1")
+			log.Printf("shard_service.1 output: %s, err: %v", output, err)
+			if err != nil {
+				return false
+			}
+			return output == "svc-shard-1\n"
+		}, 5*time.Second, 1000*time.Millisecond)
+	})
 	t.Run("Gang", func(t *testing.T) {
 		if !r.Supports(FeatureMultiAgent) {
 			t.Skip("Multi-agent feature is not supported")
