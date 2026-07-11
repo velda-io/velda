@@ -101,6 +101,7 @@ nav:
       - Gang Scheduling: user-guide/gang-scheduling.md
       - Snapshots & Overlays: user-guide/snapshots-and-overlays.md
       - Storage & Volumes: user-guide/storage-volumes.md
+      - GitHub Actions Integration: user-guide/github-actions-integration.md
   - Examples:
       - Quick Start: examples/quick-start.md
       - Ray AutoScaled cluster: examples/ray-autoscaled-cluster.md
