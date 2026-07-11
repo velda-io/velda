@@ -80,6 +80,11 @@ message Workload {
     EMAIL_STATUS_DISABLED = 2;
   }
   EmailStatus email_status = 17;
+
+  // Service name associated with this workload when queued as a batch task.
+  // If it ends with "-" for a sharded job, the shard index will be appended
+  // to the service name.
+  string service_name = 18;
 }
 
 message BatchTaskResult {

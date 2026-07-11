@@ -279,6 +279,7 @@ Authorization: Bearer <token>
 | `snapshot_name` | string | For batch jobs with snapshots: the snapshot name to use as base |
 | `stdin` | bytes | Optional non-streaming stdin payload for batch workloads. |
 | `email_status` | [EmailStatus](#emailstatus) |  |
+| `service_name` | string | Service name associated with this workload when queued as a batch task.  If it ends with "-" for a sharded job, the shard index will be appended  to the service name. |
 
 ### InstanceStatus
 

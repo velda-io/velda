@@ -110,11 +110,12 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 		func(_ string, task *db.TaskWithUser) error {
 			pool := task.Task.Pool
 			req := &proto.SessionRequest{
-				Workload:   task.Workload,
-				TaskId:     task.Id,
-				Pool:       pool,
-				InstanceId: task.InstanceId,
-				Priority:   task.Priority,
+				Workload:    task.Workload,
+				TaskId:      task.Id,
+				Pool:        pool,
+				InstanceId:  task.InstanceId,
+				Priority:    task.Priority,
+				ServiceName: task.Workload.ServiceName,
 			}
 
 			// Fetch root task to get writable_dirs and snapshot_name
@@ -150,6 +151,10 @@ func (t *TaskTracker) PollTasks(ctx context.Context) error {
 				for i := 0; i < int(task.Task.Workload.TotalShards); i++ {
 					taskShard := pb.Clone(req).(*proto.SessionRequest)
 					taskShard.Workload.ShardIndex = int32(i)
+					if strings.HasSuffix(taskShard.ServiceName, "-") {
+						taskShard.ServiceName = fmt.Sprintf("%s%d", taskShard.ServiceName, i)
+					}
+					taskShard.Workload.ServiceName = taskShard.ServiceName
 					taskShard.Workload.Environs = append(taskShard.Workload.Environs,
 						fmt.Sprintf("VELDA_SHARD_ID=%d", i),
 						fmt.Sprintf("VELDA_TOTAL_SHARDS=%d", task.Task.Workload.TotalShards))

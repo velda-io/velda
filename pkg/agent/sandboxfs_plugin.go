@@ -98,7 +98,7 @@ func (p *SandboxFsPlugin) Run(ctx context.Context) (err error) {
 func (r *SandboxFsPlugin) initAgentDir(session *proto.SessionRequest, sessionDir string) error {
 	instanceId := session.InstanceId
 	sessionId := session.SessionId
-	configData := clientlib.GenerateAgentConfig(instanceId, sessionId, session.TaskId)
+	configData := clientlib.GenerateAgentConfig(instanceId, sessionId, session.TaskId, session.ServiceName)
 	err := os.Mkdir(path.Join(sessionDir, "velda"), 0755)
 	if err != nil && !os.IsExist(err) {
 		return fmt.Errorf("Mkdir velda: %w", err)
@@ -154,7 +154,7 @@ func (p *NonPrivSandboxFsPlugin) Run(ctx context.Context) (err error) {
 	if mkErr := os.MkdirAll("/run/velda", 0755); mkErr != nil {
 		return fmt.Errorf("MkdirAll /run/velda: %w", mkErr)
 	}
-	configData := clientlib.GenerateAgentConfig(session.InstanceId, session.SessionId, session.TaskId)
+	configData := clientlib.GenerateAgentConfig(session.InstanceId, session.SessionId, session.TaskId, session.ServiceName)
 	configFile, err := os.Create("/run/velda/velda.yaml")
 	if err != nil {
 		return fmt.Errorf("Create /run/velda/velda.yaml: %w", err)
