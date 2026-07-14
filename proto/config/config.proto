@@ -305,6 +305,10 @@ message AutoscalerBackendNebiusLaunchTemplate {
   // Image family to use for the instance. If set, it will override
   // the default image.
   string image_family = 20;
+
+  // Nebius GPU/Infiniband cluster ID. If set, will attach the instance to the
+  // specified cluster (enabling Infiniband where supported).
+  string cluster_id = 21;
 }
 
 // Nebius boot disk type enum.
@@ -487,6 +491,10 @@ message NebiusAutoProvisioner {
   // Image family to use for all instances. If set, it will override
   // the default image.
   string image_family = 15;
+
+  // Infiniband cluster ID. If set, will enable Infiniband for the instance and
+  // join the cluster.
+  string cluster_id = 21;
 }
 
 message AutoscalerBackendMithrilSpotBid {

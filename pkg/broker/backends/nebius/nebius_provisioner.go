@@ -71,6 +71,7 @@ func (p *NebiusAutoPoolProvisioner) run(ctx context.Context) error {
 			ServiceAccountId:     p.cfg.ServiceAccountId,
 			AgentConfig:          &agentpb.AgentConfig{},
 			ImageFamily:          p.cfg.ImageFamily,
+			ClusterId:            p.cfg.ClusterId,
 		}
 
 		// Copy labels from common config

@@ -294,6 +294,11 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		CloudInitUserData: userData,
 		Hostname:          name,
 	}
+	if n.cfg.GetClusterId() != "" {
+		instanceSpec.GpuCluster = &compute.InstanceGpuClusterSpec{
+			Id: n.cfg.GetClusterId(),
+		}
+	}
 
 	// Add preemptible settings if configured
 	if n.cfg.GetPreemptible() {
