@@ -306,8 +306,8 @@ message AutoscalerBackendNebiusLaunchTemplate {
   // the default image.
   string image_family = 20;
 
-  // Infiniband cluster ID. If set, will enable Infiniband for the instance and
-  // join the cluster.
+  // Nebius GPU/Infiniband cluster ID. If set, will attach the instance to the
+  // specified cluster (enabling Infiniband where supported).
   string cluster_id = 21;
 }
 
