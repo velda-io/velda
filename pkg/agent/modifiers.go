@@ -24,11 +24,11 @@ func gpuModifier(libraryPath, binPath string) func(*exec.Cmd) {
 		libAdded := false
 		binAdded := false
 		for i, env := range cmd.Env {
-			if len(env) > 16 && env[:16] == "LD_LIBRARY_PATH=" {
+			if len(env) >= 16 && env[:16] == "LD_LIBRARY_PATH=" {
 				cmd.Env[i] = "LD_LIBRARY_PATH=" + libraryPath + ":" + env[16:]
 				libAdded = true
 			}
-			if len(env) > 5 && env[:5] == "PATH=" {
+			if len(env) >= 5 && env[:5] == "PATH=" {
 				cmd.Env[i] = "PATH=" + binPath + ":" + env[5:]
 				binAdded = true
 			}
