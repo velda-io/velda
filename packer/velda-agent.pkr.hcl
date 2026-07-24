@@ -86,6 +86,19 @@ build {
   provisioner "shell" {
     inline = [
       // Unattended upgrader may upgrade the kernel and break the nvidia driver.
+      "echo Install Nvidia fabric manager",
+      "wget -q https://developer.download.nvidia.com/compute/nvidia-driver/redist/fabricmanager/linux-x86_64/fabricmanager-linux-x86_64-${var.driver_version}-archive.tar.xz",
+      "echo Unpacking nvidia fabric manager",
+      "tar -xf fabricmanager-linux-x86_64-${var.driver_version}-archive.tar.xz",
+      "echo Installing nvidia fabric manager for kernel $(uname -r)",
+      # Flatten the unpacked directory and install the fabric manager.
+      "(cd fabricmanager-linux-x86_64-${var.driver_version}-archive && find . -mindepth 2 -type f -exec mv -n -t . {} + && find . -mindepth 1 -type d -empty -delete && sudo ./fm_run_package_installer.sh)",
+    ]
+  }
+
+  provisioner "shell" {
+    inline = [
+      // Unattended upgrader may upgrade the kernel and break the nvidia driver.
       "echo Downloading nvidia driver",
       "wget -q https://developer.download.nvidia.com/compute/nvidia-driver/redist/nvidia_driver/linux-x86_64/nvidia_driver-linux-x86_64-${var.driver_version}-archive.tar.xz",
       "echo Unpacking nvidia driver",
