@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -40,27 +41,42 @@ func NewDevicesPlugin(workspaceDir string, config *agentpb.SandboxConfig) *Devic
 }
 
 func copyNod(src, dst string) error {
-	stat, err := os.Stat(src)
+	stat, err := os.Lstat(src)
 	if err != nil {
 		return err
 	}
 
 	sysStat, ok := stat.Sys().(*syscall.Stat_t)
 	if !ok {
-		return err
+		return fmt.Errorf("failed to get stat for %s: Not a syscall.Stat_t", src)
 	}
-	if stat.Mode()&os.ModeDevice == 0 {
-		return nil
+	switch stat.Mode() & os.ModeType {
+	case os.ModeCharDevice | os.ModeDevice:
+		if err := unix.Mknod(dst, unix.S_IFCHR|uint32(stat.Mode()&fs.ModePerm), int(sysStat.Rdev)); err != nil {
+			return err
+		}
+	case os.ModeDir:
+		if err := os.Mkdir(dst, stat.Mode()&fs.ModePerm); err != nil && !os.IsExist(err) {
+			return err
+		}
+	case os.ModeSymlink:
+		target, err := os.Readlink(src)
+		if err != nil {
+			return err
+		}
+		if err := os.Symlink(target, dst); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported file type: %s (%v)", src, stat.Mode()&os.ModeType)
 	}
-	if err := unix.Mknod(dst, unix.S_IFCHR|uint32(stat.Mode()&fs.ModePerm), int(sysStat.Rdev)); err != nil {
-		return err
-	}
-
-	if err := os.Chmod(dst, stat.Mode()&fs.ModePerm); err != nil {
-		return err
-	}
-	if err := os.Chown(dst, int(sysStat.Uid), int(sysStat.Gid)); err != nil {
-		return err
+	if stat.Mode()&os.ModeType != os.ModeSymlink {
+		if err := os.Chmod(dst, stat.Mode()&fs.ModePerm); err != nil {
+			return err
+		}
+		if err := os.Chown(dst, int(sysStat.Uid), int(sysStat.Gid)); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -106,10 +122,18 @@ func (p *DevicesPlugin) Run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("glob nvidia caps: %w", err)
 		}
-		if err := os.MkdirAll(filepath.Join(workspaceDir, "dev/nvidia-caps"), 0755); err != nil {
-			return fmt.Errorf("mkdir /dev/nvidia-caps: %w", err)
+		ibFiles, err := filepath.Glob("/dev/infiniband/*")
+		if err != nil {
+			return fmt.Errorf("glob infiniband nodes: %w", err)
+		}
+		if len(ibFiles) > 0 {
+			if err := os.MkdirAll(filepath.Join(workspaceDir, "dev/infiniband"), 0755); err != nil {
+				return fmt.Errorf("mkdir /dev/infiniband: %w", err)
+			}
+			files = append(files, ibFiles...)
 		}
 		files = append(files, capfiles...)
+		sort.Strings(files)
 		for _, file := range files {
 			if err := copyNod(file, filepath.Join(workspaceDir, file)); err != nil {
 				return fmt.Errorf("copy nvidia node: %v %w", file, err)

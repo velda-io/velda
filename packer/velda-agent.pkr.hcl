@@ -93,6 +93,9 @@ build {
       "echo Installing nvidia fabric manager for kernel $(uname -r)",
       # Flatten the unpacked directory and install the fabric manager.
       "(cd fabricmanager-linux-x86_64-${var.driver_version}-archive && find . -mindepth 2 -type f -exec mv -n -t . {} + && find . -mindepth 1 -type d -empty -delete && sudo ./fm_run_package_installer.sh)",
+      "rm -f fabricmanager-linux-x86_64-${var.driver_version}-archive.tar.xz",
+      "rm -rf fabricmanager-linux-x86_64-${var.driver_version}-archive",
+      "echo -e \"ib_uverbs\nib_core\nmlx5_ib\" | sudo tee -a /etc/modules"
     ]
   }
 
