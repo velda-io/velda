@@ -16,6 +16,7 @@ Environment="HOME=/root"
 StandardError=journal+console
 OOMPolicy=continue
 LimitNOFILE=524288:524288
+LimitMEMLOCK=infinity
 CPUWeight=10000
 
 [Install]
