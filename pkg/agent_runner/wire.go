@@ -53,9 +53,10 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	return ShimRunner(nil) // This will never be reached, but is required for the wire build.
 }
 
-func providePid1Runner(requestPlugin *agent.SessionRequestPlugin, autofsDaemon *agent.AutoFsDaemonPlugin, authPlugin agent.AuthPluginType, pivotRootPlugin *agent.PivotRootPlugin, waiterPlugin *agent.WaiterPlugin, completionSignalPlugin *agent.CompletionSignalPlugin, sshdPlugin *agent.SshdPlugin, statusPlugin *agent.ReportStatusPlugin, batchPlugin *agent.BatchPlugin, completionWaiter *agent.CompletionWaitPlugin) Pid1Runner {
+func providePid1Runner(requestPlugin *agent.SessionRequestPlugin, autofsDaemon *agent.AutoFsDaemonPlugin, authPlugin agent.AuthPluginType, pivotRootPlugin *agent.PivotRootPlugin, waiterPlugin *agent.WaiterPlugin, completionSignalPlugin *agent.CompletionSignalPlugin, networkPlugin *agent.NetworkPlugin, sshdPlugin *agent.SshdPlugin, statusPlugin *agent.ReportStatusPlugin, batchPlugin *agent.BatchPlugin, completionWaiter *agent.CompletionWaitPlugin) Pid1Runner {
 	return agent.NewPluginRunner(
 		requestPlugin,
+		networkPlugin,
 		autofsDaemon,
 		pivotRootPlugin,
 		autofsDaemon.GetMountPlugin(),
@@ -82,6 +83,7 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 		agent.ProvidePivotRootPlugin,
 		agent.ProvideWaiterPlugin,
 		agent.ProvideCompletionSignalPlugin,
+		agent.ProvideNetworkPlugin,
 		agent.ProvideSshdPlugin,
 		agent.ProvideReportStatusPlugin,
 		agent.ProvideBatchPlugin,

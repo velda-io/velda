@@ -57,8 +57,12 @@ func ProvideAutoFsDaemonPlugin() *AutoFsDaemonPlugin {
 	return NewAutoFsDaemonPlugin()
 }
 
-func ProvideLinuxNamespacePlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig, requestPlugin *SessionRequestPlugin) *LinuxNamespacePlugin {
-	return NewLinuxNamespacePlugin(string(workDir), sandboxConfig, requestPlugin)
+func ProvideLinuxNamespacePlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig) *LinuxNamespacePlugin {
+	return NewLinuxNamespacePlugin(string(workDir), sandboxConfig)
+}
+
+func ProvideNetworkPlugin(requestPlugin *SessionRequestPlugin, workDir WorkDir) *NetworkPlugin {
+	return NewNetworkPlugin(requestPlugin, string(workDir))
 }
 
 func ProvideNvidiaPlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig) *DevicesPlugin {

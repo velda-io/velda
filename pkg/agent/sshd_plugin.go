@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"syscall"
 	"time"
 
 	"velda.io/velda/pkg/proto"
@@ -49,12 +48,6 @@ func (p *SshdPlugin) Run(ctx context.Context) (err error) {
 	auth := ctx.Value(p.authDecoderPlugin).(SshdAuthenticator)
 	waiter := ctx.Value(p.waiter).(*Waiter)
 	req := ctx.Value(p.request).(*proto.SessionRequest)
-
-	syscall.Sethostname([]byte(req.SessionId))
-
-	if err != nil {
-		return fmt.Errorf("Parse token: %w", err)
-	}
 	sshd := NewSSHD(auth, waiter)
 
 	initTimeout := req.InitTimeout.AsDuration()
