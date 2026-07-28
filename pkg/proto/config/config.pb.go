@@ -894,8 +894,8 @@ type AutoscalerBackendNebiusLaunchTemplate struct {
 	// Image family to use for the instance. If set, it will override
 	// the default image.
 	ImageFamily string `protobuf:"bytes,20,opt,name=image_family,json=imageFamily,proto3" json:"image_family,omitempty"`
-	// Infiniband cluster ID. If set, will enable Infiniband for the instance and
-	// join the cluster.
+	// Nebius GPU/Infiniband cluster ID. If set, will attach the instance to the
+	// specified cluster (enabling Infiniband where supported).
 	ClusterId     string `protobuf:"bytes,21,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -24,13 +24,11 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"velda.io/velda/pkg/proto"
 	agentpb "velda.io/velda/pkg/proto/agent"
 )
 
 type LinuxNamespacePlugin struct {
 	PluginBase
-	requestPlugin interface{}
 	WorkspaceDir  string
 	SandboxConfig *agentpb.SandboxConfig
 }
@@ -78,26 +76,21 @@ func setupDev(devDir string) {
 }
 
 func (p *LinuxNamespacePlugin) Run(ctx context.Context) error {
-	p.setupMounts(ctx, p.WorkspaceDir)
+	p.setupMounts(p.WorkspaceDir)
 	return p.RunNext(ctx)
 }
 
-func (p *LinuxNamespacePlugin) setupMounts(ctx context.Context, workDir string) {
-	request := ctx.Value(p.requestPlugin).(*proto.SessionRequest)
-	// Copy /etc/hosts to workDir/hosts
-	bytes, err := os.ReadFile("/etc/hosts")
-	if err != nil {
-		die("Read /etc/hosts", err)
-	}
-	bytes = append(bytes, []byte("\n127.0.0.1 "+request.SessionId+"\n")...)
-	if err := os.WriteFile(path.Join(workDir, "hosts"), bytes, 0644); err != nil {
-		die("Write /etc/hosts", err)
-	}
-
+func (p *LinuxNamespacePlugin) setupMounts(workDir string) {
 	// Disable propagation
 	workspaceDir := path.Join(workDir, "workspace")
 	if err := syscall.Mount("", workspaceDir, "", syscall.MS_SHARED, ""); err != nil {
 		die("remount slave", err)
+	}
+
+	// Create a dummy hosts file under workspace dir
+	// To be overwritten by NetworkPlugin
+	if err := os.WriteFile(path.Join(workDir, "hosts"), []byte("127.0.0.1 localhost\n"), 0644); err != nil {
+		die("Create dummy hosts file", err)
 	}
 
 	// Mount misc
@@ -238,11 +231,10 @@ func setDefaultEnv() error {
 	return nil
 }
 
-func NewLinuxNamespacePlugin(workspaceDir string, sandboxConfig *agentpb.SandboxConfig, requestPlugin interface{}) *LinuxNamespacePlugin {
+func NewLinuxNamespacePlugin(workspaceDir string, sandboxConfig *agentpb.SandboxConfig) *LinuxNamespacePlugin {
 	return &LinuxNamespacePlugin{
 		WorkspaceDir:  workspaceDir,
 		SandboxConfig: sandboxConfig,
-		requestPlugin: requestPlugin,
 	}
 }
 

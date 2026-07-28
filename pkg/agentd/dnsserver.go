@@ -18,6 +18,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -28,6 +29,8 @@ import (
 )
 
 const dnsDomainSuffix = ".local.velda."
+
+var sessionIdQueryPattern = regexp.MustCompile(`^[0-9a-fA-F]{16}$`)
 
 type DnsServer struct {
 	dnsServer    *dns.Server
@@ -60,6 +63,26 @@ func (s *DnsServer) Reset() {
 	s.ctx.Store(&ctx)
 }
 
+func parseSessionDnsName(name string) (sessionID string, serviceName string, ok bool) {
+	trimmed := strings.TrimSuffix(name, dnsDomainSuffix)
+	if trimmed == name {
+		return "", "", false
+	}
+
+	labels := strings.Split(trimmed, ".")
+	if len(labels) != 1 && len(labels) != 2 {
+		return "", "", false
+	}
+	if len(labels) == 1 {
+		if sessionIdQueryPattern.MatchString(labels[0]) {
+			return strings.ToLower(labels[0]), "", true
+		} else {
+			return "", labels[0], true
+		}
+	}
+	return labels[0], labels[1], true
+}
+
 // handleDNSRequest handles incoming DNS queries
 func (s *DnsServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	msg := dns.Msg{}
@@ -74,13 +97,17 @@ func (s *DnsServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		log.Printf("Received query for domain: %s\n", q.Name)
 
 		if q.Qtype == dns.TypeA && strings.HasSuffix(q.Name, dnsDomainSuffix) {
+			sessionID, svcName, ok := parseSessionDnsName(q.Name)
+			if !ok {
+				continue
+			}
+
 			// No session active.
 			if ctx == nil {
 				dns.HandleFailed(w, r)
 				return
 			}
 			instanceId := (*ctx).Value("instanceId").(int64)
-			svcName := strings.TrimSuffix(q.Name, dnsDomainSuffix)
 			// TODO: Cache this.
 			sessionRes, err := s.brokerClient.ListSessions(*ctx, &proto.ListSessionsRequest{
 				InstanceId:  instanceId,
@@ -100,6 +127,9 @@ func (s *DnsServer) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				sessions[inx] = tmp
 			}
 			for _, session := range sessions {
+				if sessionID != "" && !strings.EqualFold(session.GetSessionId(), sessionID) {
+					continue
+				}
 				rr, err := dns.NewRR(q.Name + " 300 IN A " + session.InternalIpAddress)
 				if err != nil {
 					log.Printf("Error creating DNS record: %v\n", err)

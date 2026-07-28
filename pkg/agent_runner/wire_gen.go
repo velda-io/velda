@@ -8,6 +8,7 @@ package agent_runner
 
 import (
 	"context"
+
 	"github.com/spf13/cobra"
 	agent2 "velda.io/velda/pkg/agent"
 	"velda.io/velda/pkg/proto/agent"
@@ -21,7 +22,7 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	agentDaemonPlugin := agent2.ProvideAgentDaemonPlugin(workDir, sandboxConfig)
 	mounter := agent2.ProvideMounter(sandboxConfig)
 	sandboxFsPlugin := agent2.ProvideSandboxFsPlugin(workDir, mounter, sandboxConfig, sessionRequestPlugin)
-	linuxNamespacePlugin := agent2.ProvideLinuxNamespacePlugin(workDir, sandboxConfig, sessionRequestPlugin)
+	linuxNamespacePlugin := agent2.ProvideLinuxNamespacePlugin(workDir, sandboxConfig)
 	devicesPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
 	runPid1Plugin := agent2.ProvideRunPid1Plugin(workDir, sandboxConfig, agentDaemonPlugin, sessionRequestPlugin)
 	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, linuxNamespacePlugin, devicesPlugin, runPid1Plugin)
@@ -37,6 +38,7 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	pivotRootPlugin := agent2.ProvidePivotRootPlugin(workDir)
 	waiterPlugin := agent2.ProvideWaiterPlugin()
 	completionSignalPlugin := agent2.ProvideCompletionSignalPlugin()
+	networkPlugin := agent2.ProvideNetworkPlugin(sessionRequestPlugin, workDir)
 	agentName := agent2.ProvideAgentName(cmd)
 	commandModifier := agent2.ProvideCommandModifier()
 	sshdPlugin := agent2.ProvideSshdPlugin(agentName, authPluginType, waiterPlugin, sessionRequestPlugin, completionSignalPlugin, commandModifier)
@@ -44,7 +46,7 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	batchPlugin := agent2.ProvideBatchPlugin(waiterPlugin, sessionRequestPlugin, completionSignalPlugin, commandModifier)
 	maxSessionTime := agent2.ProvideMaxSessionTime(cmd)
 	completionWaitPlugin := agent2.ProvideCompletionWaiterPlugin(completionSignalPlugin, maxSessionTime)
-	pid1Runner := providePid1Runner(sessionRequestPlugin, autoFsDaemonPlugin, authPluginType, pivotRootPlugin, waiterPlugin, completionSignalPlugin, sshdPlugin, reportStatusPlugin, batchPlugin, completionWaitPlugin)
+	pid1Runner := providePid1Runner(sessionRequestPlugin, autoFsDaemonPlugin, authPluginType, pivotRootPlugin, waiterPlugin, completionSignalPlugin, networkPlugin, sshdPlugin, reportStatusPlugin, batchPlugin, completionWaitPlugin)
 	return pid1Runner
 }
 
@@ -85,7 +87,7 @@ func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPl
 	)
 }
 
-func providePid1Runner(requestPlugin *agent2.SessionRequestPlugin, autofsDaemon *agent2.AutoFsDaemonPlugin, authPlugin agent2.AuthPluginType, pivotRootPlugin *agent2.PivotRootPlugin, waiterPlugin *agent2.WaiterPlugin, completionSignalPlugin *agent2.CompletionSignalPlugin, sshdPlugin *agent2.SshdPlugin, statusPlugin *agent2.ReportStatusPlugin, batchPlugin *agent2.BatchPlugin, completionWaiter *agent2.CompletionWaitPlugin) Pid1Runner {
+func providePid1Runner(requestPlugin *agent2.SessionRequestPlugin, autofsDaemon *agent2.AutoFsDaemonPlugin, authPlugin agent2.AuthPluginType, pivotRootPlugin *agent2.PivotRootPlugin, waiterPlugin *agent2.WaiterPlugin, completionSignalPlugin *agent2.CompletionSignalPlugin, networkPlugin *agent2.NetworkPlugin, sshdPlugin *agent2.SshdPlugin, statusPlugin *agent2.ReportStatusPlugin, batchPlugin *agent2.BatchPlugin, completionWaiter *agent2.CompletionWaitPlugin) Pid1Runner {
 	return agent2.NewPluginRunner(
 		requestPlugin,
 		autofsDaemon,
@@ -94,6 +96,7 @@ func providePid1Runner(requestPlugin *agent2.SessionRequestPlugin, autofsDaemon 
 		authPlugin,
 		waiterPlugin,
 		completionSignalPlugin,
+		networkPlugin,
 		sshdPlugin,
 		batchPlugin,
 		statusPlugin,
