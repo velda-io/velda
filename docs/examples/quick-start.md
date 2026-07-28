@@ -93,11 +93,6 @@ pip install -r requirements.txt
 ## Running Distributed training
 Use `vbatch -N` to start distributed jobs with InfiniBand without extra setup.
 
-```bash
-# Start 4 synchronized workers for distributed training
-vbatch -N 4 --gang -P gpu-a100-8 python train_distributed.py
-```
-
 You may use any backend like `torchrun`, `Ray`.
 
 For velda.cloud, all the pools with suffix `i` supports infiniband.
