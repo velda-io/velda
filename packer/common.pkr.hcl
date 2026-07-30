@@ -43,6 +43,11 @@ variable "driver_version" {
   default = "580.126.20"
 }
 
+variable "mofed_version" {
+  type    = string
+  default = "24.10-5.1.6.1"
+}
+
 variable "ami_regions" {
   type    = list(string)
   default = []

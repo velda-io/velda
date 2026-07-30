@@ -112,6 +112,14 @@ build {
   provisioner "shell" {
     inline = [
       // Unattended upgrader may upgrade the kernel and break the nvidia driver.
+      "echo Installing Mellanox OFED ${var.mofed_version}",
+      "wget -q https://content.mellanox.com/ofed/MLNX_OFED-${var.mofed_version}/MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64.tgz",
+      "tar -xf MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64.tgz",
+      "sudo apt-get install -y linux-headers-$(uname -r) gcc make perl --no-install-recommends",
+      "(cd MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64 && sudo ./mlnxofedinstall --without-fw-update --add-kernel-support --skip-distro-check --force)",
+      "sudo /etc/init.d/openibd restart || true",
+      "rm -rf MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64*",
+
       "echo Downloading nvidia driver",
       "wget -q https://developer.download.nvidia.com/compute/nvidia-driver/redist/nvidia_driver/linux-x86_64/nvidia_driver-linux-x86_64-${var.driver_version}-archive.tar.xz",
       "echo Unpacking nvidia driver",
