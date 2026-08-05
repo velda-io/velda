@@ -116,7 +116,7 @@ build {
       "wget -q https://content.mellanox.com/ofed/MLNX_OFED-${var.mofed_version}/MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64.tgz",
       "tar -xf MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64.tgz",
       "sudo apt-get install -y linux-headers-$(uname -r) gcc make perl --no-install-recommends",
-      "(cd MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64 && sudo ./mlnxofedinstall --without-fw-update --add-kernel-support --skip-distro-check --force)",
+      "(cd MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64 && sudo env MAKEFLAGS=\"-j$(nproc)\" ./mlnxofedinstall --without-fw-update --add-kernel-support --skip-distro-check --force)",
       "sudo /etc/init.d/openibd restart || true",
       "rm -rf MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64*",
 

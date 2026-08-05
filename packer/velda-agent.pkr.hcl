@@ -120,7 +120,7 @@ build {
       "tar -xf nvidia_driver-linux-x86_64-${var.driver_version}-archive.tar.xz",
       "sudo mkdir -p /var/nvidia/lib",
       "sudo mkdir -p /var/nvidia/bin",
-      "echo Instaling nvidia driver for kernel $(uname -r)",
+      "echo Installing nvidia driver for kernel $(uname -r)",
       <<-EOT
       sudo bash -c 'cat <<EOF > /etc/modprobe.d/blacklist-nouveau.conf
       blacklist nouveau
