@@ -113,7 +113,9 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	if sessionId != "" && serviceName != "" {
 		return fmt.Errorf("Cannot specify both session-id and service-name")
 	}
-	if !cmd.Flag("service-name").Changed && !clientlib.IsInSession() {
+	pool, _ := cmd.Flags().GetString("pool")
+	batch, _ := cmd.Flags().GetBool("batch")
+	if !cmd.Flag("service-name").Changed && !clientlib.IsInSession() && !batch && pool == "shell" {
 		DebugLog("Defaulting service-name to ssh")
 		serviceName = "ssh"
 	}
@@ -122,7 +124,7 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		ServiceName: serviceName,
 		SessionId:   sessionId,
 		InstanceId:  instanceId,
-		Pool:        cmd.Flag("pool").Value.String(),
+		Pool:        pool,
 		User:        user,
 	}
 	sessionReq.ForceNewSession, _ = cmd.Flags().GetBool("new-session")
@@ -165,7 +167,6 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	}
 	sessionReq.Priority = priority
 
-	batch, _ := cmd.Flags().GetBool("batch")
 	followFlag, _ := cmd.Flags().GetBool("follow")
 	// Handle writable-dirs and snapshot for both batch and non-batch modes
 	writableDirs, _ := cmd.Flags().GetStringSlice("writable-dir")
