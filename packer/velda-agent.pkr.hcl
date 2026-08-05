@@ -85,6 +85,18 @@ build {
 
   provisioner "shell" {
     inline = [
+      "echo Installing Mellanox OFED ${var.mofed_version}",
+      "wget -q https://content.mellanox.com/ofed/MLNX_OFED-${var.mofed_version}/MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64.tgz",
+      "tar -xf MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64.tgz",
+      "sudo apt-get install -y linux-headers-$(uname -r) gcc make linux-modules-extra-$(uname -r) perl bzip2 --no-install-recommends",
+      "(cd MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64 && sudo env MAKEFLAGS=\"-j$(nproc)\" ./mlnxofedinstall --without-fw-update --add-kernel-support --skip-distro-check --force)",
+      "sudo /etc/init.d/openibd restart || true",
+      "rm -rf MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64*",
+    ]
+  }
+
+  provisioner "shell" {
+    inline = [
       // Unattended upgrader may upgrade the kernel and break the nvidia driver.
       "echo Install Nvidia fabric manager",
       "wget -q https://developer.download.nvidia.com/compute/nvidia-driver/redist/fabricmanager/linux-x86_64/fabricmanager-linux-x86_64-${var.driver_version}-archive.tar.xz",
@@ -95,7 +107,7 @@ build {
       "(cd fabricmanager-linux-x86_64-${var.driver_version}-archive && find . -mindepth 2 -type f -exec mv -n -t . {} + && find . -mindepth 1 -type d -empty -delete && sudo ./fm_run_package_installer.sh)",
       "rm -f fabricmanager-linux-x86_64-${var.driver_version}-archive.tar.xz",
       "rm -rf fabricmanager-linux-x86_64-${var.driver_version}-archive",
-      "echo -e \"ib_uverbs\nib_core\nmlx5_ib\" | sudo tee -a /etc/modules"
+      "echo -e \"ib_uverbs\nib_core\nmlx5_ib\" | sudo tee -a /etc/modules > /dev/null"
     ]
   }
 
@@ -108,8 +120,7 @@ build {
       "tar -xf nvidia_driver-linux-x86_64-${var.driver_version}-archive.tar.xz",
       "sudo mkdir -p /var/nvidia/lib",
       "sudo mkdir -p /var/nvidia/bin",
-      "echo Instaling nvidia driver for kernel $(uname -r)",
-      "sudo apt install -y linux-headers-$(uname -r) gcc make linux-modules-extra-$(uname -r)",
+      "echo Installing nvidia driver for kernel $(uname -r)",
       <<-EOT
       sudo bash -c 'cat <<EOF > /etc/modprobe.d/blacklist-nouveau.conf
       blacklist nouveau
@@ -133,6 +144,7 @@ build {
       # Build the kernel driver.
       "cd nvidia_driver-linux-x86_64-${var.driver_version}-archive/kernel && make -j $(nproc) && sudo make -j $(nproc) modules_install && sudo depmod -a",
       "rm -rf nvidia_driver-linux-x86_64-${var.driver_version}-archive*",
+      "echo nvidia-peermem | sudo tee -a /etc/modules > /dev/null"
     ]
   }
 
