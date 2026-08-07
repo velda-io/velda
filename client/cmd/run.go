@@ -115,19 +115,13 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	}
 	pool, _ := cmd.Flags().GetString("pool")
 	batch, _ := cmd.Flags().GetBool("batch")
-	// Determine effective noinput: it's a ternary flag.
-	// If the flag was not set explicitly, default to true in batch mode, false otherwise.
+	// Determine the effective --noinput value.
+	// In batch mode, stdin is ignored by default unless the flag is explicitly set (e.g. --noinput=false).
 	noinputFlag, _ := cmd.Flags().GetBool("noinput")
 	noinputChanged := cmd.Flags().Lookup("noinput").Changed
-	var effectiveNoInput bool
+	effectiveNoInput := noinputFlag
 	if !noinputChanged {
-		if batch {
-			effectiveNoInput = true
-		} else {
-			effectiveNoInput = false
-		}
-	} else {
-		effectiveNoInput = noinputFlag
+		effectiveNoInput = batch
 	}
 	if !cmd.Flag("service-name").Changed && !clientlib.IsInSession() && !batch && pool == "shell" {
 		DebugLog("Defaulting service-name to ssh")
@@ -201,9 +195,14 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		}
 		// If running in batch mode and stdin should be provided, read all stdin into workload.Stdin.
 		if !effectiveNoInput {
-			data, err := io.ReadAll(os.Stdin)
+			const maxStdinBytes = 4 << 20 // 4 MiB (grpc-go default max receive size unless configured otherwise)
+			limited := io.LimitReader(os.Stdin, maxStdinBytes+1)
+			data, err := io.ReadAll(limited)
 			if err != nil {
 				return fmt.Errorf("Error reading stdin: %v", err)
+			}
+			if len(data) > maxStdinBytes {
+				return fmt.Errorf("Stdin too large (>%d bytes); pass input via a file instead of stdin", maxStdinBytes)
 			}
 			workload.Stdin = data
 		}
