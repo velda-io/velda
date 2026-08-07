@@ -115,6 +115,20 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	}
 	pool, _ := cmd.Flags().GetString("pool")
 	batch, _ := cmd.Flags().GetBool("batch")
+	// Determine effective noinput: it's a ternary flag.
+	// If the flag was not set explicitly, default to true in batch mode, false otherwise.
+	noinputFlag, _ := cmd.Flags().GetBool("noinput")
+	noinputChanged := cmd.Flags().Lookup("noinput").Changed
+	var effectiveNoInput bool
+	if !noinputChanged {
+		if batch {
+			effectiveNoInput = true
+		} else {
+			effectiveNoInput = false
+		}
+	} else {
+		effectiveNoInput = noinputFlag
+	}
 	if !cmd.Flag("service-name").Changed && !clientlib.IsInSession() && !batch && pool == "shell" {
 		DebugLog("Defaulting service-name to ssh")
 		serviceName = "ssh"
@@ -184,6 +198,14 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		workload, err := getWorkload(cmd, args)
 		if err != nil {
 			return err
+		}
+		// If running in batch mode and stdin should be provided, read all stdin into workload.Stdin.
+		if !effectiveNoInput {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("Error reading stdin: %v", err)
+			}
+			workload.Stdin = data
 		}
 		if emailEnabled {
 			workload.EmailStatus = proto.Workload_EMAIL_STATUS_ENABLED
@@ -307,8 +329,8 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 	default:
 		return fmt.Errorf("Invalid tty mode: %s", ttymode)
 	}
-	noinput, _ := cmd.Flags().GetBool("noinput")
-	interactive := !noinput || tty || defaultShell
+	// Use the effective noinput computed earlier to determine interactive behavior.
+	interactive := !effectiveNoInput || tty || defaultShell
 
 	if interactive {
 		session.Stdin = os.Stdin
