@@ -260,7 +260,7 @@ set -ex
 echo "<empty> /tmp host defaults 0 0" >> /etc/fstab
 echo "<empty> /var/lib/docker host defaults 0 0" >> /etc/fstab
 
-# Some distiros make it a symlink.
+# Some distros make it a symlink.
 rm -f /etc/resolv.conf
 cat << EOF > /etc/resolv.conf
 nameserver 127.0.0.1
