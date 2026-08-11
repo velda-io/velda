@@ -74,6 +74,9 @@ func lookupUserPosix(username string) (*User, error) {
 		}
 		groupstr := strings.Split(string(groupfile), "\n")
 		for _, g := range groupstr {
+			if strings.HasPrefix(g, "#") || g == "" {
+				continue
+			}
 			componenets := strings.Split(g, ":")
 			if len(componenets) < 4 {
 				log.Printf("Invalid group entry: %s", g)

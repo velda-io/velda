@@ -52,10 +52,7 @@ type SessionUser interface {
 var userKey = &struct{}{}
 
 func UserFromContext(ctx context.Context) User {
-	user, ok := ctx.Value(userKey).(User)
-	if !ok {
-		panic("Accessing user without auth interceptor")
-	}
+	user, _ := ctx.Value(userKey).(User)
 	return user
 }
 

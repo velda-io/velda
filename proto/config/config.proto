@@ -25,10 +25,24 @@ message Server {
   string grpc_address = 1;
   string http_address = 2;
 
-  // If non-empty, /velda.BrokerService/AgentUpdate requests must include
-  // x-forwarded-client-cert metadata with URI SAN containing this exact
-  // SPIFFE ID. Empty means mTLS is not required for AgentUpdate.
-  string cert_spiffe_id = 6;
+  enum MTLSIdentitySource {
+    MTLS_IDENTITY_SOURCE_UNSPECIFIED = 0;
+    // Trust x-forwarded-client-cert metadata (typically when a TLS-terminating
+    // proxy forwards client certificate details).
+    MTLS_IDENTITY_SOURCE_FORWARDED_CLIENT_CERT = 1;
+    // Read client identity directly from gRPC peer TLS certificates.
+    MTLS_IDENTITY_SOURCE_PEER_TLS_CERT = 2;
+  }
+
+  // If non-empty, /velda.BrokerService/AgentUpdate requests must present this
+  // SPIFFE ID via the configured MTLS identity source.
+  string agent_cert_spiffe_id = 6;
+
+  // Select where mTLS client identity is sourced from.
+  MTLSIdentitySource mtls_identity_source = 7;
+
+  // Root CA used to verify incoming client certificates.
+  string mtls_root_ca = 8;
 
   reserved 3, 4, 5;
   reserved 64 to 127;

@@ -34,6 +34,10 @@ import (
 
 const (
 	ActionRequestSession = rbac.Action("instance.request_session")
+	ActionAgentUpdate    = rbac.Action("server.agent_update")
+	ActionListSessions   = rbac.Action("instance.list_sessions")
+	ActionKillSession    = rbac.Action("instance.kill_session")
+	ActionUpdateSession  = rbac.Action("instance.update_session")
 )
 
 type TaskDb interface {
@@ -83,6 +87,10 @@ func NewBrokerServer(schedulerSet *SchedulerSet, sessions *SessionDatabase, perm
 }
 
 func (s *server) AgentUpdate(stream proto.BrokerService_AgentUpdateServer) error {
+	if err := s.permissions.Check(stream.Context(), ActionAgentUpdate, "servers/self"); err != nil {
+		return err
+	}
+
 	req, err := stream.Recv()
 	identity := req.AgentIdentity
 	if err != nil {
@@ -252,6 +260,10 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 }
 
 func (s *server) ListSessions(ctx context.Context, req *proto.ListSessionsRequest) (*proto.ListSessionsResponse, error) {
+	if err := s.permissions.Check(ctx, ActionListSessions, fmt.Sprintf("instances/%d", req.InstanceId)); err != nil {
+		return nil, err
+	}
+
 	var sessions []*Session
 	var err error
 	if req.ServiceName != "" {
@@ -285,7 +297,7 @@ func (s *server) ListSessions(ctx context.Context, req *proto.ListSessionsReques
 }
 
 func (s *server) KillSession(ctx context.Context, req *proto.KillSessionRequest) (*emptypb.Empty, error) {
-	if err := s.permissions.Check(ctx, rbac.Action("instance.kill_session"), fmt.Sprintf("instances/%d", req.InstanceId)); err != nil {
+	if err := s.permissions.Check(ctx, ActionKillSession, fmt.Sprintf("instances/%d", req.InstanceId)); err != nil {
 		return nil, err
 	}
 
@@ -319,7 +331,7 @@ func (s *server) KillSession(ctx context.Context, req *proto.KillSessionRequest)
 }
 
 func (s *server) SetTag(ctx context.Context, req *proto.SetTagRequest) (*proto.SetTagResponse, error) {
-	if err := s.permissions.Check(ctx, rbac.Action("instance.update_session"), fmt.Sprintf("instances/%d", req.InstanceId)); err != nil {
+	if err := s.permissions.Check(ctx, ActionUpdateSession, fmt.Sprintf("instances/%d", req.InstanceId)); err != nil {
 		return nil, err
 	}
 
