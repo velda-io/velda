@@ -98,6 +98,11 @@ func runImportContainer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("pulling image %s: %w", parsedRef, err)
 	}
 
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		return fmt.Errorf("getting image config: %w", err)
+	}
+
 	if err := remountRootReadWrite(); err != nil {
 		return fmt.Errorf("remounting root read-write: %w", err)
 	}
@@ -108,6 +113,9 @@ func runImportContainer(cmd *cobra.Command, args []string) error {
 
 	if err := extractTarToRoot(cmd, reader); err != nil {
 		return fmt.Errorf("extracting image to /: %w", err)
+	}
+	if err := appendImageConfigEnvToEnvironment("/etc/environment", cfg.Config.Env); err != nil {
+		return fmt.Errorf("appending image env to /etc/environment: %w", err)
 	}
 
 	cmd.PrintErrf("Successfully imported %s\n", parsedRef)
@@ -184,13 +192,14 @@ func extractTarToRoot(cmd *cobra.Command, r io.Reader) error {
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(dstPath, os.FileMode(hdr.Mode)); err != nil {
+			mode := tarHeaderFileMode(hdr.Mode)
+			if err := os.MkdirAll(dstPath, mode); err != nil {
 				return fmt.Errorf("creating dir %s: %w", dstPath, err)
 			}
 			if err := os.Chown(dstPath, hdr.Uid, hdr.Gid); err != nil {
 				return fmt.Errorf("chown dir %s: %w", dstPath, err)
 			}
-			if err := os.Chmod(dstPath, os.FileMode(hdr.Mode)); err != nil {
+			if err := os.Chmod(dstPath, mode); err != nil {
 				return fmt.Errorf("chmod dir %s: %w", dstPath, err)
 			}
 			if err := os.Chtimes(dstPath, safeTime(hdr.AccessTime), safeTime(hdr.ModTime)); err != nil {
@@ -223,10 +232,11 @@ func extractTarToRoot(cmd *cobra.Command, r io.Reader) error {
 			}
 
 		case tar.TypeReg, tar.TypeRegA:
+			mode := tarHeaderFileMode(hdr.Mode)
 			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 				return fmt.Errorf("ensuring parent dir for file %s: %w", dstPath, err)
 			}
-			file, err := os.OpenFile(dstPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(hdr.Mode))
+			file, err := os.OpenFile(dstPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)
 			if err != nil {
 				return fmt.Errorf("creating file %s: %w", dstPath, err)
 			}
@@ -242,7 +252,7 @@ func extractTarToRoot(cmd *cobra.Command, r io.Reader) error {
 			if err := os.Chown(dstPath, hdr.Uid, hdr.Gid); err != nil {
 				return fmt.Errorf("chown file %s: %w", dstPath, err)
 			}
-			if err := os.Chmod(dstPath, os.FileMode(hdr.Mode)); err != nil {
+			if err := os.Chmod(dstPath, mode); err != nil {
 				return fmt.Errorf("chmod file %s: %w", dstPath, err)
 			}
 			if err := os.Chtimes(dstPath, safeTime(hdr.AccessTime), safeTime(hdr.ModTime)); err != nil {
@@ -275,6 +285,83 @@ func formatSize(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func tarHeaderFileMode(mode int64) os.FileMode {
+	fileMode := os.FileMode(mode & 0o777)
+	if mode&0o4000 != 0 {
+		fileMode |= os.ModeSetuid
+	}
+	if mode&0o2000 != 0 {
+		fileMode |= os.ModeSetgid
+	}
+	if mode&0o1000 != 0 {
+		fileMode |= os.ModeSticky
+	}
+	return fileMode
+}
+
+func appendImageConfigEnvToEnvironment(path string, envVars []string) error {
+	if len(envVars) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("creating parent dir for %s: %w", path, err)
+	}
+
+	var existing []byte
+	if data, err := os.ReadFile(path); err == nil {
+		existing = data
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	existingLines := map[string]struct{}{}
+	for _, line := range strings.Split(string(existing), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		existingLines[line] = struct{}{}
+	}
+
+	var linesToAppend []string
+	for _, envVar := range envVars {
+		key, value, ok := strings.Cut(envVar, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if strings.ContainsAny(key, "\r\n") || strings.ContainsAny(value, "\r\n") {
+			continue
+		}
+		line := key + "=" + value
+		if _, exists := existingLines[line]; exists {
+			continue
+		}
+		linesToAppend = append(linesToAppend, line)
+		existingLines[line] = struct{}{}
+	}
+	if len(linesToAppend) == 0 {
+		return nil
+	}
+
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", path, err)
+	}
+	defer file.Close()
+
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		if _, err := file.WriteString("\n"); err != nil {
+			return fmt.Errorf("writing separator newline to %s: %w", path, err)
+		}
+	}
+	for _, line := range linesToAppend {
+		if _, err := file.WriteString(line + "\n"); err != nil {
+			return fmt.Errorf("appending env to %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 func cleanExtractPath(name string) (string, error) {

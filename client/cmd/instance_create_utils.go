@@ -256,6 +256,22 @@ func runInitScript(cmd *cobra.Command, sshClient *clientlib.SshClient, scriptCon
 func getInitSandboxScript() string {
 	return `
 set -ex
+
+echo "<empty> /tmp host defaults 0 0" >> /etc/fstab
+echo "<empty> /var/lib/docker host defaults 0 0" >> /etc/fstab
+
+# Some distros make it a symlink.
+rm -f /etc/resolv.conf
+cat << EOF > /etc/resolv.conf
+nameserver 127.0.0.1
+search local.velda
+EOF
+
+ln -sf /run/velda/velda /usr/bin/velda
+ln -sf /run/velda/velda /usr/bin/vbatch
+ln -sf /run/velda/velda /usr/bin/vrun
+ln -sf /run/velda/velda /sbin/mount.host
+
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 export HOME="/root"
 # Initialize user
@@ -267,18 +283,6 @@ mkdir -p /etc/sudoers.d
 echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/user
 usermod -aG sudo user || true
 
-echo "<empty> /tmp host defaults 0 0" >> /etc/fstab
-echo "<empty> /var/lib/docker host defaults 0 0" >> /etc/fstab
-
-cat << EOF > /etc/resolv.conf
-nameserver 127.0.0.1
-search local.velda
-EOF
-
-ln -sf /run/velda/velda /usr/bin/velda
-ln -sf /run/velda/velda /usr/bin/vbatch
-ln -sf /run/velda/velda /usr/bin/vrun
-ln -sf /run/velda/velda /sbin/mount.host
 ` + ExtraInitScript
 }
 
