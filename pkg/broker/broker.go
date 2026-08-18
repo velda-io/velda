@@ -206,17 +206,17 @@ func (s *server) RequestSession(ctx context.Context, req *proto.SessionRequest) 
 		req.Workload.WritableDirs = req.WritableDirs
 		req.Workload.SnapshotName = req.SnapshotName
 		req.Workload.ServiceName = req.ServiceName
+		if strings.Contains(req.TaskId, "/") {
+			return nil, status.Error(codes.InvalidArgument, "task_id cannot contain '/'")
+		}
 		// Assign & fixup task ID
 		if inBatch {
-			if strings.Contains(req.TaskId, "/") {
-				return nil, fmt.Errorf("Task ID cannot contain '/'")
-			}
-
 			if req.TaskId == "" {
 				req.TaskId = "task"
 			}
 			req.TaskId = fmt.Sprintf("%s/%s", sessionUser.TaskId(), req.TaskId)
-		} else if req.TaskId == "" {
+		} else {
+			// Always assign a new ID for top-level tasks.
 			req.TaskId = uuid.NewString()
 		}
 
