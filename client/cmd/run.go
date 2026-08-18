@@ -244,6 +244,8 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 
 		DebugLog("Sending session request: %v", sessionReq)
 		// Retry handled by BrokerClient
+		resp, err := brokerClient.RequestSession(cmd.Context(), sessionReq)
+		DebugLog("Got response: %v, err: %v", resp, err)
 		return resp, err
 	}()
 	if err != nil {
