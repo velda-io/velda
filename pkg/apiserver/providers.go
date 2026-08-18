@@ -458,7 +458,6 @@ var ServiceProviders = wire.NewSet(
 	ProvideCtx,
 	ProvideHttpHandler,
 	ProvideGrpcMetrics,
-	ProvideMTLSMethodSPIFFEMap,
 	ProvideMTLSVerifier,
 	ProvideMTLSUnaryInterceptor,
 	ProvideMTLSStreamInterceptor,
@@ -469,4 +468,5 @@ var ServiceProviders = wire.NewSet(
 	ProvideHttpRunner,
 	ProvideReadySignal,
 	ProvideCompletionSignal,
+	ProvideMTLSEvidenceSource,
 )
