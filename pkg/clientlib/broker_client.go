@@ -59,7 +59,7 @@ const serviceConfig = `{
             "initialBackoff": "5s",
             "maxBackoff": "60s",
             "backoffMultiplier": 2,
-            "retryableStatusCodes": ["UNAVAILABLE"]
+            "retryableStatusCodes": ["UNAVAILABLE", "RESOURCE_EXHAUSTED", "CANCELLED"]
         }
     }]
 }`

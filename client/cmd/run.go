@@ -35,9 +35,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"google.golang.org/grpc/codes"
-	grpcstatus "google.golang.org/grpc/status"
-
 	"velda.io/velda/pkg/clientlib"
 	"velda.io/velda/pkg/proto"
 	"velda.io/velda/pkg/utils"
@@ -236,52 +233,27 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 		}
 	}
 	quiet, _ := cmd.Flags().GetBool("quiet")
-	watchPoolStatus := !batch || followFlag
-	if watchPoolStatus && sessionReq.Pool != "" {
-		watchCtx, watchCancel := context.WithCancel(cmd.Context())
-		defer watchCancel()
-		watchRegion := utils.ExtractRegionId(instanceId)
-		go streamPoolStatusNotifications(watchCtx, conn, sessionReq.Pool, watchRegion, cmd)
-	}
-
-	if !quiet && !batch {
-		cmd.PrintErrf("Requesting compute node from pool %s\n", sessionReq.Pool)
-	}
-	DebugLog("Sending session request: %v", sessionReq)
-
-	var resp *proto.ExecutionStatus
-	// Exponential backoff when broker returns RESOURCE_EXHAUSTED
-	// Start with 30s, double each retry, and give up after 5 minutes total.
-	maxTotalWait := 5 * time.Minute
-	delay := 5 * time.Second
-	for {
-		resp, err = brokerClient.RequestSession(cmd.Context(), sessionReq)
-		if err == nil {
-			break
+	resp, err := func() (*proto.ExecutionStatus, error) {
+		watchPoolStatus := !batch || followFlag
+		if watchPoolStatus && sessionReq.Pool != "" {
+			watchCtx, watchCancel := context.WithCancel(cmd.Context())
+			defer watchCancel()
+			watchRegion := utils.ExtractRegionId(instanceId)
+			go streamPoolStatusNotifications(watchCtx, conn, sessionReq.Pool, watchRegion, cmd)
 		}
-		// If context was cancelled/expired, return immediately.
-		st := grpcstatus.Convert(err)
-		if st.Code() == codes.ResourceExhausted {
-			if !quiet && !batch {
-				cmd.PrintErrf("Out of quota: %v, retrying in %s...\n", st.Message(), delay)
-			}
-			select {
-			case <-cmd.Context().Done():
-				return err
-			case <-time.After(delay):
-			}
-			delay *= 2
-			if delay > maxTotalWait {
-				delay = maxTotalWait
-			}
-			continue
-		}
+
+		DebugLog("Sending session request: %v", sessionReq)
+		// Retry handled by BrokerClient
+		resp, err := brokerClient.RequestSession(cmd.Context(), sessionReq)
+		DebugLog("Got response: %v, err: %v", resp, err)
+		return resp, nil
+	}()
+	if err != nil {
 		return err
 	}
 	if !quiet && !batch {
 		cmd.PrintErrln("Node allocated, connecting...")
 	}
-	DebugLog("Got response: %s. Connecting ", resp.String())
 	if batch {
 		taskId := resp.GetTaskId()
 		fmt.Printf("%s\n", taskId)
@@ -422,48 +394,62 @@ func runCommand(cmd *cobra.Command, args []string, returnCode *int) error {
 
 func streamPoolStatusNotifications(ctx context.Context, conn grpc.ClientConnInterface, pool string, region int, cmd *cobra.Command) {
 	client := proto.NewPoolManagerServiceClient(conn)
-	stream, err := client.WatchPoolStatus(ctx, &proto.WatchPoolStatusRequest{Pool: pool, RegionId: int32(region)})
-	if err != nil {
-		DebugLog("Failed to watch pool status for %s: %v", pool, err)
-		return
-	}
-
-	lastEventKey := ""
-	for {
-		notification, err := stream.Recv()
+	watchLoop := func() {
+		stream, err := client.WatchPoolStatus(ctx, &proto.WatchPoolStatusRequest{Pool: pool, RegionId: int32(region)})
 		if err != nil {
-			if err == io.EOF || ctx.Err() != nil {
-				return
-			}
-			DebugLog("Pool status stream ended for %s: %v", pool, err)
+			DebugLog("Failed to watch pool status for %s: %v", pool, err)
 			return
 		}
 
-		status := notification.GetAutoscalerStatus()
-		if status == nil || status.GetLastAllocationError() == "" {
-			continue
-		}
-		timestamp := status.GetLastAllocationErrorTime()
-		eventTs := int64(0)
-		if timestamp != nil {
-			eventTs = timestamp.AsTime().UnixNano()
-		}
-		eventKey := fmt.Sprintf("%s|%d", status.GetLastAllocationError(), eventTs)
-		if eventKey == lastEventKey {
-			continue
-		}
-		lastEventKey = eventKey
+		lastEventKey := ""
+		for {
+			notification, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF || ctx.Err() != nil {
+					return
+				}
+				DebugLog("Pool status stream ended for %s: %v", pool, err)
+				return
+			}
 
-		notificationPool := notification.GetPool()
-		if notificationPool == "" {
-			notificationPool = pool
+			status := notification.GetAutoscalerStatus()
+			if status == nil || status.GetLastAllocationError() == "" {
+				continue
+			}
+			timestamp := status.GetLastAllocationErrorTime()
+			eventTs := int64(0)
+			if timestamp != nil {
+				eventTs = timestamp.AsTime().UnixNano()
+			}
+			eventKey := fmt.Sprintf("%s|%d", status.GetLastAllocationError(), eventTs)
+			if eventKey == lastEventKey {
+				continue
+			}
+			lastEventKey = eventKey
+
+			notificationPool := notification.GetPool()
+			if notificationPool == "" {
+				notificationPool = pool
+			}
+			if timestamp == nil || timestamp.AsTime().IsZero() {
+				cmd.PrintErrf("Pool %s had error to allocate node: %s\n", notificationPool, status.GetLastAllocationError())
+				continue
+			}
+			errTime := timestamp.AsTime()
+			cmd.PrintErrf("Pool %s had error to allocate node at %s: %s\n", notificationPool, errTime.Format(time.RFC3339), status.GetLastAllocationError())
 		}
-		if timestamp == nil || timestamp.AsTime().IsZero() {
-			cmd.PrintErrf("Pool %s had error to allocate node: %s\n", notificationPool, status.GetLastAllocationError())
+	}
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+	for {
+		watchLoop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
-		errTime := timestamp.AsTime()
-		cmd.PrintErrf("Pool %s had error to allocate node at %s: %s\n", notificationPool, errTime.Format(time.RFC3339), status.GetLastAllocationError())
 	}
 }
 
