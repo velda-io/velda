@@ -82,13 +82,18 @@ build {
       "sudo cp /tmp/velda-install/ops_agent_config.yaml /etc/google-cloud-ops-agent/config.yaml",
     ]
   }
+  provisioner "shell" {
+    inline = [
+      "sudo apt-get install -y linux-headers-$(uname -r) gcc make linux-modules-extra-$(uname -r) perl bzip2 apt-utils --no-install-recommends",
+    ]
+  }
 
   provisioner "shell" {
+    only = ["nebius-image.velda"]
     inline = [
       "echo Installing Mellanox OFED ${var.mofed_version}",
       "wget -q https://content.mellanox.com/ofed/MLNX_OFED-${var.mofed_version}/MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64.tgz",
       "tar -xf MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64.tgz",
-      "sudo apt-get install -y linux-headers-$(uname -r) gcc make linux-modules-extra-$(uname -r) perl bzip2 --no-install-recommends",
       "(cd MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64 && sudo env MAKEFLAGS=\"-j$(nproc)\" ./mlnxofedinstall --without-fw-update --add-kernel-support --skip-distro-check --force)",
       "sudo /etc/init.d/openibd restart || true",
       "rm -rf MLNX_OFED_LINUX-${var.mofed_version}-ubuntu24.04-x86_64*",
@@ -96,8 +101,8 @@ build {
   }
 
   provisioner "shell" {
+    only = ["nebius-image.velda"]
     inline = [
-      // Unattended upgrader may upgrade the kernel and break the nvidia driver.
       "echo Install Nvidia fabric manager",
       "wget -q https://developer.download.nvidia.com/compute/nvidia-driver/redist/fabricmanager/linux-x86_64/fabricmanager-linux-x86_64-${var.driver_version}-archive.tar.xz",
       "echo Unpacking nvidia fabric manager",
