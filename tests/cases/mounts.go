@@ -88,6 +88,7 @@ cat /scratch/testfile-empty
 # Check if the file exists (it shouldn't in a new emptydir)
 if [ -f /scratch/testfile-empty ]; then
   echo "FILE_EXISTS"
+  sleep 1000
 else
   echo "FILE_NOT_EXISTS"
 fi

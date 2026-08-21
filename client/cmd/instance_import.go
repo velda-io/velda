@@ -185,6 +185,9 @@ func extractTarToRoot(cmd *cobra.Command, r io.Reader) error {
 			return fmt.Errorf("reading tar stream: %w", err)
 		}
 
+		if hdr.Name == "etc/hosts" {
+			continue
+		}
 		dstPath, err := cleanExtractPath(hdr.Name)
 		if err != nil {
 			return err
