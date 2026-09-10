@@ -119,10 +119,12 @@ func IsInSession() bool {
 
 func GenerateAgentConfig(instance int64, session, taskId, service string) *agentpb.AgentConfig {
 	result := &agentpb.AgentConfig{
-		Broker:   agentConfig.Broker,
-		Session:  session,
-		Instance: instance,
-		Service:  service,
+		Broker:        agentConfig.Broker,
+		Session:       session,
+		Instance:      instance,
+		Service:       service,
+		SandboxConfig: agentConfig.SandboxConfig,
+		DaemonConfig:  agentConfig.DaemonConfig,
 	}
 	if taskId != "" {
 		result.TaskId = taskId

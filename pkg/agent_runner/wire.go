@@ -27,7 +27,7 @@ import (
 type ShimRunner agent.AbstractPlugin
 type Pid1Runner agent.AbstractPlugin
 
-func provideShimRunner(requestPlugin *agent.SessionRequestPlugin, agentDaemonPlugin *agent.AgentDaemonPlugin, sandboxFsPlugin *agent.SandboxFsPlugin, sandboxPlugin *agent.LinuxNamespacePlugin, nvidiaPlugin *agent.DevicesPlugin, pid1Plugin *agent.RunPid1Plugin) ShimRunner {
+func provideShimRunner(requestPlugin *agent.SessionRequestPlugin, agentDaemonPlugin *agent.AgentDaemonPlugin, sandboxFsPlugin *agent.SandboxFsPlugin, sandboxPlugin *agent.LinuxNamespacePlugin, nvidiaPlugin *agent.DevicesPlugin, pid1Plugin *agent.RunPid1Plugin, runtimePid1Plugin *agent.RunPid1WithRuntimePlugin) ShimRunner {
 	return agent.NewPluginRunner(
 		requestPlugin,
 		agentDaemonPlugin,
@@ -35,6 +35,7 @@ func provideShimRunner(requestPlugin *agent.SessionRequestPlugin, agentDaemonPlu
 		sandboxPlugin,
 		nvidiaPlugin,
 		pid1Plugin,
+		runtimePid1Plugin,
 	)
 }
 
@@ -48,6 +49,7 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 		agent.ProvideLinuxNamespacePlugin,
 		agent.ProvideNvidiaPlugin,
 		agent.ProvideRunPid1Plugin,
+		agent.ProvideRunPid1WithRuntimePlugin,
 		provideShimRunner,
 	)
 	return ShimRunner(nil) // This will never be reached, but is required for the wire build.

@@ -8,7 +8,6 @@ package agent_runner
 
 import (
 	"context"
-
 	"github.com/spf13/cobra"
 	agent2 "velda.io/velda/pkg/agent"
 	"velda.io/velda/pkg/proto/agent"
@@ -25,7 +24,8 @@ func NewShimRunner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	linuxNamespacePlugin := agent2.ProvideLinuxNamespacePlugin(workDir, sandboxConfig)
 	devicesPlugin := agent2.ProvideNvidiaPlugin(workDir, sandboxConfig)
 	runPid1Plugin := agent2.ProvideRunPid1Plugin(workDir, sandboxConfig, agentDaemonPlugin, sessionRequestPlugin)
-	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, linuxNamespacePlugin, devicesPlugin, runPid1Plugin)
+	runPid1WithRuntimePlugin := agent2.ProvideRunPid1WithRuntimePlugin(workDir, sandboxConfig, agentDaemonPlugin, sessionRequestPlugin, linuxNamespacePlugin, devicesPlugin)
+	shimRunner := provideShimRunner(sessionRequestPlugin, agentDaemonPlugin, sandboxFsPlugin, linuxNamespacePlugin, devicesPlugin, runPid1Plugin, runPid1WithRuntimePlugin)
 	return shimRunner
 }
 
@@ -35,7 +35,7 @@ func NewPid1Runner(ctx context.Context, cmd *cobra.Command, sandboxConfig *agent
 	autoFsDaemonPlugin := agent2.ProvideAutoFsDaemonPlugin()
 	authPluginType := agent2.ProvideAuthPlugin(cmd, sessionRequestPlugin)
 	workDir := agent2.ProvideWorkdir(cmd)
-	pivotRootPlugin := agent2.ProvidePivotRootPlugin(workDir)
+	pivotRootPlugin := agent2.ProvidePivotRootPlugin(workDir, sandboxConfig)
 	waiterPlugin := agent2.ProvideWaiterPlugin()
 	completionSignalPlugin := agent2.ProvideCompletionSignalPlugin()
 	networkPlugin := agent2.ProvideNetworkPlugin(sessionRequestPlugin, workDir)
@@ -76,7 +76,7 @@ type ShimRunner agent2.AbstractPlugin
 
 type Pid1Runner agent2.AbstractPlugin
 
-func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPlugin *agent2.AgentDaemonPlugin, sandboxFsPlugin *agent2.SandboxFsPlugin, sandboxPlugin *agent2.LinuxNamespacePlugin, nvidiaPlugin *agent2.DevicesPlugin, pid1Plugin *agent2.RunPid1Plugin) ShimRunner {
+func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPlugin *agent2.AgentDaemonPlugin, sandboxFsPlugin *agent2.SandboxFsPlugin, sandboxPlugin *agent2.LinuxNamespacePlugin, nvidiaPlugin *agent2.DevicesPlugin, pid1Plugin *agent2.RunPid1Plugin, runtimePid1Plugin *agent2.RunPid1WithRuntimePlugin) ShimRunner {
 	return agent2.NewPluginRunner(
 		requestPlugin,
 		agentDaemonPlugin,
@@ -84,19 +84,20 @@ func provideShimRunner(requestPlugin *agent2.SessionRequestPlugin, agentDaemonPl
 		sandboxPlugin,
 		nvidiaPlugin,
 		pid1Plugin,
+		runtimePid1Plugin,
 	)
 }
 
 func providePid1Runner(requestPlugin *agent2.SessionRequestPlugin, autofsDaemon *agent2.AutoFsDaemonPlugin, authPlugin agent2.AuthPluginType, pivotRootPlugin *agent2.PivotRootPlugin, waiterPlugin *agent2.WaiterPlugin, completionSignalPlugin *agent2.CompletionSignalPlugin, networkPlugin *agent2.NetworkPlugin, sshdPlugin *agent2.SshdPlugin, statusPlugin *agent2.ReportStatusPlugin, batchPlugin *agent2.BatchPlugin, completionWaiter *agent2.CompletionWaitPlugin) Pid1Runner {
 	return agent2.NewPluginRunner(
 		requestPlugin,
+		networkPlugin,
 		autofsDaemon,
 		pivotRootPlugin,
 		autofsDaemon.GetMountPlugin(),
 		authPlugin,
 		waiterPlugin,
 		completionSignalPlugin,
-		networkPlugin,
 		sshdPlugin,
 		batchPlugin,
 		statusPlugin,

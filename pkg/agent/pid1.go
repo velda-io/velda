@@ -51,6 +51,7 @@ type RunPid1Plugin struct {
 	WorkspaceDir    string
 	AppArmorProfile string
 	ChanCheckPoint  chan *proto.CheckPointRequest
+	sandboxConfig   *agentpb.SandboxConfig
 }
 
 func NewRunPid1Plugin(workspaceDir string, sandboxCfg *agentpb.SandboxConfig, agentDaemonPlugin *AgentDaemonPlugin, requestPlugin interface{}) *RunPid1Plugin {
@@ -59,11 +60,15 @@ func NewRunPid1Plugin(workspaceDir string, sandboxCfg *agentpb.SandboxConfig, ag
 		AppArmorProfile: sandboxCfg.GetApparmorProfile(),
 		ChanCheckPoint:  agentDaemonPlugin.ChanCheckPoint,
 		requestPlugin:   requestPlugin,
+		sandboxConfig:   sandboxCfg,
 	}
 }
 
 func (p *RunPid1Plugin) Run(ctx context.Context) error {
 	request := ctx.Value(p.requestPlugin).(*proto.SessionRequest)
+	if sandboxRuntimeEnabled(p.sandboxConfig) {
+		return p.RunNext(ctx)
+	}
 	var cmd *os.Process
 	var err error
 	if !request.Checkpointed {

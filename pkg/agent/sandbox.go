@@ -15,6 +15,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"syscall"
 
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 
 	agentpb "velda.io/velda/pkg/proto/agent"
@@ -76,8 +78,103 @@ func setupDev(devDir string) {
 }
 
 func (p *LinuxNamespacePlugin) Run(ctx context.Context) error {
+	if sandboxRuntimeEnabled(p.SandboxConfig) {
+		return p.RunNext(ctx)
+	}
 	p.setupMounts(p.WorkspaceDir)
 	return p.RunNext(ctx)
+}
+
+func (p *LinuxNamespacePlugin) appendRuntimeSpec(spec *specs.Spec) error {
+	workspaceDir := path.Join(p.WorkspaceDir, "workspace")
+	if err := os.WriteFile(path.Join(p.WorkspaceDir, "hosts"), []byte("127.0.0.1 localhost\n"), 0644); err != nil {
+		return fmt.Errorf("create runtime hosts file: %w", err)
+	}
+	for _, relPath := range []string{"sys", "dev", "dev/pts", "dev/shm", "run", "run/user", "run/velda", "etc"} {
+		if err := os.MkdirAll(path.Join(workspaceDir, relPath), 0755); err != nil {
+			return fmt.Errorf("create runtime mountpoint %s: %w", relPath, err)
+		}
+	}
+	if err := os.Symlink("/proc/self/fd", path.Join(workspaceDir, "dev/fd")); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("create runtime /dev/fd symlink: %w", err)
+	}
+	/*
+		fstabMounts, err := ParseRuntimeFstabMounts(path.Join(workspaceDir, "etc/fstab"))
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("parse runtime fstab: %w", err)
+		}
+		for _, mount := range fstabMounts {
+			targetPath := path.Join(workspaceDir, strings.TrimPrefix(mount.Destination, "/"))
+			if err := os.MkdirAll(targetPath, 0755); err != nil {
+				return fmt.Errorf("create runtime fstab mountpoint %s: %w", mount.Destination, err)
+			}
+			spec.Mounts = append(spec.Mounts, mount)
+		}
+	*/
+	spec.Mounts = append(spec.Mounts,
+		specs.Mount{Destination: "/sys", Type: "sysfs", Source: "sysfs"},
+		specs.Mount{Destination: "/sys/fs/cgroup", Type: "cgroup2", Source: "cgroup2"},
+		specs.Mount{Destination: "/dev", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "strictatime", "mode=755"}},
+		specs.Mount{Destination: "/dev/pts", Type: "devpts", Source: "devpts", Options: []string{"nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=620"}},
+		specs.Mount{Destination: "/dev/shm", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "strictatime", "mode=1777"}},
+		specs.Mount{Destination: "/run", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "strictatime", "mode=755"}},
+		specs.Mount{Destination: "/run/velda", Type: "bind", Source: path.Join(p.WorkspaceDir, "velda"), Options: []string{"rbind", "ro"}},
+		specs.Mount{Destination: "/etc/hosts", Type: "bind", Source: path.Join(p.WorkspaceDir, "hosts"), Options: []string{"bind", "ro"}},
+	)
+	for _, mount := range p.SandboxConfig.GetHostMounts() {
+		if mount.GetSource() == "" || mount.GetTarget() == "" {
+			log.Printf("Skipping invalid host mount in runtime spec: %v", mount)
+			continue
+		}
+		targetPath := path.Join(workspaceDir, strings.TrimPrefix(mount.GetTarget(), "/"))
+		if err := os.MkdirAll(targetPath, 0755); err != nil {
+			return fmt.Errorf("create runtime host mount target: %w", err)
+		}
+		options := []string{"rbind"}
+		if !mount.GetReadWrite() {
+			options = append(options, "ro")
+		}
+		spec.Mounts = append(spec.Mounts, specs.Mount{Destination: "/" + strings.TrimPrefix(mount.GetTarget(), "/"), Type: "bind", Source: mount.GetSource(), Options: options})
+	}
+	if spec.Linux == nil {
+		spec.Linux = &specs.Linux{}
+	}
+	if spec.Linux.Resources == nil {
+		spec.Linux.Resources = &specs.LinuxResources{}
+	}
+	devAutofsStat, err := os.Stat("/dev/autofs")
+	if err != nil {
+		return fmt.Errorf("stat /dev/autofs: %w", err)
+	}
+	devAutofsSys, ok := devAutofsStat.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("failed to get stat for /dev/autofs")
+	}
+	devAutofsMajor := int64(unix.Major(devAutofsSys.Rdev))
+	devAutofsMinor := int64(unix.Minor(devAutofsSys.Rdev))
+	devAutofsMode := os.FileMode(devAutofsStat.Mode() & os.ModePerm)
+	spec.Linux.Devices = append(spec.Linux.Devices, specs.LinuxDevice{
+		Path:     "/dev/autofs",
+		Type:     "c",
+		Major:    devAutofsMajor,
+		Minor:    devAutofsMinor,
+		FileMode: fileModePtr(devAutofsMode),
+		UID:      uint32Ptr(devAutofsSys.Uid),
+		GID:      uint32Ptr(devAutofsSys.Gid),
+	})
+	if p.SandboxConfig.GetAllocateTty() {
+		ttyMode := os.FileMode(0666)
+		ttyMajor := int64(4)
+		ttyMinor := int64(1)
+		spec.Linux.Devices = append(spec.Linux.Devices, specs.LinuxDevice{Path: "/dev/tty1", Type: "c", Major: ttyMajor, Minor: ttyMinor, FileMode: fileModePtr(ttyMode)})
+		spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices, specs.LinuxDeviceCgroup{Type: "c", Major: int64Ptr(ttyMajor), Minor: int64Ptr(ttyMinor), Access: "rwm", Allow: true})
+	}
+	spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices,
+		specs.LinuxDeviceCgroup{Type: "c", Major: int64Ptr(devAutofsMajor), Minor: int64Ptr(devAutofsMinor), Access: "rwm", Allow: true},
+		specs.LinuxDeviceCgroup{Type: "c", Major: int64Ptr(10), Minor: int64Ptr(235), Access: "rwm", Allow: true},
+	)
+	spec.Linux.RootfsPropagation = "shared"
+	return nil
 }
 
 func (p *LinuxNamespacePlugin) setupMounts(workDir string) {
@@ -160,10 +257,31 @@ func (p *LinuxNamespacePlugin) setupMounts(workDir string) {
 
 type PivotRootPlugin struct {
 	PluginBase
-	WorkspaceDir string
+	WorkspaceDir  string
+	SandboxConfig *agentpb.SandboxConfig
 }
 
 func (p *PivotRootPlugin) Run(ctx context.Context) error {
+	if sandboxRuntimeEnabled(p.SandboxConfig) {
+		log.Printf("Runtime mode enabled, skipping pivot root")
+		os.Clearenv()
+		if err := setDefaultEnv(); err != nil {
+			log.Printf("Failed to load default env: %v", err)
+		}
+		if err := os.Chdir("/"); err != nil {
+			log.Printf("Failed to change to runtime root: %v", err)
+		}
+		if _, err := os.Stat("/etc/fstab"); err == nil {
+			// Set up mounts from /etc/fstab by invoking "mount -a -O nox-lazy"
+			cmd := exec.Command("mount", "-a", "-O", "nox-lazy")
+			cmd.Stderr = os.Stderr
+			// Failures are non-fatal.
+			if err := cmd.Run(); err != nil {
+				log.Printf("Failed start mount -a -O nolazy: %v", err)
+			}
+		}
+		return p.RunNext(ctx)
+	}
 	workspaceDir := path.Join(p.WorkspaceDir, "workspace")
 	if err := syscall.Mount("", "/", "", syscall.MS_REC|syscall.MS_SLAVE, ""); err != nil {
 		die("Mount private", err)
@@ -238,8 +356,9 @@ func NewLinuxNamespacePlugin(workspaceDir string, sandboxConfig *agentpb.Sandbox
 	}
 }
 
-func NewPivotRootPlugin(workspaceDir string) *PivotRootPlugin {
+func NewPivotRootPlugin(workspaceDir string, sandboxConfig *agentpb.SandboxConfig) *PivotRootPlugin {
 	return &PivotRootPlugin{
-		WorkspaceDir: workspaceDir,
+		WorkspaceDir:  workspaceDir,
+		SandboxConfig: sandboxConfig,
 	}
 }

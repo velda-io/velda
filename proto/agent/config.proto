@@ -79,6 +79,20 @@ message SandboxConfig {
   // The directory where the NVIDIA driver is installed.
   // It must contain bin & lib for the user-space NVIDIA driver libraries.
   string nvidia_driver_install_dir = 8;
+
+  enum SandboxRuntime {
+    SANDBOX_RUNTIME_UNSPECIFIED = 0;
+    SANDBOX_RUNTIME_RUNC = 1;
+    SANDBOX_RUNTIME_RUNSC = 2;
+  }
+
+  // Optional container runtime used to launch sandbox pid1.
+  // When unset, the agent uses the existing native spawn path.
+  SandboxRuntime sandbox_runtime = 9;
+
+  // Optional path to the sandbox runtime binary.
+  // When unset, the runtime name is resolved from PATH.
+  string sandbox_runtime_path = 10;
 }
 
 message DaemonConfig {
@@ -122,6 +136,7 @@ message DaemonConfig {
   // Optional explicit agent name used as the reported agent ID.
   // If not set, agentd falls back to AGENT_NAME env var and hostname.
   string agent_name = 7;
+
 }
 
 message BrokerInfo {

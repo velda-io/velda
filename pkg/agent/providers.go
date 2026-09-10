@@ -73,6 +73,10 @@ func ProvideRunPid1Plugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig,
 	return NewRunPid1Plugin(string(workDir), sandboxConfig, agentDaemonPlugin, requestPlugin)
 }
 
+func ProvideRunPid1WithRuntimePlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig, agentDaemonPlugin *AgentDaemonPlugin, requestPlugin *SessionRequestPlugin, linuxNamespacePlugin *LinuxNamespacePlugin, devicesPlugin *DevicesPlugin) *RunPid1WithRuntimePlugin {
+	return NewRunPid1WithRuntimePlugin(string(workDir), sandboxConfig, agentDaemonPlugin, requestPlugin, linuxNamespacePlugin, devicesPlugin)
+}
+
 func ProvideCommandModifier() CommandModifier {
 	if HasNvidiaGpu() {
 		return gpuModifier("/var/nvidia/lib", "/var/nvidia/bin")
@@ -85,8 +89,8 @@ func ProvideAgentName(cmd *cobra.Command) AgentName {
 	return AgentName(agentName)
 }
 
-func ProvidePivotRootPlugin(workDir WorkDir) *PivotRootPlugin {
-	return NewPivotRootPlugin(string(workDir))
+func ProvidePivotRootPlugin(workDir WorkDir, sandboxConfig *agentpb.SandboxConfig) *PivotRootPlugin {
+	return NewPivotRootPlugin(string(workDir), sandboxConfig)
 }
 
 func ProvideWaiterPlugin() *WaiterPlugin {

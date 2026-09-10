@@ -23,6 +23,7 @@ import (
 	"sort"
 	"syscall"
 
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	agentpb "velda.io/velda/pkg/proto/agent"
 )
@@ -83,6 +84,9 @@ func copyNod(src, dst string) error {
 }
 
 func (p *DevicesPlugin) Run(ctx context.Context) error {
+	if sandboxRuntimeEnabled(p.config) {
+		return p.RunNext(ctx)
+	}
 	// detect available GPU devices (NVIDIA or AMD)
 	nvidiaExists := func() bool { _, err := os.Stat("/dev/nvidiactl"); return err == nil }()
 	amdKfdExists := func() bool { _, err := os.Stat("/dev/kfd"); return err == nil }()
@@ -185,6 +189,136 @@ func (p *DevicesPlugin) Run(ctx context.Context) error {
 	}
 
 	return p.RunNext(ctx)
+}
+
+func (p *DevicesPlugin) appendRuntimeDevice(spec *specs.Spec, sourcePath string, targetPath string) error {
+	stat, err := os.Lstat(sourcePath)
+	if err != nil {
+		return err
+	}
+	sysStat, ok := stat.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("failed to get stat for %s: not a syscall.Stat_t", sourcePath)
+	}
+	if stat.Mode()&os.ModeType != (os.ModeDevice | os.ModeCharDevice) {
+		return nil
+	}
+	if spec.Linux == nil {
+		spec.Linux = &specs.Linux{}
+	}
+	if spec.Linux.Resources == nil {
+		spec.Linux.Resources = &specs.LinuxResources{}
+	}
+	major := int64(unix.Major(sysStat.Rdev))
+	minor := int64(unix.Minor(sysStat.Rdev))
+	fileMode := os.FileMode(stat.Mode() & fs.ModePerm)
+	spec.Linux.Devices = append(spec.Linux.Devices, specs.LinuxDevice{
+		Path:     targetPath,
+		Type:     "c",
+		Major:    major,
+		Minor:    minor,
+		FileMode: fileModePtr(fileMode),
+		UID:      uint32Ptr(sysStat.Uid),
+		GID:      uint32Ptr(sysStat.Gid),
+	})
+	spec.Linux.Resources.Devices = append(spec.Linux.Resources.Devices, specs.LinuxDeviceCgroup{Type: "c", Major: int64Ptr(major), Minor: int64Ptr(minor), Access: "rwm", Allow: true})
+	return nil
+}
+
+func (p *DevicesPlugin) appendRuntimeSpec(spec *specs.Spec) error {
+	workspaceDir := path.Join(p.WorkspaceDir, "workspace")
+	if spec.Linux == nil {
+		spec.Linux = &specs.Linux{}
+	}
+	if spec.Linux.Resources == nil {
+		spec.Linux.Resources = &specs.LinuxResources{}
+	}
+
+	nvidiaExists := func() bool { _, err := os.Stat("/dev/nvidiactl"); return err == nil }()
+	amdKfdExists := func() bool { _, err := os.Stat("/dev/kfd"); return err == nil }()
+	amdDriExists := func() bool {
+		fi, err := os.Stat("/dev/dri")
+		if err != nil {
+			return false
+		}
+		return fi.IsDir()
+	}()
+
+	if !nvidiaExists && !amdKfdExists && !amdDriExists {
+		return nil
+	}
+
+	if nvidiaExists {
+		nvidiaLibs := os.Getenv("VELDA_NVIDIA_DIR")
+		if nvidiaLibs == "" {
+			nvidiaLibs = p.config.GetNvidiaDriverInstallDir()
+		}
+		if nvidiaLibs == "" {
+			if _, err := os.Stat("/var/nvidia"); err == nil {
+				nvidiaLibs = "/var/nvidia"
+			}
+		}
+		files, err := filepath.Glob("/dev/nvidia*")
+		if err != nil {
+			return fmt.Errorf("glob nvidia nodes: %w", err)
+		}
+		capfiles, err := filepath.Glob("/dev/nvidia-caps/*")
+		if err != nil {
+			return fmt.Errorf("glob nvidia caps: %w", err)
+		}
+		ibFiles, err := filepath.Glob("/dev/infiniband/*")
+		if err != nil {
+			return fmt.Errorf("glob infiniband nodes: %w", err)
+		}
+		if len(ibFiles) > 0 {
+			if err := os.MkdirAll(filepath.Join(workspaceDir, "dev/infiniband"), 0755); err != nil {
+				return fmt.Errorf("mkdir /dev/infiniband: %w", err)
+			}
+			files = append(files, ibFiles...)
+		}
+		files = append(files, capfiles...)
+		sort.Strings(files)
+		for _, file := range files {
+			if err := p.appendRuntimeDevice(spec, file, file); err != nil {
+				return fmt.Errorf("append nvidia device spec: %s: %w", file, err)
+			}
+		}
+		if nvidiaLibs != "" {
+			if err := os.MkdirAll(filepath.Join(workspaceDir, "var/nvidia"), 0755); err != nil {
+				return fmt.Errorf("mkdir nvidia bins: %w", err)
+			}
+			spec.Mounts = append(spec.Mounts, specs.Mount{Destination: "/var/nvidia", Type: "bind", Source: nvidiaLibs, Options: []string{"rbind", "ro"}})
+		}
+	}
+
+	if amdKfdExists || amdDriExists {
+		if err := os.MkdirAll(filepath.Join(workspaceDir, "dev"), 0755); err != nil {
+			return fmt.Errorf("mkdir dev: %w", err)
+		}
+	}
+	if amdKfdExists {
+		if err := p.appendRuntimeDevice(spec, "/dev/kfd", "/dev/kfd"); err != nil {
+			return fmt.Errorf("append kfd device spec: %w", err)
+		}
+	}
+	if amdDriExists {
+		files, err := filepath.Glob("/dev/dri/*")
+		if err != nil {
+			return fmt.Errorf("glob dri nodes: %w", err)
+		}
+		if len(files) > 0 {
+			if err := os.MkdirAll(filepath.Join(workspaceDir, "dev/dri"), 0755); err != nil {
+				return fmt.Errorf("mkdir dev/dri: %w", err)
+			}
+			for _, file := range files {
+				if err := p.appendRuntimeDevice(spec, file, file); err != nil {
+					return fmt.Errorf("append dri device spec: %s: %w", file, err)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func HasNvidiaGpu() bool {
