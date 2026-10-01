@@ -28,11 +28,19 @@ import (
 	"time"
 	_ "unsafe"
 
+	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 	pb "google.golang.org/protobuf/proto"
 	"velda.io/velda/pkg/proto"
 	agentpb "velda.io/velda/pkg/proto/agent"
 )
+
+// NetnsContextKey is the context key for network namespace file descriptor.
+// If present (as uintptr), the sandbox process will use this network namespace.
+// The FD should be opened with O_CLOEXEC.
+type netnsContextKeyType struct{}
+
+var NetnsContextKey = netnsContextKeyType{}
 
 type ErrorCheckPointed struct {
 }
@@ -72,7 +80,7 @@ func (p *RunPid1Plugin) Run(ctx context.Context) error {
 	var cmd *os.Process
 	var err error
 	if !request.Checkpointed {
-		cmd, err = p.runPid1(request)
+		cmd, err = p.runPid1WithContext(ctx, request)
 	} else {
 		cmd, err = p.performRestore(request)
 	}
@@ -320,9 +328,41 @@ func setApparmorProfile(profile string) error {
 	return nil
 }
 
-func (p *RunPid1Plugin) runPid1(request *proto.SessionRequest) (*os.Process, error) {
+func (p *RunPid1Plugin) runPid1WithContext(ctx context.Context, request *proto.SessionRequest) (*os.Process, error) {
+	// Lock OS thread for namespace operations
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+
+	// Check if network namespace FD is specified in context
+	netnsFd, hasNetns := ctx.Value(NetnsContextKey).(uintptr)
+	var origNs netns.NsHandle
+
+	if hasNetns && netnsFd != 0 {
+		// Save original network namespace
+		var err error
+		origNs, err = netns.Get()
+		if err != nil {
+			return nil, fmt.Errorf("Failed to get original netns: %w", err)
+		}
+
+		// Ensure we always restore the namespace
+		defer func() {
+			// Restore original namespace
+			if origNs != netns.None() {
+				if err := netns.Set(origNs); err != nil {
+					log.Printf("runPid1: Warning: failed to restore netns: %v", err)
+				}
+				origNs.Close()
+			}
+		}()
+
+		// Enter the network namespace using the provided FD
+		if err := unix.Setns(int(netnsFd), unix.CLONE_NEWNET); err != nil {
+			return nil, fmt.Errorf("Failed to setns to FD %d: %w", netnsFd, err)
+		}
+
+		log.Printf("runPid1: Entered network namespace via FD %d", netnsFd)
+	}
 
 	if p.AppArmorProfile != "" {
 		if err := setApparmorProfile(p.AppArmorProfile); err != nil {
@@ -353,11 +393,14 @@ func (p *RunPid1Plugin) runPid1(request *proto.SessionRequest) (*os.Process, err
 	if request.Workload != nil {
 		files = append(files, os.NewFile(3, "/proc/self/fd/3")) // Batch output
 	}
+
+	cloneFlags := uintptr(syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWUTS | syscall.CLONE_NEWCGROUP)
+
 	cmd, err := os.StartProcess(executable, append([]string{executable}, args...), &os.ProcAttr{
 		Files: files,
 		Env:   os.Environ(),
 		Sys: &syscall.SysProcAttr{
-			Cloneflags:  syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWUTS | syscall.CLONE_NEWCGROUP,
+			Cloneflags:  cloneFlags,
 			Setsid:      true,
 			CgroupFD:    fd,
 			UseCgroupFD: true,
