@@ -31,7 +31,7 @@ require (
 	github.com/klauspost/compress v1.18.1
 	github.com/mattn/go-isatty v0.0.20
 	github.com/miekg/dns v1.1.62
-	github.com/nebius/gosdk v0.2.37
+	github.com/nebius/gosdk v0.2.75
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/pkg/sftp v1.13.7
 	github.com/prometheus/client_golang v1.22.0

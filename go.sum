@@ -287,6 +287,8 @@ github.com/ncruces/go-strftime v0.1.9 h1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdh
 github.com/ncruces/go-strftime v0.1.9/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/nebius/gosdk v0.2.37 h1:pRHA7HALZWr3q4Q9hiTTKjS1+Fe8iw6806i9w8j1LP8=
 github.com/nebius/gosdk v0.2.37/go.mod h1:M25m7hhesvpkwuj5UFUMtlmI2vHK7e5rrYBl7QgeZaM=
+github.com/nebius/gosdk v0.2.75 h1:OR4CxHlEvcsGehz0obdbnApk+q+0ZlwIMhJ2h/sEKno=
+github.com/nebius/gosdk v0.2.75/go.mod h1:M25m7hhesvpkwuj5UFUMtlmI2vHK7e5rrYBl7QgeZaM=
 github.com/onsi/ginkgo/v2 v2.19.0 h1:9Cnnf7UHo57Hy3k6/m5k3dRfGTMXGvxhHFvkDTCTpvA=
 github.com/onsi/ginkgo/v2 v2.19.0/go.mod h1:rlwLi9PilAFJ8jCg9UE1QP6VBpd6/xj3SRC0d6TU0To=
 github.com/onsi/gomega v1.19.0 h1:4ieX6qQjPP/BfC3mpsAtIGGlxTWPeA3Inl/7DtXw1tw=

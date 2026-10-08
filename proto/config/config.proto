@@ -323,6 +323,12 @@ message AutoscalerBackendNebiusLaunchTemplate {
   // Nebius GPU/Infiniband cluster ID. If set, will attach the instance to the
   // specified cluster (enabling Infiniband where supported).
   string cluster_id = 21;
+
+  // Pricing policy ID for spot instances with max price.
+  // If set, uses dynamic spot pricing with the specified max price policy.
+  // If not set but preemptible=true, follows current spot price dynamically.
+  // If not set and preemptible=false, uses on-demand pricing.
+  string spot_pricing_policy_id = 22;
 }
 
 // Nebius boot disk type enum.
@@ -509,6 +515,11 @@ message NebiusAutoProvisioner {
   // Infiniband cluster ID. If set, will enable Infiniband for the instance and
   // join the cluster.
   string cluster_id = 21;
+
+  // Common spot pricing policy ID for all pools.
+  // If set, uses dynamic spot pricing with max price policy.
+  // If not set but preemptible=true, follows current spot price dynamically.
+  string spot_pricing_policy_id = 22;
 }
 
 message AutoscalerBackendMithrilSpotBid {
