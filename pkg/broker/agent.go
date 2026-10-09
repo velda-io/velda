@@ -78,6 +78,10 @@ type Agent struct {
 	cancelConfirm chan struct{}
 }
 
+func (a *Agent) ID() string {
+	return a.id
+}
+
 func newAgent(initialReq *proto.AgentUpdateRequest, peerInfo *peer.Peer, scheduler *Scheduler, delegate agentDelegate) *Agent {
 	addr, ok := peerInfo.Addr.(*net.TCPAddr)
 	if !ok {

@@ -309,6 +309,26 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		instanceSpec.RecoveryPolicy = compute.InstanceRecoveryPolicy_FAIL
 	}
 
+	// Configure pricing model
+	if spotPolicyID := n.cfg.GetSpotPricingPolicyId(); spotPolicyID != "" {
+		// Use dynamic spot pricing with max price policy
+		instanceSpec.PricingModel = &compute.InstanceSpec_SpotPricingPolicy{
+			SpotPricingPolicy: &compute.SpotPricingPolicySpec{
+				Id: spotPolicyID,
+			},
+		}
+	} else if n.cfg.GetPreemptible() {
+		// Follow current spot price dynamically
+		instanceSpec.PricingModel = &compute.InstanceSpec_FollowsSpotPrice{
+			FollowsSpotPrice: &compute.FollowsSpotPriceSpec{},
+		}
+	} else {
+		// Use on-demand pricing (default)
+		instanceSpec.PricingModel = &compute.InstanceSpec_OnDemand{
+			OnDemand: &compute.OnDemandSpec{},
+		}
+	}
+
 	log.Printf("Creating Nebius instance %s", name)
 	operation, err := n.instanceService.Create(ctx, &compute.CreateInstanceRequest{
 		Metadata: &common.ResourceMetadata{
