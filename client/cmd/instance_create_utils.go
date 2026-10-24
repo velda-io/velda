@@ -263,7 +263,8 @@ echo "<empty> /var/lib/docker host defaults 0 0" >> /etc/fstab
 # Some distros make it a symlink.
 rm -f /etc/resolv.conf
 cat << EOF > /etc/resolv.conf
-nameserver 127.0.0.1
+nameserver 8.8.8.8
+nameserver 8.8.4.4
 search local.velda
 EOF
 
