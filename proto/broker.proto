@@ -258,6 +258,12 @@ message ExecutionStatus {
     // This is not used with user-based authentication.
     string jump_host = 4;
     bytes jump_host_key = 5;
+
+    // Optional host override used for dialing through jump host.
+    // When set, this is used instead of 'host' when dialing through jump_host.
+    // Falls back to 'host' if not set.
+    // The host format is internal to jump host implementation.
+    string jump_dial_host = 6;
   }
   SshConnection ssh_connection = 5;
 
