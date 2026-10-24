@@ -73,11 +73,16 @@ func SshConnectWithAuth(ctx context.Context, sshConn *proto.ExecutionStatus_SshC
 		if err != nil {
 			return nil, fmt.Errorf("Error dialing jump host: %v", err)
 		}
-		jumpConn, err := jumpClient.Dial("tcp", fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port))
+		// Use JumpDialHost if set (e.g., for VPC connections), otherwise fallback to Host
+		dialHost := sshConn.Host
+		if sshConn.JumpDialHost != "" {
+			dialHost = sshConn.JumpDialHost
+		}
+		jumpConn, err := jumpClient.Dial("tcp", fmt.Sprintf("%s:%d", dialHost, sshConn.Port))
 		if err != nil {
 			return nil, fmt.Errorf("Error dialing jump host: %v", err)
 		}
-		conn, channels, reqs, err := ssh.NewClientConn(jumpConn, fmt.Sprintf("%s:%d", sshConn.Host, sshConn.Port), clientConfig)
+		conn, channels, reqs, err := ssh.NewClientConn(jumpConn, fmt.Sprintf("%s:%d", dialHost, sshConn.Port), clientConfig)
 		if err != nil {
 			return nil, fmt.Errorf("Error dialing ssh: %v", err)
 		}
