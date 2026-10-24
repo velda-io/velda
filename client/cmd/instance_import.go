@@ -18,9 +18,11 @@ package cmd
 
 import (
 	"archive/tar"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,6 +79,13 @@ func runImportContainer(cmd *cobra.Command, args []string) error {
 	imageRef := args[0]
 	authMethod, _ := cmd.Flags().GetString("auth")
 	authB64, _ := cmd.Flags().GetString("auth-encoded")
+
+	// Fix DNS configuration BEFORE any network operation
+	// This must happen before Go's resolver is initialized
+	if err := ensureDNSConfiguration(cmd); err != nil {
+		cmd.PrintErrf("Warning: failed to ensure DNS configuration: %v\n", err)
+	}
+
 	remoteOpt, err := resolveRegistryAuthWithBase64(authMethod, authB64)
 	if err != nil {
 		return fmt.Errorf("resolving registry auth: %w", err)
@@ -387,4 +396,43 @@ func safeTime(t time.Time) time.Time {
 		return time.Unix(0, 0)
 	}
 	return t
+}
+
+func ensureDNSConfiguration(cmd *cobra.Command) error {
+	cmd.PrintErrln("Setting up DNS configuration...")
+
+	// Ensure /etc directory exists
+	if err := os.MkdirAll("/etc", 0o755); err != nil {
+		return fmt.Errorf("failed to create /etc: %w", err)
+	}
+
+	// Unconditionally write Google's DNS to /etc/resolv.conf
+	resolvConf := "nameserver 8.8.8.8\nnameserver 8.8.4.4\n"
+	if err := os.WriteFile("/etc/resolv.conf", []byte(resolvConf), 0o644); err != nil {
+		return fmt.Errorf("failed to write /etc/resolv.conf: %w", err)
+	}
+
+	cmd.PrintErrln("DNS configured to use 8.8.8.8")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.google.com", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create DNS test request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("DNS/network test failed (HTTPS request to google.com): %w", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 500 {
+		return fmt.Errorf("DNS/network test returned unexpected status: %d", resp.StatusCode)
+	}
+
+	cmd.PrintErrln("Networking test passed")
+	return nil
 }
