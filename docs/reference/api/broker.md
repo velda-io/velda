@@ -110,6 +110,7 @@ Content-Type: application/json
 | `labels` | string[] |  |
 | `internal_ip_address` | string |  |
 | `tags` | map&lt;string, string&gt; | Key-value tags for the session. |
+| `vpc_id` | string | VPC ID if this session is in a VPC (enterprise-only) |
 
 ### SetTagResponse
 

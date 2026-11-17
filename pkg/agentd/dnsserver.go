@@ -228,6 +228,19 @@ func (s *DnsServer) Run() error {
 	return err
 }
 
+// RunWithPacketConn starts the DNS server with a pre-created PacketConn.
+// This is useful when you want to create the listener in a specific network namespace.
+// The caller is responsible for closing the PacketConn after the server is shut down.
+func (s *DnsServer) RunWithPacketConn(conn net.PacketConn) error {
+	s.dnsServer.PacketConn = conn
+	log.Printf("Starting DNS server")
+	err := s.dnsServer.ActivateAndServe()
+	if err != nil {
+		log.Printf("Failed to start DNS server: %v", err)
+	}
+	return err
+}
+
 func (s *DnsServer) Shutdown(ctx context.Context) error {
 	return s.dnsServer.ShutdownContext(ctx)
 }

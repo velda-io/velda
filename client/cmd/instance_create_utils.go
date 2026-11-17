@@ -260,11 +260,11 @@ set -ex
 echo "<empty> /tmp host defaults 0 0" >> /etc/fstab
 echo "<empty> /var/lib/docker host defaults 0 0" >> /etc/fstab
 
+touch /etc/hosts || true
 # Some distros make it a symlink.
 rm -f /etc/resolv.conf
 cat << EOF > /etc/resolv.conf
-nameserver 8.8.8.8
-nameserver 8.8.4.4
+nameserver 127.0.0.1
 search local.velda
 EOF
 

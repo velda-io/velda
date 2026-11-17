@@ -1853,8 +1853,7 @@ type ExecutionStatus_SshConnection struct {
 	// Optional host override used for dialing through jump host.
 	// When set, this is used instead of 'host' when dialing through jump_host.
 	// Falls back to 'host' if not set.
-	// Used primarily for VPC connections where the dial target differs from
-	// the display host (e.g., encoded VPC metadata: vpc|vpcID|vpcCIDR|vpcIP).
+	// The host format is internal to jump host implementation.
 	JumpDialHost  string `protobuf:"bytes,6,opt,name=jump_dial_host,json=jumpDialHost,proto3" json:"jump_dial_host,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
