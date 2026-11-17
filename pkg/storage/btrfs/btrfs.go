@@ -441,3 +441,23 @@ func (b *Btrfs) runCommand(ctx context.Context, command ...string) error {
 	}
 	return nil
 }
+
+func (b *Btrfs) SetStorageQuota(ctx context.Context, instanceId int64, quotaGb int32) error {
+	subvolume := fmt.Sprintf("%s/%d/current", b.rootPath, instanceId)
+
+	// Enable quotas on the root path if not already enabled (idempotent)
+	if err := b.runCommand(ctx, "btrfs", "quota", "enable", b.rootPath); err != nil {
+		// Ignore error if quotas are already enabled
+		log.Printf("Warning: failed to enable btrfs quota (may already be enabled): %v", err)
+	}
+
+	// If quotaGb is 0, remove the quota limit
+	if quotaGb == 0 {
+		return b.runCommand(ctx, "btrfs", "qgroup", "limit", "none", subvolume)
+	}
+
+	// Set the quota limit in GB
+	quotaSize := fmt.Sprintf("%dG", quotaGb)
+	return b.runCommand(ctx, "btrfs", "qgroup", "limit", quotaSize, subvolume)
+}
+

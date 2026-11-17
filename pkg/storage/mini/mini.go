@@ -356,3 +356,9 @@ func (z *MiniStorage) GetRoot(instanceId int64) string {
 func (z *MiniStorage) GetSnapshotRoot(instanceId int64, snapshotName string) string {
 	return z.getSnapshotPath(instanceId, snapshotName)
 }
+
+func (z *MiniStorage) SetStorageQuota(ctx context.Context, instanceId int64, quotaGb int32) error {
+	// No-op for OSS Mini storage (quota management not implemented)
+	return nil
+}
+

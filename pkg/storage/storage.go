@@ -52,6 +52,11 @@ type Storage interface {
 	ListImages(ctx context.Context) ([]string, error)
 
 	DeleteImage(ctx context.Context, imageName string) error
+
+	// SetStorageQuota sets the storage quota for an instance in GB (ENT only).
+	// A value of 0 means no quota limit.
+	// For OSS implementations, this can return nil (no-op) or ErrNotSupported.
+	SetStorageQuota(ctx context.Context, instanceId int64, quotaGb int32) error
 }
 
 // LocalDiskProvider is implemented by local filesystem based storage backends.
@@ -72,3 +77,4 @@ type StorageAuth interface {
 	// instance and session.
 	RevokeAccess(ctx context.Context, instanceId int64, sessionId string) error
 }
+
