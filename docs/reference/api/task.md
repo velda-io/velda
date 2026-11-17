@@ -192,6 +192,7 @@ Authorization: Bearer <token>
 | `skip_docker_init_script` | bool | Optional: skip the post-install initialization script when  docker_image is set. |
 | `docker_auth_username` | string | Optional: registry username for private docker_image pulls.  Used only when docker_image is set. |
 | `docker_auth_password` | string | Optional: registry password for private docker_image pulls.  Used only when docker_image is set. |
+| `storage_quota_gb` | int32 | Optional: storage quota in GB. If not specified, uses default from config. |
 
 ### Instance
 
@@ -204,6 +205,7 @@ Authorization: Bearer <token>
 | `owner_id` | int64 | Only to be filled by the server. |
 | `org_id` | int64 | org_id is the organization this instance belongs to. |
 | `region_display_info` | [RegionDisplayInfo](#regiondisplayinfo) | Region metadata for UI display. |
+| `storage_quota_gb` | int32 | Storage quota in GB. 0 means no quota limit. |
 
 ### RegionDisplayInfo
 

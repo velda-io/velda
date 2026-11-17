@@ -347,3 +347,19 @@ func (z *Zfs) GetRoot(instanceId int64) string {
 func (z *Zfs) GetSnapshotRoot(instanceId int64, snapshotName string) string {
 	return fmt.Sprintf("/%s/%d/.zfs/snapshot/%s", z.pool, instanceId, snapshotName)
 }
+
+func (z *Zfs) SetStorageQuota(ctx context.Context, instanceId int64, quotaGb int32) error {
+	dataset := fmt.Sprintf("%s/%d", z.pool, instanceId)
+
+	// If quotaGb is 0, remove the quota (set to none)
+	var quotaValue string
+	if quotaGb == 0 {
+		quotaValue = "none"
+	} else {
+		quotaValue = fmt.Sprintf("%dG", quotaGb)
+	}
+
+	// Use refquota to set the quota (excludes snapshots from the quota)
+	return z.runCommand(ctx, "zfs", "set", fmt.Sprintf("refquota=%s", quotaValue), dataset)
+}
+

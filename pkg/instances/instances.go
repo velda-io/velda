@@ -58,6 +58,13 @@ type InstanceDb interface {
 	DeleteInstance(ctx context.Context, in *proto.DeleteInstanceRequest) (db.Committer, *proto.Instance, error)
 }
 
+// InstanceDbWithQuota is an optional interface that database implementations can implement
+// to support storage quota updates (enterprise-only feature).
+type InstanceDbWithQuota interface {
+	InstanceDb
+	UpdateInstanceStorageQuota(ctx context.Context, in *proto.UpdateInstanceStorageQuotaRequest) (*proto.Instance, error)
+}
+
 type service struct {
 	proto.UnimplementedInstanceServiceServer
 	db          InstanceDb
@@ -328,6 +335,24 @@ func (s *service) DeleteImage(ctx context.Context, in *proto.DeleteImageRequest)
 	return &emptypb.Empty{}, nil
 }
 
+func (s *service) UpdateInstanceStorageQuota(ctx context.Context, in *proto.UpdateInstanceStorageQuotaRequest) (*emptypb.Empty, error) {
+	// Apply the quota on the storage backend first
+	if err := s.storage.SetStorageQuota(ctx, in.InstanceId, in.StorageQuotaGb); err != nil {
+		return nil, fmt.Errorf("failed to set storage quota on backend: %w", err)
+	}
+
+	// Update the quota in the database if the database supports it (enterprise-only)
+	if dbWithQuota, ok := s.db.(InstanceDbWithQuota); ok {
+		_, err := dbWithQuota.UpdateInstanceStorageQuota(ctx, in)
+		if err != nil {
+			log.Printf("Warning: failed to update database after setting storage quota: %v", err)
+			return nil, err
+		}
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
 func checkInstanceName(name string) error {
 	if len(name) < 3 || len(name) > 50 {
 		return fmt.Errorf("instance name must be between 3 and 50 characters")
@@ -338,3 +363,4 @@ func checkInstanceName(name string) error {
 	}
 	return nil
 }
+
