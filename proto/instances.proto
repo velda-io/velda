@@ -119,12 +119,6 @@ message DeleteImageRequest {
   string image_name = 1;
 }
 
-message UpdateInstanceStorageQuotaRequest {
-  int64 instance_id = 1;
-  // New storage quota in GB. 0 means no quota limit.
-  int32 storage_quota_gb = 2;
-}
-
 service InstanceService {
   rpc CreateInstance(CreateInstanceRequest) returns (Instance) {
     option (google.api.http) = {

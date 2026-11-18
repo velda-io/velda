@@ -881,59 +881,6 @@ func (x *DeleteImageRequest) GetImageName() string {
 	return ""
 }
 
-type UpdateInstanceStorageQuotaRequest struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	InstanceId int64                  `protobuf:"varint,1,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
-	// New storage quota in GB. 0 means no quota limit.
-	StorageQuotaGb int32 `protobuf:"varint,2,opt,name=storage_quota_gb,json=storageQuotaGb,proto3" json:"storage_quota_gb,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *UpdateInstanceStorageQuotaRequest) Reset() {
-	*x = UpdateInstanceStorageQuotaRequest{}
-	mi := &file_instances_proto_msgTypes[14]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UpdateInstanceStorageQuotaRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UpdateInstanceStorageQuotaRequest) ProtoMessage() {}
-
-func (x *UpdateInstanceStorageQuotaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_instances_proto_msgTypes[14]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UpdateInstanceStorageQuotaRequest.ProtoReflect.Descriptor instead.
-func (*UpdateInstanceStorageQuotaRequest) Descriptor() ([]byte, []int) {
-	return file_instances_proto_rawDescGZIP(), []int{14}
-}
-
-func (x *UpdateInstanceStorageQuotaRequest) GetInstanceId() int64 {
-	if x != nil {
-		return x.InstanceId
-	}
-	return 0
-}
-
-func (x *UpdateInstanceStorageQuotaRequest) GetStorageQuotaGb() int32 {
-	if x != nil {
-		return x.StorageQuotaGb
-	}
-	return 0
-}
-
 var File_instances_proto protoreflect.FileDescriptor
 
 var file_instances_proto_rawDesc = []byte{
@@ -1033,14 +980,7 @@ var file_instances_proto_rawDesc = []byte{
 	0x65, 0x22, 0x33, 0x0a, 0x12, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x49, 0x6d, 0x61, 0x67, 0x65,
 	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1d, 0x0a, 0x0a, 0x69, 0x6d, 0x61, 0x67, 0x65,
 	0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x69, 0x6d, 0x61,
-	0x67, 0x65, 0x4e, 0x61, 0x6d, 0x65, 0x22, 0x6e, 0x0a, 0x21, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65,
-	0x49, 0x6e, 0x73, 0x74, 0x61, 0x6e, 0x63, 0x65, 0x53, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x51,
-	0x75, 0x6f, 0x74, 0x61, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1f, 0x0a, 0x0b, 0x69,
-	0x6e, 0x73, 0x74, 0x61, 0x6e, 0x63, 0x65, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03,
-	0x52, 0x0a, 0x69, 0x6e, 0x73, 0x74, 0x61, 0x6e, 0x63, 0x65, 0x49, 0x64, 0x12, 0x28, 0x0a, 0x10,
-	0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x5f, 0x71, 0x75, 0x6f, 0x74, 0x61, 0x5f, 0x67, 0x62,
-	0x18, 0x02, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0e, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x51,
-	0x75, 0x6f, 0x74, 0x61, 0x47, 0x62, 0x2a, 0x6d, 0x0a, 0x0e, 0x49, 0x6e, 0x73, 0x74, 0x61, 0x6e,
+	0x67, 0x65, 0x4e, 0x61, 0x6d, 0x65, 0x2a, 0x6d, 0x0a, 0x0e, 0x49, 0x6e, 0x73, 0x74, 0x61, 0x6e,
 	0x63, 0x65, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x1f, 0x0a, 0x1b, 0x49, 0x4e, 0x53, 0x54,
 	0x41, 0x4e, 0x43, 0x45, 0x5f, 0x53, 0x54, 0x41, 0x54, 0x55, 0x53, 0x5f, 0x55, 0x4e, 0x53, 0x50,
 	0x45, 0x43, 0x49, 0x46, 0x49, 0x45, 0x44, 0x10, 0x00, 0x12, 0x1a, 0x0a, 0x16, 0x49, 0x4e, 0x53,
@@ -1134,25 +1074,24 @@ func file_instances_proto_rawDescGZIP() []byte {
 }
 
 var file_instances_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_instances_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_instances_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_instances_proto_goTypes = []any{
-	(InstanceStatus)(0),                       // 0: velda.InstanceStatus
-	(*Instance)(nil),                          // 1: velda.Instance
-	(*SnapshotReference)(nil),                 // 2: velda.SnapshotReference
-	(*CreateInstanceRequest)(nil),             // 3: velda.CreateInstanceRequest
-	(*GetInstanceRequest)(nil),                // 4: velda.GetInstanceRequest
-	(*GetInstanceByNameRequest)(nil),          // 5: velda.GetInstanceByNameRequest
-	(*ListInstancesRequest)(nil),              // 6: velda.ListInstancesRequest
-	(*ListInstancesResponse)(nil),             // 7: velda.ListInstancesResponse
-	(*DeleteInstanceRequest)(nil),             // 8: velda.DeleteInstanceRequest
-	(*CreateSnapshotRequest)(nil),             // 9: velda.CreateSnapshotRequest
-	(*DeleteSnapshotRequest)(nil),             // 10: velda.DeleteSnapshotRequest
-	(*ListImagesRequest)(nil),                 // 11: velda.ListImagesRequest
-	(*ListImagesResponse)(nil),                // 12: velda.ListImagesResponse
-	(*CreateImageRequest)(nil),                // 13: velda.CreateImageRequest
-	(*DeleteImageRequest)(nil),                // 14: velda.DeleteImageRequest
-	(*UpdateInstanceStorageQuotaRequest)(nil), // 15: velda.UpdateInstanceStorageQuotaRequest
-	(*emptypb.Empty)(nil),                     // 16: google.protobuf.Empty
+	(InstanceStatus)(0),              // 0: velda.InstanceStatus
+	(*Instance)(nil),                 // 1: velda.Instance
+	(*SnapshotReference)(nil),        // 2: velda.SnapshotReference
+	(*CreateInstanceRequest)(nil),    // 3: velda.CreateInstanceRequest
+	(*GetInstanceRequest)(nil),       // 4: velda.GetInstanceRequest
+	(*GetInstanceByNameRequest)(nil), // 5: velda.GetInstanceByNameRequest
+	(*ListInstancesRequest)(nil),     // 6: velda.ListInstancesRequest
+	(*ListInstancesResponse)(nil),    // 7: velda.ListInstancesResponse
+	(*DeleteInstanceRequest)(nil),    // 8: velda.DeleteInstanceRequest
+	(*CreateSnapshotRequest)(nil),    // 9: velda.CreateSnapshotRequest
+	(*DeleteSnapshotRequest)(nil),    // 10: velda.DeleteSnapshotRequest
+	(*ListImagesRequest)(nil),        // 11: velda.ListImagesRequest
+	(*ListImagesResponse)(nil),       // 12: velda.ListImagesResponse
+	(*CreateImageRequest)(nil),       // 13: velda.CreateImageRequest
+	(*DeleteImageRequest)(nil),       // 14: velda.DeleteImageRequest
+	(*emptypb.Empty)(nil),            // 15: google.protobuf.Empty
 }
 var file_instances_proto_depIdxs = []int32{
 	0,  // 0: velda.Instance.status:type_name -> velda.InstanceStatus
@@ -1172,13 +1111,13 @@ var file_instances_proto_depIdxs = []int32{
 	1,  // 14: velda.InstanceService.CreateInstance:output_type -> velda.Instance
 	1,  // 15: velda.InstanceService.GetInstance:output_type -> velda.Instance
 	1,  // 16: velda.InstanceService.GetInstanceByName:output_type -> velda.Instance
-	16, // 17: velda.InstanceService.DeleteInstance:output_type -> google.protobuf.Empty
+	15, // 17: velda.InstanceService.DeleteInstance:output_type -> google.protobuf.Empty
 	7,  // 18: velda.InstanceService.ListInstances:output_type -> velda.ListInstancesResponse
 	2,  // 19: velda.InstanceService.CreateSnapshot:output_type -> velda.SnapshotReference
-	16, // 20: velda.InstanceService.DeleteSnapshot:output_type -> google.protobuf.Empty
+	15, // 20: velda.InstanceService.DeleteSnapshot:output_type -> google.protobuf.Empty
 	12, // 21: velda.InstanceService.ListImages:output_type -> velda.ListImagesResponse
-	16, // 22: velda.InstanceService.CreateImage:output_type -> google.protobuf.Empty
-	16, // 23: velda.InstanceService.DeleteImage:output_type -> google.protobuf.Empty
+	15, // 22: velda.InstanceService.CreateImage:output_type -> google.protobuf.Empty
+	15, // 23: velda.InstanceService.DeleteImage:output_type -> google.protobuf.Empty
 	14, // [14:24] is the sub-list for method output_type
 	4,  // [4:14] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
@@ -1201,7 +1140,7 @@ func file_instances_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_instances_proto_rawDesc,
 			NumEnums:      1,
-			NumMessages:   15,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
