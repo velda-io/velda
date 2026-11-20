@@ -53,6 +53,8 @@ vrun -P gpu-h200-8 python train.py --epochs 100
 ```
 4. Onboard more developers by cloning from an existing templates.
 
+For CLI automation with a coding agent, see the [Velda GPU skill](skills/velda-gpu/SKILL.md).
+
 # 🤝 Contributing
 We love contributions from our community ❤️. Pull requests are welcome!
 
