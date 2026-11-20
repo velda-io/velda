@@ -66,12 +66,12 @@ type LocalDiskProvider interface {
 }
 
 // StorageAuth provides NFS-based access control for session requests.
-// Implementations grant or revoke NFS access for an agent and patch the
-// session request with the NFS mount information.
+// Implementations grant or revoke NFS access for an agent and return the
+// mount information.
 type StorageAuth interface {
 	// GrantAccess exports instance and snapshot paths via NFS for agentHost,
-	// and patches req.AgentSessionInfo with the resulting NFS mount details.
-	GrantAccess(ctx context.Context, req *proto.SessionRequest, agentHost string) error
+	// and returns the resulting NFS mount details.
+	GrantAccess(ctx context.Context, req *proto.SessionRequest, agentHost string) (*proto.VolumeMount, error)
 
 	// RevokeAccess removes the NFS export that was created for the given
 	// instance and session.

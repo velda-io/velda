@@ -90,14 +90,15 @@ func (m *SimpleMounter) mountInternal(ctx context.Context, session *proto.Sessio
 
 		// Skip base mount if using DirectFS for snapshots
 		if useDirectFS {
+			nfsMount := session.AgentSessionInfo.GetInstanceMount().GetNfsMount()
 			if mType == mountTypeSnapshot {
-				if session.AgentSessionInfo.GetNfsMount().NfsSnapshotPath != "" {
-					dataDir = fmt.Sprintf("%s:7655@%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsSnapshotPath)
+				if nfsMount.NfsSnapshotPath != "" {
+					dataDir = fmt.Sprintf("%s:7655@%s", nfsMount.NfsServer, nfsMount.NfsSnapshotPath)
 				} else {
-					dataDir = fmt.Sprintf("%s:7655@%s/.zfs/snapshot/%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsPath, snapshotName)
+					dataDir = fmt.Sprintf("%s:7655@%s/.zfs/snapshot/%s", nfsMount.NfsServer, nfsMount.NfsPath, snapshotName)
 				}
 			} else {
-				dataDir = fmt.Sprintf("%s:7655@%s", session.AgentSessionInfo.GetNfsMount().NfsServer, session.AgentSessionInfo.GetNfsMount().NfsPath)
+				dataDir = fmt.Sprintf("%s:7655@%s", nfsMount.NfsServer, nfsMount.NfsPath)
 			}
 		} else {
 			if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -173,7 +174,7 @@ func (m *SimpleMounter) mountDirect(ctx context.Context, session *proto.SessionR
 
 	case *agentpb.AgentDiskSource_NfsMountSource_:
 		nfsSource := s.NfsMountSource
-		nfsMount := session.AgentSessionInfo.GetNfsMount()
+		nfsMount := session.AgentSessionInfo.GetInstanceMount().GetNfsMount()
 		if nfsMount == nil {
 			return nil, fmt.Errorf("NFS mount info is not provided in session request")
 		}

@@ -174,13 +174,23 @@ message SessionRequest {
   reserved 7, 32 to 63;
 }
 
-message AgentSessionInfo {
-  message NfsMount {
-    string nfs_server = 1;
-    string nfs_path = 2;
-    string nfs_snapshot_path = 3;
+message NfsMount {
+  string nfs_server = 1;
+  string nfs_path = 2;
+  string nfs_snapshot_path = 3;
+}
+
+message VolumeMount {
+  oneof mount_type {
+    NfsMount nfs_mount = 1;
   }
-  oneof file_mount { NfsMount nfs_mount = 1; }
+}
+
+message AgentSessionInfo {
+  // Deprecated
+  NfsMount nfs_mount = 1;
+  // Mount information for the instance root filesystem
+  VolumeMount instance_mount = 2;
 }
 
 message SessionInitResponse {
