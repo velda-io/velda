@@ -341,6 +341,7 @@ Content-Type: application/json
 | `org_id` | int64 | org_id is the organization this instance belongs to. |
 | `region_display_info` | [RegionDisplayInfo](#regiondisplayinfo) | Region metadata for UI display. |
 | `storage_quota_gb` | int32 | Storage quota in GB. 0 means no quota limit. |
+| `volume_bindings` | map&lt;string, [VolumeBinding](#volumebinding)&gt; | Volume bindings: map from mount path to volume binding details.  Key is the mount path (e.g., "/mnt/data"), value contains volume details. |
 
 ### ListImagesResponse
 

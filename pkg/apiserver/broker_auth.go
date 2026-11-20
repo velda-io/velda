@@ -43,8 +43,14 @@ func (n *BrokerAuth) GrantAccessToAgent(ctx context.Context, agent *broker.Agent
 	if agentHost == "" || agentHost == "<nil>" {
 		agentHost = peerIP
 	}
-	if err := n.storageAuth.GrantAccess(ctx, session.Request, agentHost); err != nil {
+	if mountInfo, err := n.storageAuth.GrantAccess(ctx, session.Request, agentHost); err != nil {
 		return nil, fmt.Errorf("failed to grant NFS access: %w", err)
+	} else {
+		session.Request.AgentSessionInfo = &proto.AgentSessionInfo{
+			InstanceMount: mountInfo,
+			// For backward compatability
+			NfsMount: mountInfo.GetNfsMount(),
+		}
 	}
 	return &sessionUser{
 		EmptyUser: rbac.EmptyUser{},

@@ -45,8 +45,8 @@ func NewLocalNfsAuth(disk LocalDiskProvider, nfsServer string) (*LocalNfsAuth, e
 }
 
 // GrantAccess exports the instance (and optional snapshot) path via NFS for
-// agentHost, then patches req.AgentSessionInfo with the resulting mount details.
-func (n *LocalNfsAuth) GrantAccess(ctx context.Context, req *proto.SessionRequest, agentHost string) error {
+// agentHost, and returns the resulting mount details.
+func (n *LocalNfsAuth) GrantAccess(ctx context.Context, req *proto.SessionRequest, agentHost string) (*proto.VolumeMount, error) {
 	instanceID := req.InstanceId
 	exportPath := n.disk.GetRoot(instanceID)
 	paths := []string{exportPath}
@@ -58,19 +58,18 @@ func (n *LocalNfsAuth) GrantAccess(ctx context.Context, req *proto.SessionReques
 	}
 
 	if err := exportNFS(paths, agentHost, req.InstanceId, req.SessionId); err != nil {
-		return fmt.Errorf("failed to export NFS: %w", err)
+		return nil, fmt.Errorf("failed to export NFS: %w", err)
 	}
 
-	req.AgentSessionInfo = &proto.AgentSessionInfo{
-		FileMount: &proto.AgentSessionInfo_NfsMount_{
-			NfsMount: &proto.AgentSessionInfo_NfsMount{
+	return &proto.VolumeMount{
+		MountType: &proto.VolumeMount_NfsMount{
+			NfsMount: &proto.NfsMount{
 				NfsServer:       n.nfsServer,
 				NfsPath:         exportPath,
 				NfsSnapshotPath: snapshotPath,
 			},
 		},
-	}
-	return nil
+	}, nil
 }
 
 // RevokeAccess removes the NFS export that was created for the given instance
