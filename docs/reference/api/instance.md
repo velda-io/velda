@@ -276,6 +276,39 @@ Authorization: Bearer <token>
 
 ---
 
+### Update Instance
+
+`PATCH /rest/instances/{instance_id}`
+
+**Authorization**: Bearer `<token>`
+
+**Path Parameters**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `instance_id` | int64 |  |
+
+**Request Body** (application/json)
+
+| Field  &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; | Type | Description |
+|-------|------|-------------|
+| `storage_quota_gb` | int32 | _(oneof _storage_quota_gb)_ Optional: new storage quota in GB.  If not set (field is absent), storage quota is not updated. |
+| `volume_bindings` | map&lt;string, [VolumeBinding](#volumebinding)&gt; | Volume bindings to set. Always replaces all existing volume bindings.  Empty map removes all volume bindings.  Key is the mount path (e.g., "/mnt/data"), value contains volume details. |
+
+**Response** (200 OK)
+
+`application/json` — [Instance](#instance)
+
+**Example**
+
+```http
+PATCH /rest/instances/{instance_id} HTTP/1.1
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+---
+
 ### List Regions
 
 `GET /velda/regions`
@@ -337,11 +370,11 @@ Content-Type: application/json
 | `instance_name` | string |  |
 | `status` | [InstanceStatus](#instancestatus) |  |
 | `init_task_id` | string | Optional: set by CreateInstance when docker_image initialization  is enqueued. |
+| `volume_bindings` | map&lt;string, [VolumeBinding](#volumebinding)&gt; | Volume bindings: map from mount path to volume binding details.  Key is the mount path (e.g., "/mnt/data"), value contains volume details. |
 | `owner_id` | int64 | Only to be filled by the server. |
 | `org_id` | int64 | org_id is the organization this instance belongs to. |
 | `region_display_info` | [RegionDisplayInfo](#regiondisplayinfo) | Region metadata for UI display. |
 | `storage_quota_gb` | int32 | Storage quota in GB. 0 means no quota limit. |
-| `volume_bindings` | map&lt;string, [VolumeBinding](#volumebinding)&gt; | Volume bindings: map from mount path to volume binding details.  Key is the mount path (e.g., "/mnt/data"), value contains volume details. |
 
 ### ListImagesResponse
 
@@ -377,6 +410,12 @@ Content-Type: application/json
 |-------|------|-------------|
 | `instance_id` | int64 |  |
 | `snapshot_name` | string |  |
+
+### VolumeBinding
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `volume_id` | int64 | The ID of the volume to bind. |
 
 ### InstanceStatus
 

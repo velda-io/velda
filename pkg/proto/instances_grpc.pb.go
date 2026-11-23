@@ -44,6 +44,7 @@ const (
 	InstanceService_ListImages_FullMethodName        = "/velda.InstanceService/ListImages"
 	InstanceService_CreateImage_FullMethodName       = "/velda.InstanceService/CreateImage"
 	InstanceService_DeleteImage_FullMethodName       = "/velda.InstanceService/DeleteImage"
+	InstanceService_UpdateInstance_FullMethodName    = "/velda.InstanceService/UpdateInstance"
 )
 
 // InstanceServiceClient is the client API for InstanceService service.
@@ -60,6 +61,7 @@ type InstanceServiceClient interface {
 	ListImages(ctx context.Context, in *ListImagesRequest, opts ...grpc.CallOption) (*ListImagesResponse, error)
 	CreateImage(ctx context.Context, in *CreateImageRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	DeleteImage(ctx context.Context, in *DeleteImageRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	UpdateInstance(ctx context.Context, in *UpdateInstanceRequest, opts ...grpc.CallOption) (*Instance, error)
 }
 
 type instanceServiceClient struct {
@@ -170,6 +172,16 @@ func (c *instanceServiceClient) DeleteImage(ctx context.Context, in *DeleteImage
 	return out, nil
 }
 
+func (c *instanceServiceClient) UpdateInstance(ctx context.Context, in *UpdateInstanceRequest, opts ...grpc.CallOption) (*Instance, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Instance)
+	err := c.cc.Invoke(ctx, InstanceService_UpdateInstance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InstanceServiceServer is the server API for InstanceService service.
 // All implementations must embed UnimplementedInstanceServiceServer
 // for forward compatibility.
@@ -184,6 +196,7 @@ type InstanceServiceServer interface {
 	ListImages(context.Context, *ListImagesRequest) (*ListImagesResponse, error)
 	CreateImage(context.Context, *CreateImageRequest) (*emptypb.Empty, error)
 	DeleteImage(context.Context, *DeleteImageRequest) (*emptypb.Empty, error)
+	UpdateInstance(context.Context, *UpdateInstanceRequest) (*Instance, error)
 	mustEmbedUnimplementedInstanceServiceServer()
 }
 
@@ -223,6 +236,9 @@ func (UnimplementedInstanceServiceServer) CreateImage(context.Context, *CreateIm
 }
 func (UnimplementedInstanceServiceServer) DeleteImage(context.Context, *DeleteImageRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteImage not implemented")
+}
+func (UnimplementedInstanceServiceServer) UpdateInstance(context.Context, *UpdateInstanceRequest) (*Instance, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateInstance not implemented")
 }
 func (UnimplementedInstanceServiceServer) mustEmbedUnimplementedInstanceServiceServer() {}
 func (UnimplementedInstanceServiceServer) testEmbeddedByValue()                         {}
@@ -425,6 +441,24 @@ func _InstanceService_DeleteImage_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InstanceService_UpdateInstance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateInstanceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstanceServiceServer).UpdateInstance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstanceService_UpdateInstance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstanceServiceServer).UpdateInstance(ctx, req.(*UpdateInstanceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InstanceService_ServiceDesc is the grpc.ServiceDesc for InstanceService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -471,6 +505,10 @@ var InstanceService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteImage",
 			Handler:    _InstanceService_DeleteImage_Handler,
+		},
+		{
+			MethodName: "UpdateInstance",
+			Handler:    _InstanceService_UpdateInstance_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

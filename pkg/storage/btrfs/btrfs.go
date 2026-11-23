@@ -25,16 +25,24 @@ import (
 )
 
 type Btrfs struct {
-	rootPath      string
-	maxDiskSizeGb int64
-	uid           int
+	rootPath                 string
+	maxDiskSizeGb            int64
+	uid                      int
+	volumeRootPermissions    os.FileMode
+	createBasicInstanceDirs  bool
 }
 
 func NewBtrfs(rootPath string, maxDiskSizeGb int64) (*Btrfs, error) {
+	return NewBtrfsWithOptions(rootPath, maxDiskSizeGb, 0755, true)
+}
+
+func NewBtrfsWithOptions(rootPath string, maxDiskSizeGb int64, volumeRootPermissions os.FileMode, createBasicInstanceDirs bool) (*Btrfs, error) {
 	b := &Btrfs{
-		rootPath:      rootPath,
-		maxDiskSizeGb: maxDiskSizeGb,
-		uid:           os.Geteuid(),
+		rootPath:                rootPath,
+		maxDiskSizeGb:           maxDiskSizeGb,
+		uid:                     os.Geteuid(),
+		volumeRootPermissions:   volumeRootPermissions,
+		createBasicInstanceDirs: createBasicInstanceDirs,
 	}
 	err := b.init()
 	if err != nil {
@@ -96,6 +104,15 @@ func (b *Btrfs) CreateInstance(ctx context.Context, instanceId int64) error {
 		return fmt.Errorf("failed to create BTRFS instance %d: %w", instanceId, err)
 	}
 
+	// Set permissions on the subvolume root
+	if err := b.runCommand(
+		ctx,
+		"chmod",
+		fmt.Sprintf("%o", b.volumeRootPermissions),
+		instancePath); err != nil {
+		return fmt.Errorf("failed to set permissions for instance %d: %w", instanceId, err)
+	}
+
 	// Create snapshots directory
 	if err := b.runCommand(ctx, "mkdir", "-p", snapshotsDir); err != nil {
 		return fmt.Errorf("failed to create snapshots directory for instance %d: %w", instanceId, err)
@@ -125,15 +142,17 @@ func (b *Btrfs) CreateInstance(ctx context.Context, instanceId int64) error {
 		}
 	}
 
-	// Make a minimal filesystem structure
-	for _, dir := range []string{"proc", "sys", "dev", "run", "etc"} {
-		err = b.runCommand(
-			ctx,
-			"mkdir",
-			"-p",
-			fmt.Sprintf("%s/%s", instancePath, dir))
-		if err != nil {
-			return fmt.Errorf("failed to create directory %s in instance %d: %w", dir, instanceId, err)
+	// Create basic filesystem structure if enabled
+	if b.createBasicInstanceDirs {
+		for _, dir := range []string{"proc", "sys", "dev", "run", "etc"} {
+			err = b.runCommand(
+				ctx,
+				"mkdir",
+				"-p",
+				fmt.Sprintf("%s/%s", instancePath, dir))
+			if err != nil {
+				return fmt.Errorf("failed to create directory %s in instance %d: %w", dir, instanceId, err)
+			}
 		}
 	}
 	return nil
@@ -160,6 +179,15 @@ func (b *Btrfs) CreateInstanceFromSnapshot(ctx context.Context, instanceId int64
 		return err
 	}
 
+	// Set permissions on the snapshot subvolume root
+	if err := b.runCommand(
+		ctx,
+		"chmod",
+		fmt.Sprintf("%o", b.volumeRootPermissions),
+		target); err != nil {
+		return fmt.Errorf("failed to set permissions for instance %d: %w", instanceId, err)
+	}
+
 	// Create snapshots directory
 	if err := b.runCommand(ctx, "mkdir", "-p", snapshotsDir); err != nil {
 		return fmt.Errorf("failed to create snapshots directory for instance %d: %w", instanceId, err)
@@ -183,6 +211,20 @@ func (b *Btrfs) CreateInstanceFromSnapshot(ctx context.Context, instanceId int64
 			subvolId,
 			b.rootPath); err != nil {
 			return fmt.Errorf("failed to set quota for instance %d: %w", instanceId, err)
+		}
+	}
+
+	// Create basic filesystem structure if enabled
+	if b.createBasicInstanceDirs {
+		for _, dir := range []string{"proc", "sys", "dev", "run", "etc"} {
+			err := b.runCommand(
+				ctx,
+				"mkdir",
+				"-p",
+				fmt.Sprintf("%s/%s", target, dir))
+			if err != nil {
+				return fmt.Errorf("failed to create directory %s in instance %d: %w", dir, instanceId, err)
+			}
 		}
 	}
 	return nil
@@ -209,6 +251,15 @@ func (b *Btrfs) CreateInstanceFromImage(ctx context.Context, instanceId int64, i
 		return err
 	}
 
+	// Set permissions on the snapshot subvolume root
+	if err := b.runCommand(
+		ctx,
+		"chmod",
+		fmt.Sprintf("%o", b.volumeRootPermissions),
+		target); err != nil {
+		return fmt.Errorf("failed to set permissions for instance %d: %w", instanceId, err)
+	}
+
 	// Create snapshots directory
 	if err := b.runCommand(ctx, "mkdir", "-p", snapshotsDir); err != nil {
 		return fmt.Errorf("failed to create snapshots directory for instance %d: %w", instanceId, err)
@@ -232,6 +283,20 @@ func (b *Btrfs) CreateInstanceFromImage(ctx context.Context, instanceId int64, i
 			subvolId,
 			b.rootPath); err != nil {
 			return fmt.Errorf("failed to set quota for instance %d: %w", instanceId, err)
+		}
+	}
+
+	// Create basic filesystem structure if enabled
+	if b.createBasicInstanceDirs {
+		for _, dir := range []string{"proc", "sys", "dev", "run", "etc"} {
+			err := b.runCommand(
+				ctx,
+				"mkdir",
+				"-p",
+				fmt.Sprintf("%s/%s", target, dir))
+			if err != nil {
+				return fmt.Errorf("failed to create directory %s in instance %d: %w", dir, instanceId, err)
+			}
 		}
 	}
 	return nil
