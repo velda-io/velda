@@ -121,9 +121,27 @@ func ProvideStorage(cfg *configpb.Config) (storage.Storage, error) {
 	config := cfg.GetStorage()
 	switch config.Storage.(type) {
 	case *configpb.Storage_Zfs_:
-		return zfs.NewZfs(config.GetZfs().Pool, config.GetZfs().GetMaxDiskSizeGb())
+		zfsConfig := config.GetZfs()
+		perms := os.FileMode(0755)
+		if zfsConfig.VolumeRootPermissions != 0 {
+			perms = os.FileMode(zfsConfig.VolumeRootPermissions)
+		}
+		createDirs := true
+		if zfsConfig.CreateBasicInstanceDirs == false {
+			createDirs = false
+		}
+		return zfs.NewZfsWithOptions(zfsConfig.Pool, zfsConfig.GetMaxDiskSizeGb(), perms, createDirs)
 	case *configpb.Storage_Btrfs_:
-		return btrfs.NewBtrfs(config.GetBtrfs().RootPath, config.GetBtrfs().GetMaxDiskSizeGb())
+		btrfsConfig := config.GetBtrfs()
+		perms := os.FileMode(0755)
+		if btrfsConfig.VolumeRootPermissions != 0 {
+			perms = os.FileMode(btrfsConfig.VolumeRootPermissions)
+		}
+		createDirs := true
+		if btrfsConfig.CreateBasicInstanceDirs == false {
+			createDirs = false
+		}
+		return btrfs.NewBtrfsWithOptions(btrfsConfig.RootPath, btrfsConfig.GetMaxDiskSizeGb(), perms, createDirs)
 	case *configpb.Storage_Mini:
 		return mini.NewMiniStorage(config.GetMini().Root)
 	default:

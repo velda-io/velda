@@ -1,0 +1,83 @@
+syntax = "proto3";
+package velda;
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "velda.io/velda/pkg/proto";
+
+enum VolumeStatus {
+  VOLUME_STATUS_UNSPECIFIED = 0;
+  VOLUME_STATUS_ACTIVE = 1;
+  VOLUME_STATUS_TERMINATED = 2;
+}
+
+message Volume {
+  int64 id = 1;
+  string name = 2;
+  // org_id is the organization this volume belongs to.
+  int64 org_id = 4;
+  VolumeStatus status = 5;
+  // Volume size in GB.
+  int32 size_gb = 6;
+  string region = 7;
+}
+
+message CreateVolumeRequest {
+  Volume volume = 1;
+  string region = 4;
+}
+
+message GetVolumeRequest { int64 volume_id = 1; }
+
+message ListVolumesRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListVolumesResponse {
+  repeated Volume volumes = 1;
+  string next_page_token = 2;
+}
+
+message DeleteVolumeRequest { int64 volume_id = 1; }
+
+message UpdateVolumeSizeRequest {
+  int64 volume_id = 1;
+  // New volume size in GB. Can only be increased.
+  int32 size_gb = 2;
+}
+
+service VolumeService {
+  rpc CreateVolume(CreateVolumeRequest) returns (Volume) {
+    option (google.api.http) = {
+      post : "/velda/volumes"
+      body : "*"
+    };
+  }
+
+  rpc GetVolume(GetVolumeRequest) returns (Volume) {
+    option (google.api.http) = {
+      get : "/velda/volumes/{volume_id}"
+    };
+  }
+
+  rpc ListVolumes(ListVolumesRequest) returns (ListVolumesResponse) {
+    option (google.api.http) = {
+      get : "/velda/volumes"
+    };
+  }
+
+  rpc DeleteVolume(DeleteVolumeRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete : "/velda/volumes/{volume_id}"
+    };
+  }
+
+  rpc UpdateVolumeSize(UpdateVolumeSizeRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      patch : "/velda/volumes/{volume_id}/size"
+      body : "*"
+    };
+  }
+}

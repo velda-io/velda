@@ -181,8 +181,10 @@ message NfsMount {
 }
 
 message VolumeMount {
+  string path = 1;
+  int64 volume_id = 2;
   oneof mount_type {
-    NfsMount nfs_mount = 1;
+    NfsMount nfs_mount = 3;
   }
 }
 

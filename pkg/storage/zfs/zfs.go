@@ -25,16 +25,24 @@ import (
 )
 
 type Zfs struct {
-	pool          string
-	maxDiskSizeGb int64
-	uid           int
+	pool                     string
+	maxDiskSizeGb            int64
+	uid                      int
+	volumeRootPermissions    os.FileMode
+	createBasicInstanceDirs  bool
 }
 
 func NewZfs(pool string, maxDiskSizeGb int64) (*Zfs, error) {
+	return NewZfsWithOptions(pool, maxDiskSizeGb, 0755, true)
+}
+
+func NewZfsWithOptions(pool string, maxDiskSizeGb int64, volumeRootPermissions os.FileMode, createBasicInstanceDirs bool) (*Zfs, error) {
 	z := &Zfs{
-		pool:          pool,
-		maxDiskSizeGb: maxDiskSizeGb,
-		uid:           os.Geteuid(),
+		pool:                    pool,
+		maxDiskSizeGb:           maxDiskSizeGb,
+		uid:                     os.Geteuid(),
+		volumeRootPermissions:   volumeRootPermissions,
+		createBasicInstanceDirs: createBasicInstanceDirs,
 	}
 	err := z.init()
 	if err != nil {
@@ -71,14 +79,25 @@ func (z *Zfs) CheckAlive(ctx context.Context, instanceId int64) error {
 }
 
 func (z *Zfs) CreateInstance(ctx context.Context, instanceId int64) error {
+	datasetPath := fmt.Sprintf("%s/%d", z.pool, instanceId)
 	err := z.runCommand(
 		ctx,
 		"zfs",
 		"create",
-		fmt.Sprintf("%s/%d", z.pool, instanceId))
+		datasetPath)
 	if err != nil {
 		return fmt.Errorf("failed to create ZFS instance %d: %w", instanceId, err)
 	}
+
+	// Set permissions on the dataset root
+	if err := z.runCommand(
+		ctx,
+		"chmod",
+		fmt.Sprintf("%o", z.volumeRootPermissions),
+		fmt.Sprintf("/%s/%d", z.pool, instanceId)); err != nil {
+		return fmt.Errorf("failed to set permissions for instance %d: %w", instanceId, err)
+	}
+
 	// If a maximum disk size is configured, set refquota for this dataset (GB).
 	if z.maxDiskSizeGb > 0 {
 		if err := z.runCommand(
@@ -86,18 +105,21 @@ func (z *Zfs) CreateInstance(ctx context.Context, instanceId int64) error {
 			"zfs",
 			"set",
 			fmt.Sprintf("refquota=%dG", z.maxDiskSizeGb),
-			fmt.Sprintf("%s/%d", z.pool, instanceId)); err != nil {
+			datasetPath); err != nil {
 			return fmt.Errorf("failed to set refquota for instance %d: %w", instanceId, err)
 		}
 	}
-	// Make a minimal filesystem structure
-	for _, dir := range []string{"proc", "sys", "dev", "run", "etc"} {
-		err = z.runCommand(
-			ctx,
-			"mkdir",
-			fmt.Sprintf("/%s/%d/%s", z.pool, instanceId, dir))
-		if err != nil {
-			return fmt.Errorf("failed to create directory %s in instance %d: %w", dir, instanceId, err)
+
+	// Create basic filesystem structure if enabled
+	if z.createBasicInstanceDirs {
+		for _, dir := range []string{"proc", "sys", "dev", "run", "etc"} {
+			err = z.runCommand(
+				ctx,
+				"mkdir",
+				fmt.Sprintf("/%s/%d/%s", z.pool, instanceId, dir))
+			if err != nil {
+				return fmt.Errorf("failed to create directory %s in instance %d: %w", dir, instanceId, err)
+			}
 		}
 	}
 	return nil
@@ -113,6 +135,16 @@ func (z *Zfs) CreateInstanceFromSnapshot(ctx context.Context, instanceId int64, 
 		target); err != nil {
 		return err
 	}
+
+	// Set permissions on the cloned dataset root
+	if err := z.runCommand(
+		ctx,
+		"chmod",
+		fmt.Sprintf("%o", z.volumeRootPermissions),
+		fmt.Sprintf("/%s/%d", z.pool, instanceId)); err != nil {
+		return fmt.Errorf("failed to set permissions for instance %d: %w", instanceId, err)
+	}
+
 	if z.maxDiskSizeGb > 0 {
 		if err := z.runCommand(
 			ctx,

@@ -56,6 +56,12 @@ message Storage {
     // If `max_disk_size_gb` is set (non-zero),
     // created instance datasets will have `refquota` set to this value.
     int64 max_disk_size_gb = 2;
+
+    // Default permissions for new volume root (as octal, e.g., 0755).
+    int32 volume_root_permissions = 3;
+
+    // Whether to create basic instance directory structure (proc, sys, dev, run, etc).
+    bool create_basic_instance_dirs = 4;
   }
   // BTRFS storage configuration.
   message Btrfs {
@@ -64,6 +70,12 @@ message Storage {
     // If `max_disk_size_gb` is set (non-zero),
     // created instance subvolumes will have quota limit set to this value.
     int64 max_disk_size_gb = 2;
+
+    // Default permissions for new volume root (as octal, e.g., 0755).
+    int32 volume_root_permissions = 3;
+
+    // Whether to create basic instance directory structure (proc, sys, dev, run, etc).
+    bool create_basic_instance_dirs = 4;
   }
   message MiniVelda { string root = 1; }
   oneof storage {
