@@ -1,0 +1,53 @@
+// Copyright 2025 Velda Inc
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+package velda;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "velda.io/velda/pkg/proto";
+
+message SearchImagesRequest {
+  string query = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message Image {
+  string id = 1;
+  string slug = 2;
+  string name = 3;
+  string description = 4;
+  string github_link = 5;
+  string latest_image_id = 7;
+  string cover_photo = 8;
+  int64 creation_count = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  string region = 12;
+  reserved 6;
+}
+
+message SearchImagesResponse {
+  repeated Image images = 1;
+}
+
+service ImageManagementEnt {
+  rpc SearchImages(SearchImagesRequest) returns (SearchImagesResponse) {
+    option (google.api.http) = {
+      get: "/rest/images/search"
+    };
+  }
+}

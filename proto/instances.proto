@@ -52,6 +52,7 @@ message CreateInstanceRequest {
   Instance instance = 1;
   oneof source {
     string image_name = 2;
+    string image_family = 9;
     SnapshotReference snapshot = 3;
   }
   // Optional: specify region by name
