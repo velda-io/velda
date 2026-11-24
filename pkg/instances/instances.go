@@ -129,6 +129,8 @@ func (s *service) CreateInstance(ctx context.Context, in *proto.CreateInstanceRe
 		if err := s.storage.CreateInstanceFromImage(ctx, instance.Id, image); err != nil {
 			return nil, err
 		}
+	case *proto.CreateInstanceRequest_ImageFamily:
+		return nil, status.Errorf(codes.InvalidArgument, "image_family is not supported in OSS, use image_name instead")
 	case nil:
 		if err := s.storage.CreateInstance(ctx, instance.Id); err != nil {
 			return nil, err

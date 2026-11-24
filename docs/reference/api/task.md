@@ -186,6 +186,7 @@ Authorization: Bearer <token>
 |-------|------|-------------|
 | `instance` | [Instance](#instance) |  |
 | `image_name` | string | _(oneof source)_ |
+| `image_family` | string | _(oneof source)_ |
 | `snapshot` | [SnapshotReference](#snapshotreference) | _(oneof source)_ |
 | `region` | string | Optional: specify region by name  If not specified, uses the current region.  Only used for hosted / enterprise. |
 | `docker_image` | string | Optional: if set, the server will enqueue a remote initialization task  that imports this container image into the newly created instance. |
