@@ -26,7 +26,7 @@ import (
 )
 
 var createInstanceCmd = &cobra.Command{
-	Use:   "create [-i <image> | -f instance | -d docker-image] <instance>",
+	Use:   "create [-i <image> | -f instance | --image-family <family> | -d docker-image] <instance>",
 	Short: "Create a new instance",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -42,6 +42,7 @@ var createInstanceCmd = &cobra.Command{
 			return fmt.Errorf("Name is required")
 		}
 		image, _ := cmd.Flags().GetString("image")
+		imageFamily, _ := cmd.Flags().GetString("image-family")
 		fromInstance, _ := cmd.Flags().GetString("from-instance")
 		snapshotName, _ := cmd.Flags().GetString("snapshot")
 		dockerImage, _ := cmd.Flags().GetString("docker-image")
@@ -50,6 +51,9 @@ var createInstanceCmd = &cobra.Command{
 
 		sourceCount := 0
 		if image != "" {
+			sourceCount++
+		}
+		if imageFamily != "" {
 			sourceCount++
 		}
 		if fromInstance != "" {
@@ -62,7 +66,10 @@ var createInstanceCmd = &cobra.Command{
 			sourceCount++
 		}
 		if sourceCount > 1 {
-			return fmt.Errorf("Only one of --image, --from-instance, --docker-image, or --tar-file can be specified")
+			return fmt.Errorf("Only one of --image, --image-family, --from-instance, --docker-image, or --tar-file can be specified")
+		}
+		if sourceCount == 0 {
+			return fmt.Errorf("One of --image, --image-family, --from-instance, --docker-image, or --tar-file must be specified")
 		}
 
 		if dockerImage != "" {
@@ -79,6 +86,9 @@ var createInstanceCmd = &cobra.Command{
 		if image != "" {
 			request.Source = &proto.CreateInstanceRequest_ImageName{ImageName: image}
 			cmd.Printf("Using image %s\n", image)
+		} else if imageFamily != "" {
+			request.Source = &proto.CreateInstanceRequest_ImageFamily{ImageFamily: imageFamily}
+			cmd.Printf("Using image family %s\n", imageFamily)
 		} else if fromInstance != "" {
 			instanceId, err := clientlib.ParseInstanceId(cmd.Context(), fromInstance, clientlib.FallbackToSession)
 			if err != nil {
@@ -88,9 +98,6 @@ var createInstanceCmd = &cobra.Command{
 			request.Source = &proto.CreateInstanceRequest_Snapshot{
 				Snapshot: &proto.SnapshotReference{InstanceId: instanceId, SnapshotName: snapshotName},
 			}
-		} else {
-			cmd.Println(`No image or instance specified, creating empty instance.
-Use scp/SFTP to upload files to the instance.`)
 		}
 
 		cmd.Printf("Creating instance %s\n", name)
@@ -107,6 +114,7 @@ func init() {
 	instanceCmd.AddCommand(createInstanceCmd)
 	flags := createInstanceCmd.Flags()
 	flags.StringP("image", "i", "", "Name of the image to create the instance from")
+	flags.String("image-family", "", "Image family to create the instance from")
 	flags.StringP("from-instance", "f", "", "Name of the instance to clone from")
 	flags.String("snapshot", "", "Name of the snapshot to create the instance from. If not provided, it will create one from the current instance disk using timestamped-name.")
 	flags.StringP("docker-image", "d", "", "Docker image to initialize the instance from (e.g., ubuntu:24.04)")
