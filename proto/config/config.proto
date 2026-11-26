@@ -96,6 +96,11 @@ message TailscaleConfig {
   string pre_auth_key = 2;
 }
 
+message OVNConfig {
+  // OVN Southbound database connection string (e.g., tcp:192.168.1.100:6642)
+  string sb_db = 1;
+}
+
 message SSHConnectorConfig {
   // SSH port used for connection (default: 22).
   int32 ssh_port = 1;
@@ -341,6 +346,9 @@ message AutoscalerBackendNebiusLaunchTemplate {
   // If not set but preemptible=true, follows current spot price dynamically.
   // If not set and preemptible=false, uses on-demand pricing.
   string spot_pricing_policy_id = 22;
+
+  // OVN configuration for Open vSwitch and OVN networking
+  OVNConfig ovn_config = 23;
 }
 
 // Nebius boot disk type enum.
@@ -532,6 +540,9 @@ message NebiusAutoProvisioner {
   // If set, uses dynamic spot pricing with max price policy.
   // If not set but preemptible=true, follows current spot price dynamically.
   string spot_pricing_policy_id = 22;
+
+  // OVN configuration for Open vSwitch and OVN networking
+  OVNConfig ovn_config = 23;
 }
 
 message AutoscalerBackendMithrilSpotBid {
