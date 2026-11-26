@@ -171,6 +171,13 @@ func (n *nebiusPoolBackend) createInstance(ctx context.Context, name string) (st
 		bootcmds = append(bootcmds, fmt.Sprintf("mount -t virtiofs fs-%d %s", i, fs.GetMountPath()))
 	}
 
+	// Add OVS initialization if OVN is configured
+	if ovnCfg := n.cfg.GetOvnConfig(); ovnCfg != nil && ovnCfg.GetSbDb() != "" {
+		runcmds = append(runcmds,
+			fmt.Sprintf("curl -fsSL https://releases.velda.io/ovs-init.sh -o /tmp/ovs-init.sh && chmod +x /tmp/ovs-init.sh && bash /tmp/ovs-init.sh '%s'", ovnCfg.GetSbDb()),
+		)
+	}
+
 	runcmds = append(runcmds, n.cfg.GetAdditionalRuncmds()...)
 	runcmds = append(runcmds,
 		"curl -fsSL https://releases.velda.io/nvidia-collect.sh -o /tmp/nvidia-collect.sh && bash /tmp/nvidia-collect.sh",
